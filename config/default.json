@@ -14,6 +14,12 @@
       "command": "claude",
       "args": ["-p", "--output-format", "stream-json"],
       "timeout": 300000
+    },
+    "opencode": {
+      "adapter": "opencode",
+      "command": "opencode",
+      "args": ["run", "--dangerously-skip-permissions"],
+      "timeout": 300000
     }
   },
   "policy": {

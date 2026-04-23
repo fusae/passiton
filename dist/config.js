@@ -20,6 +20,12 @@ export const DEFAULT_CONFIG = {
             args: ['-p', '--output-format', 'stream-json'],
             timeout: 300_000,
         },
+        opencode: {
+            adapter: 'opencode',
+            command: 'opencode',
+            args: ['run', '--dangerously-skip-permissions'],
+            timeout: 300_000,
+        },
     },
     policy: {
         maxRounds: 20,

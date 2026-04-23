@@ -139,6 +139,7 @@ async function serverStart() {
   const { Router } = await import('./router.js')
   const { CodexAdapter } = await import('./adapters/codex.js')
   const { ClaudeCodeAdapter } = await import('./adapters/claude-code.js')
+  const { OpenCodeAdapter } = await import('./adapters/opencode.js')
   const { createServer } = await import('./server.js')
 
   initDb()
@@ -157,6 +158,14 @@ async function serverStart() {
         router.registerAdapter(new ClaudeCodeAdapter({
           command: agentCfg.command,
           timeout: agentCfg.timeout,
+          env: agentCfg.env,
+        }))
+        break
+      case 'opencode':
+        router.registerAdapter(new OpenCodeAdapter({
+          command: agentCfg.command,
+          timeout: agentCfg.timeout,
+          model: (agentCfg as any).model,
           env: agentCfg.env,
         }))
         break

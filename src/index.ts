@@ -5,6 +5,7 @@ import { initDb } from './state.js'
 import { Router } from './router.js'
 import { CodexAdapter } from './adapters/codex.js'
 import { ClaudeCodeAdapter } from './adapters/claude-code.js'
+import { OpenCodeAdapter } from './adapters/opencode.js'
 import { createServer } from './server.js'
 
 async function main(): Promise<void> {
@@ -30,6 +31,14 @@ async function main(): Promise<void> {
         router.registerAdapter(new ClaudeCodeAdapter({
           command: agentCfg.command,
           timeout: agentCfg.timeout,
+          env: agentCfg.env,
+        }))
+        break
+      case 'opencode':
+        router.registerAdapter(new OpenCodeAdapter({
+          command: agentCfg.command,
+          timeout: agentCfg.timeout,
+          model: (agentCfg as any).model,
           env: agentCfg.env,
         }))
         break
