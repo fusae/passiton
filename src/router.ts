@@ -248,13 +248,11 @@ export class Router extends EventEmitter {
     this.recordMessage(sessionId, session.to.adapter, toResponse, round)
     state.updateSession(sessionId, { currentRound: round })
 
-    if (detectCompletion(toResponse)) {
-      return { done: true, nextMessage: toResponse }
-    }
+    const toWantsDone = detectCompletion(toResponse)
 
-    // Send `to`'s response back to `from` agent
+    // Always let `from` respond — even if `to` said [DONE], give `from` a chance to wrap up
     if (!this.runningLoops.has(sessionId)) {
-      return { done: false, nextMessage: toResponse }
+      return { done: toWantsDone, nextMessage: toResponse }
     }
 
     // Build send opts for `from` agent
@@ -263,7 +261,8 @@ export class Router extends EventEmitter {
     const fromResponse = await this.callWithRetry(fromAdapter, session, toResponse, fromOpts)
     this.recordMessage(sessionId, session.from.adapter, fromResponse, round)
 
-    if (detectCompletion(fromResponse)) {
+    // Done if either side said [DONE]
+    if (toWantsDone || detectCompletion(fromResponse)) {
       return { done: true, nextMessage: fromResponse }
     }
 
