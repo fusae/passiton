@@ -1,0 +1,25 @@
+{
+  "server": {
+    "port": 4590
+  },
+  "agents": {
+    "codex": {
+      "adapter": "codex",
+      "command": "codex",
+      "args": ["exec", "-p"],
+      "timeout": 300000
+    },
+    "claude-code": {
+      "adapter": "claude-code",
+      "command": "claude",
+      "args": ["-p", "--output-format", "stream-json"],
+      "timeout": 300000
+    }
+  },
+  "policy": {
+    "maxRounds": 20,
+    "messageTimeout": 300000,
+    "sessionTimeout": 7200000,
+    "retries": 1
+  }
+}
