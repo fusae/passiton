@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import type { Session, Message, Adapter, PolicyConfig, AgentRef } from './types.js';
+import type { Session, Message, Adapter, PolicyConfig, AgentRef, SessionMode } from './types.js';
 export declare class Router extends EventEmitter {
     private adapters;
     private policy;
@@ -12,6 +12,8 @@ export declare class Router extends EventEmitter {
         from: AgentRef;
         to: AgentRef;
         initialPrompt: string;
+        mode?: SessionMode;
+        context?: string;
         maxRounds?: number;
         approveMode?: boolean;
         cwd?: string;
@@ -20,6 +22,12 @@ export declare class Router extends EventEmitter {
     resumeSession(id: string, extraRounds?: number): Promise<Session>;
     stopSession(id: string): Promise<Session>;
     injectMessage(sessionId: string, content: string, side?: 'from' | 'to'): Message;
+    /**
+     * Nudge — inject a human directive and resume.
+     * Unlike injectMessage, this explicitly pauses first (if active), injects, then resumes.
+     * Use when the user wants to redirect the conversation mid-flight.
+     */
+    nudge(sessionId: string, content: string): Promise<Message>;
     /**
      * Run rounds until done / paused / error.
      * firstMessage is the content to send to `to` in the first round.
@@ -30,6 +38,11 @@ export declare class Router extends EventEmitter {
      * Returns { done, nextMessage } where nextMessage feeds the next round's `to`.
      */
     private processRound;
+    /**
+     * Build AdapterSendOpts with system prompt and conversation history.
+     * `perspective` determines which agent we're building for.
+     */
+    private buildSendOpts;
     private callWithRetry;
     private recordMessage;
     private markError;

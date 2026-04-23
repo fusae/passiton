@@ -13,8 +13,26 @@ export class CodexAdapter {
         this.env = cfg.env ?? {};
         this.config = { command: this.command, timeout: this.timeout };
     }
-    async send(session, message) {
-        return this.run([this.command, 'exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', message], session.cwd);
+    async send(session, message, opts) {
+        // Build the full prompt with system context and history
+        const fullMessage = this.buildPrompt(message, opts);
+        return this.run([this.command, 'exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', fullMessage], session.cwd);
+    }
+    buildPrompt(message, opts) {
+        const parts = [];
+        if (opts?.systemPrompt) {
+            parts.push(`[System Instructions]\n${opts.systemPrompt}\n`);
+        }
+        if (opts?.history && opts.history.length > 0) {
+            parts.push('[Conversation History]');
+            for (const msg of opts.history) {
+                const role = msg.role === 'assistant' ? 'You' : 'Other';
+                parts.push(`${role}: ${msg.content}`);
+            }
+            parts.push('');
+        }
+        parts.push(`[Current Message]\n${message}`);
+        return parts.join('\n');
     }
     async healthCheck() {
         try {

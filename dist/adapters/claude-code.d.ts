@@ -1,5 +1,5 @@
 import type { Adapter } from './types.js';
-import type { Session } from '../types.js';
+import type { Session, AdapterSendOpts } from '../types.js';
 export interface ClaudeCodeAdapterConfig {
     command?: string;
     timeout?: number;
@@ -12,7 +12,8 @@ export declare class ClaudeCodeAdapter implements Adapter {
     private timeout;
     private env;
     constructor(cfg?: ClaudeCodeAdapterConfig);
-    send(session: Session, message: string): Promise<string>;
+    send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string>;
+    private buildPrompt;
     healthCheck(): Promise<boolean>;
     /**
      * Parse stream-json output from claude CLI.

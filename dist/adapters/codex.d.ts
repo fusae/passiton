@@ -1,5 +1,5 @@
 import type { Adapter } from './types.js';
-import type { Session } from '../types.js';
+import type { Session, AdapterSendOpts } from '../types.js';
 export interface CodexAdapterConfig {
     command?: string;
     timeout?: number;
@@ -12,7 +12,8 @@ export declare class CodexAdapter implements Adapter {
     private timeout;
     private env;
     constructor(cfg?: CodexAdapterConfig);
-    send(session: Session, message: string): Promise<string>;
+    send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string>;
+    private buildPrompt;
     healthCheck(): Promise<boolean>;
     private run;
 }

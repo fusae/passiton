@@ -1,4 +1,5 @@
 export type SessionStatus = 'active' | 'paused' | 'done' | 'error';
+export type SessionMode = 'collaborate' | 'discuss' | 'review' | 'freeform';
 export interface AgentRef {
     adapter: string;
     label?: string;
@@ -16,10 +17,16 @@ export interface Session {
     from: AgentRef;
     to: AgentRef;
     status: SessionStatus;
+    mode: SessionMode;
     maxRounds: number;
     currentRound: number;
     approveMode: boolean;
     cwd?: string;
+    context?: string;
+    systemPrompts?: {
+        from: string;
+        to: string;
+    };
     createdAt: number;
     updatedAt: number;
 }
@@ -29,8 +36,15 @@ export interface SessionWithMessages extends Session {
 export interface Adapter {
     name: string;
     config: Record<string, unknown>;
-    send(session: Session, message: string): Promise<string>;
+    send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string>;
     healthCheck(): Promise<boolean>;
+}
+export interface AdapterSendOpts {
+    systemPrompt?: string;
+    history?: Array<{
+        role: 'user' | 'assistant';
+        content: string;
+    }>;
 }
 export interface PolicyConfig {
     maxRounds: number;

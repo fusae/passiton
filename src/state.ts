@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { homedir } from 'os'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
-import type { Session, Message, AgentRef, SessionStatus } from './types.js'
+import type { Session, Message, AgentRef, SessionStatus, SessionMode } from './types.js'
 
 const DB_DIR = join(homedir(), '.turing')
 const DB_PATH = join(DB_DIR, 'turing.db')
@@ -28,10 +28,13 @@ function createTables(): void {
       to_adapter   TEXT NOT NULL,
       to_label     TEXT,
       status       TEXT NOT NULL DEFAULT 'active',
+      mode         TEXT NOT NULL DEFAULT 'freeform',
       max_rounds   INTEGER NOT NULL DEFAULT 20,
       current_round INTEGER NOT NULL DEFAULT 0,
       approve_mode INTEGER NOT NULL DEFAULT 0,
       cwd          TEXT,
+      context      TEXT,
+      system_prompts TEXT,
       created_at   INTEGER NOT NULL,
       updated_at   INTEGER NOT NULL
     );
@@ -48,20 +51,38 @@ function createTables(): void {
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
   `)
+
+  // Migrate: add new columns if they don't exist (for existing DBs)
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'freeform'`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN context TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN system_prompts TEXT`)
+  } catch { /* column already exists */ }
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
 
 function rowToSession(row: Record<string, unknown>): Session {
+  let systemPrompts: { from: string; to: string } | undefined
+  if (row.system_prompts) {
+    try { systemPrompts = JSON.parse(row.system_prompts as string) } catch { /* ignore */ }
+  }
   return {
     id: row.id as string,
     from: { adapter: row.from_adapter as string, label: row.from_label as string | undefined },
     to: { adapter: row.to_adapter as string, label: row.to_label as string | undefined },
     status: row.status as SessionStatus,
+    mode: (row.mode as SessionMode) || 'freeform',
     maxRounds: row.max_rounds as number,
     currentRound: row.current_round as number,
     approveMode: Boolean(row.approve_mode),
     cwd: row.cwd as string | undefined,
+    context: row.context as string | undefined,
+    systemPrompts,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
   }
@@ -71,6 +92,9 @@ export function createSession(params: {
   id: string
   from: AgentRef
   to: AgentRef
+  mode?: SessionMode
+  context?: string
+  systemPrompts?: { from: string; to: string }
   maxRounds?: number
   approveMode?: boolean
   cwd?: string
@@ -78,8 +102,9 @@ export function createSession(params: {
   const now = Date.now()
   const stmt = db.prepare(`
     INSERT INTO sessions (id, from_adapter, from_label, to_adapter, to_label,
-      status, max_rounds, current_round, approve_mode, cwd, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'active', ?, 0, ?, ?, ?, ?)
+      status, mode, max_rounds, current_round, approve_mode, cwd, context, system_prompts,
+      created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 0, ?, ?, ?, ?, ?, ?)
   `)
   stmt.run(
     params.id,
@@ -87,9 +112,12 @@ export function createSession(params: {
     params.from.label ?? null,
     params.to.adapter,
     params.to.label ?? null,
+    params.mode ?? 'freeform',
     params.maxRounds ?? 20,
     params.approveMode ? 1 : 0,
     params.cwd ?? null,
+    params.context ?? null,
+    params.systemPrompts ? JSON.stringify(params.systemPrompts) : null,
     now,
     now
   )

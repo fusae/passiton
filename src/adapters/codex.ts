@@ -2,7 +2,7 @@
 
 import { spawn } from 'child_process'
 import type { Adapter } from './types.js'
-import type { Session } from '../types.js'
+import type { Session, AdapterSendOpts } from '../types.js'
 
 const DEFAULT_CODEX_PATH = 'codex'
 
@@ -26,8 +26,27 @@ export class CodexAdapter implements Adapter {
     this.config = { command: this.command, timeout: this.timeout }
   }
 
-  async send(session: Session, message: string): Promise<string> {
-    return this.run([this.command, 'exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', message], session.cwd)
+  async send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string> {
+    // Build the full prompt with system context and history
+    const fullMessage = this.buildPrompt(message, opts)
+    return this.run([this.command, 'exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', fullMessage], session.cwd)
+  }
+
+  private buildPrompt(message: string, opts?: AdapterSendOpts): string {
+    const parts: string[] = []
+    if (opts?.systemPrompt) {
+      parts.push(`[System Instructions]\n${opts.systemPrompt}\n`)
+    }
+    if (opts?.history && opts.history.length > 0) {
+      parts.push('[Conversation History]')
+      for (const msg of opts.history) {
+        const role = msg.role === 'assistant' ? 'You' : 'Other'
+        parts.push(`${role}: ${msg.content}`)
+      }
+      parts.push('')
+    }
+    parts.push(`[Current Message]\n${message}`)
+    return parts.join('\n')
   }
 
   async healthCheck(): Promise<boolean> {

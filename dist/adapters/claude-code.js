@@ -12,9 +12,26 @@ export class ClaudeCodeAdapter {
         this.env = cfg.env ?? {};
         this.config = { command: this.command, timeout: this.timeout };
     }
-    async send(session, message) {
-        const raw = await this.run([this.command, '-p', message, '--output-format', 'stream-json', '--verbose'], session.cwd);
+    async send(session, message, opts) {
+        const fullMessage = this.buildPrompt(message, opts);
+        const raw = await this.run([this.command, '-p', fullMessage, '--output-format', 'stream-json', '--verbose'], session.cwd);
         return this.extractText(raw);
+    }
+    buildPrompt(message, opts) {
+        const parts = [];
+        if (opts?.systemPrompt) {
+            parts.push(`[System Instructions]\n${opts.systemPrompt}\n`);
+        }
+        if (opts?.history && opts.history.length > 0) {
+            parts.push('[Conversation History]');
+            for (const msg of opts.history) {
+                const role = msg.role === 'assistant' ? 'You' : 'Other';
+                parts.push(`${role}: ${msg.content}`);
+            }
+            parts.push('');
+        }
+        parts.push(`[Current Message]\n${message}`);
+        return parts.join('\n');
     }
     async healthCheck() {
         try {

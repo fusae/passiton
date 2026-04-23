@@ -15,8 +15,9 @@ export class OpenCodeAdapter {
         this.env = cfg.env ?? {};
         this.config = { command: this.command, timeout: this.timeout, model: this.model };
     }
-    async send(session, message) {
-        const args = ['run', message, '--dangerously-skip-permissions'];
+    async send(session, message, opts) {
+        const fullMessage = this.buildPrompt(message, opts);
+        const args = ['run', fullMessage, '--dangerously-skip-permissions'];
         if (this.model) {
             args.push('--model', this.model);
         }
@@ -25,6 +26,22 @@ export class OpenCodeAdapter {
         }
         const raw = await this.run([this.command, ...args], session.cwd);
         return this.extractText(raw);
+    }
+    buildPrompt(message, opts) {
+        const parts = [];
+        if (opts?.systemPrompt) {
+            parts.push(`[System Instructions]\n${opts.systemPrompt}\n`);
+        }
+        if (opts?.history && opts.history.length > 0) {
+            parts.push('[Conversation History]');
+            for (const msg of opts.history) {
+                const role = msg.role === 'assistant' ? 'You' : 'Other';
+                parts.push(`${role}: ${msg.content}`);
+            }
+            parts.push('');
+        }
+        parts.push(`[Current Message]\n${message}`);
+        return parts.join('\n');
     }
     async healthCheck() {
         try {

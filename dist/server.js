@@ -93,6 +93,8 @@ export function createServer(router, port) {
                     from: body.from,
                     to: body.to,
                     initialPrompt: body.initialPrompt,
+                    mode: body.mode,
+                    context: body.context,
                     maxRounds: body.maxRounds,
                     approveMode: body.approveMode,
                     cwd: body.cwd,
@@ -132,6 +134,13 @@ export function createServer(router, port) {
             if (msgMatch && method === 'POST') {
                 const body = await parseBody(req);
                 const msg = router.injectMessage(msgMatch[1], body.content, body.side ?? 'from');
+                return json(res, 200, msg);
+            }
+            // POST /api/sessions/:id/nudge — human redirects the conversation mid-flight
+            const nudgeMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/nudge$/);
+            if (nudgeMatch && method === 'POST') {
+                const body = await parseBody(req);
+                const msg = await router.nudge(nudgeMatch[1], body.content);
                 return json(res, 200, msg);
             }
             // POST /api/sessions/:id/takeover

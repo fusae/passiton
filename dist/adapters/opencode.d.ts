@@ -1,5 +1,5 @@
 import type { Adapter } from './types.js';
-import type { Session } from '../types.js';
+import type { Session, AdapterSendOpts } from '../types.js';
 export interface OpenCodeAdapterConfig {
     command?: string;
     timeout?: number;
@@ -14,7 +14,8 @@ export declare class OpenCodeAdapter implements Adapter {
     private model?;
     private env;
     constructor(cfg?: OpenCodeAdapterConfig);
-    send(session: Session, message: string): Promise<string>;
+    send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string>;
+    private buildPrompt;
     healthCheck(): Promise<boolean>;
     /**
      * Extract assistant text from opencode output.

@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { v4 as uuidv4 } from 'uuid';
 import * as state from './state.js';
 import { checkPreRound, detectCompletion, DEFAULT_POLICY, } from './policy.js';
+import { generateSystemPrompts } from './prompts.js';
 export class Router extends EventEmitter {
     adapters = new Map();
     policy;
@@ -24,10 +25,16 @@ export class Router extends EventEmitter {
     }
     // ── Session control ─────────────────────────────────────────────────────────
     startSession(params) {
+        const mode = params.mode ?? 'freeform';
+        // Generate system prompts based on mode + context
+        const systemPrompts = generateSystemPrompts(mode, params.from, params.to, params.initialPrompt, params.context);
         const session = state.createSession({
             id: uuidv4(),
             from: params.from,
             to: params.to,
+            mode,
+            context: params.context,
+            systemPrompts,
             maxRounds: params.maxRounds ?? this.policy.maxRounds,
             approveMode: params.approveMode ?? false,
             cwd: params.cwd,
@@ -88,11 +95,29 @@ export class Router extends EventEmitter {
         if (!session)
             throw new Error(`Session ${sessionId} not found`);
         const msg = this.recordMessage(sessionId, 'human', content, session.currentRound);
-        // If session is paused and approveMode, we resume from this injected message
-        if (session.status === 'paused' && !session.approveMode) {
-            // auto-resume using injected message
+        // If session is paused, auto-resume using injected message
+        if (session.status === 'paused') {
             this.resumeSession(sessionId).catch(console.error);
         }
+        return msg;
+    }
+    /**
+     * Nudge — inject a human directive and resume.
+     * Unlike injectMessage, this explicitly pauses first (if active), injects, then resumes.
+     * Use when the user wants to redirect the conversation mid-flight.
+     */
+    async nudge(sessionId, content) {
+        const session = state.getSession(sessionId);
+        if (!session)
+            throw new Error(`Session ${sessionId} not found`);
+        // Pause if currently active
+        if (session.status === 'active') {
+            await this.pauseSession(sessionId);
+        }
+        // Record the human message
+        const msg = this.recordMessage(sessionId, 'human', content, session.currentRound);
+        // Resume — the run loop will pick up from the last message (the human injection)
+        await this.resumeSession(sessionId);
         return msg;
     }
     // ── Core run loop ────────────────────────────────────────────────────────────
@@ -158,8 +183,10 @@ export class Router extends EventEmitter {
             throw new Error(`Adapter not found: ${session.to.adapter}`);
         if (!fromAdapter)
             throw new Error(`Adapter not found: ${session.from.adapter}`);
-        // Send to `to` agent
-        const toResponse = await this.callWithRetry(toAdapter, session, messageForTo);
+        // Build conversation history and send opts for `to` agent
+        const toOpts = this.buildSendOpts(session, 'to');
+        // Send to `to` agent with system prompt + history
+        const toResponse = await this.callWithRetry(toAdapter, session, messageForTo, toOpts);
         this.recordMessage(sessionId, session.to.adapter, toResponse, round);
         state.updateSession(sessionId, { currentRound: round });
         if (detectCompletion(toResponse)) {
@@ -169,19 +196,42 @@ export class Router extends EventEmitter {
         if (!this.runningLoops.has(sessionId)) {
             return { done: false, nextMessage: toResponse };
         }
-        const fromResponse = await this.callWithRetry(fromAdapter, session, toResponse);
+        // Build send opts for `from` agent
+        const fromOpts = this.buildSendOpts(session, 'from');
+        const fromResponse = await this.callWithRetry(fromAdapter, session, toResponse, fromOpts);
         this.recordMessage(sessionId, session.from.adapter, fromResponse, round);
         if (detectCompletion(fromResponse)) {
             return { done: true, nextMessage: fromResponse };
         }
         return { done: false, nextMessage: fromResponse };
     }
+    /**
+     * Build AdapterSendOpts with system prompt and conversation history.
+     * `perspective` determines which agent we're building for.
+     */
+    buildSendOpts(session, perspective) {
+        const systemPrompt = session.systemPrompts?.[perspective];
+        const messages = state.getMessages(session.id);
+        // Build history from the perspective of this agent
+        // Messages from this agent are 'assistant', messages from the other agent (or human) are 'user'
+        const selfAdapter = perspective === 'from' ? session.from.adapter : session.to.adapter;
+        const history = [];
+        for (const msg of messages) {
+            if (msg.from === selfAdapter) {
+                history.push({ role: 'assistant', content: msg.content });
+            }
+            else {
+                history.push({ role: 'user', content: msg.content });
+            }
+        }
+        return { systemPrompt, history };
+    }
     // ── Helpers ─────────────────────────────────────────────────────────────────
-    async callWithRetry(adapter, session, message) {
+    async callWithRetry(adapter, session, message, opts) {
         let lastErr;
         for (let attempt = 0; attempt <= this.policy.retries; attempt++) {
             try {
-                return await adapter.send(session, message);
+                return await adapter.send(session, message, opts);
             }
             catch (err) {
                 lastErr = err;

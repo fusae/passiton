@@ -22,10 +22,13 @@ function createTables() {
       to_adapter   TEXT NOT NULL,
       to_label     TEXT,
       status       TEXT NOT NULL DEFAULT 'active',
+      mode         TEXT NOT NULL DEFAULT 'freeform',
       max_rounds   INTEGER NOT NULL DEFAULT 20,
       current_round INTEGER NOT NULL DEFAULT 0,
       approve_mode INTEGER NOT NULL DEFAULT 0,
       cwd          TEXT,
+      context      TEXT,
+      system_prompts TEXT,
       created_at   INTEGER NOT NULL,
       updated_at   INTEGER NOT NULL
     );
@@ -42,18 +45,41 @@ function createTables() {
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
   `);
+    // Migrate: add new columns if they don't exist (for existing DBs)
+    try {
+        db.exec(`ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'freeform'`);
+    }
+    catch { /* column already exists */ }
+    try {
+        db.exec(`ALTER TABLE sessions ADD COLUMN context TEXT`);
+    }
+    catch { /* column already exists */ }
+    try {
+        db.exec(`ALTER TABLE sessions ADD COLUMN system_prompts TEXT`);
+    }
+    catch { /* column already exists */ }
 }
 // ── Sessions ──────────────────────────────────────────────────────────────────
 function rowToSession(row) {
+    let systemPrompts;
+    if (row.system_prompts) {
+        try {
+            systemPrompts = JSON.parse(row.system_prompts);
+        }
+        catch { /* ignore */ }
+    }
     return {
         id: row.id,
         from: { adapter: row.from_adapter, label: row.from_label },
         to: { adapter: row.to_adapter, label: row.to_label },
         status: row.status,
+        mode: row.mode || 'freeform',
         maxRounds: row.max_rounds,
         currentRound: row.current_round,
         approveMode: Boolean(row.approve_mode),
         cwd: row.cwd,
+        context: row.context,
+        systemPrompts,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     };
@@ -62,10 +88,11 @@ export function createSession(params) {
     const now = Date.now();
     const stmt = db.prepare(`
     INSERT INTO sessions (id, from_adapter, from_label, to_adapter, to_label,
-      status, max_rounds, current_round, approve_mode, cwd, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'active', ?, 0, ?, ?, ?, ?)
+      status, mode, max_rounds, current_round, approve_mode, cwd, context, system_prompts,
+      created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 0, ?, ?, ?, ?, ?, ?)
   `);
-    stmt.run(params.id, params.from.adapter, params.from.label ?? null, params.to.adapter, params.to.label ?? null, params.maxRounds ?? 20, params.approveMode ? 1 : 0, params.cwd ?? null, now, now);
+    stmt.run(params.id, params.from.adapter, params.from.label ?? null, params.to.adapter, params.to.label ?? null, params.mode ?? 'freeform', params.maxRounds ?? 20, params.approveMode ? 1 : 0, params.cwd ?? null, params.context ?? null, params.systemPrompts ? JSON.stringify(params.systemPrompts) : null, now, now);
     return getSession(params.id);
 }
 export function getSession(id) {

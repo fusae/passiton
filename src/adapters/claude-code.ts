@@ -2,7 +2,7 @@
 
 import { spawn } from 'child_process'
 import type { Adapter } from './types.js'
-import type { Session } from '../types.js'
+import type { Session, AdapterSendOpts } from '../types.js'
 
 export interface ClaudeCodeAdapterConfig {
   command?: string
@@ -36,12 +36,30 @@ export class ClaudeCodeAdapter implements Adapter {
     this.config = { command: this.command, timeout: this.timeout }
   }
 
-  async send(session: Session, message: string): Promise<string> {
+  async send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string> {
+    const fullMessage = this.buildPrompt(message, opts)
     const raw = await this.run(
-      [this.command, '-p', message, '--output-format', 'stream-json', '--verbose'],
+      [this.command, '-p', fullMessage, '--output-format', 'stream-json', '--verbose'],
       session.cwd
     )
     return this.extractText(raw)
+  }
+
+  private buildPrompt(message: string, opts?: AdapterSendOpts): string {
+    const parts: string[] = []
+    if (opts?.systemPrompt) {
+      parts.push(`[System Instructions]\n${opts.systemPrompt}\n`)
+    }
+    if (opts?.history && opts.history.length > 0) {
+      parts.push('[Conversation History]')
+      for (const msg of opts.history) {
+        const role = msg.role === 'assistant' ? 'You' : 'Other'
+        parts.push(`${role}: ${msg.content}`)
+      }
+      parts.push('')
+    }
+    parts.push(`[Current Message]\n${message}`)
+    return parts.join('\n')
   }
 
   async healthCheck(): Promise<boolean> {

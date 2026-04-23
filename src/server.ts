@@ -103,6 +103,8 @@ export function createServer(router: Router, port: number): http.Server {
           from: body.from as { adapter: string; label?: string },
           to: body.to as { adapter: string; label?: string },
           initialPrompt: body.initialPrompt as string,
+          mode: body.mode as 'collaborate' | 'discuss' | 'review' | 'freeform' | undefined,
+          context: body.context as string | undefined,
           maxRounds: body.maxRounds as number | undefined,
           approveMode: body.approveMode as boolean | undefined,
           cwd: body.cwd as string | undefined,
@@ -150,6 +152,14 @@ export function createServer(router: Router, port: number): http.Server {
           body.content as string,
           (body.side as 'from' | 'to') ?? 'from'
         )
+        return json(res, 200, msg)
+      }
+
+      // POST /api/sessions/:id/nudge — human redirects the conversation mid-flight
+      const nudgeMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/nudge$/)
+      if (nudgeMatch && method === 'POST') {
+        const body = await parseBody(req) as Record<string, unknown>
+        const msg = await router.nudge(nudgeMatch[1], body.content as string)
         return json(res, 200, msg)
       }
 
