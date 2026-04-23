@@ -1,0 +1,292 @@
+# Turing — 产品文档
+
+## 这是什么
+
+Turing 是一个本地运行的 **AI Agent 通信代理**。它让任意两个 AI agent 像跟人聊天一样互相对话，agent 不需要任何改造，也不知道对面是人还是机器。
+
+你（人类）可以随时旁观、插话、接管对话。
+
+## 目前支持的 Agent
+
+| 名称 | 说明 |
+|------|------|
+| **codex** | OpenAI Codex（本机 App） |
+| **claude-code** | Anthropic Claude Code CLI |
+| **opencode** | OpenCode（支持 GLM、GPT 等多模型） |
+
+## 怎么用
+
+### 启动
+
+```bash
+cd ~/Projects/turing && node dist/index.js
+```
+
+Server 跑在 `http://localhost:4590`。
+
+### Web UI
+
+浏览器打开 `http://localhost:4590`，可以：
+- 看所有对话 session
+- 实时查看消息
+- 创建新 session
+- 人类插入（暂停 / 发消息 / 继续）
+
+### 通过 Cola
+
+直接跟 Cola 说，比如：
+- "让 Codex 和 OpenCode 讨论下这个问题"
+- "暂停那个 session"
+- "我插一句话进去"
+
+---
+
+## HTTP API
+
+Base URL: `http://localhost:4590`
+
+所有请求和响应都是 JSON。
+
+---
+
+### 1. 查看可用 Agent
+
+```
+GET /api/agents
+```
+
+**返回**：
+```json
+[
+  { "name": "codex", "healthy": true },
+  { "name": "claude-code", "healthy": true },
+  { "name": "opencode", "healthy": true }
+]
+```
+
+`healthy` 表示这个 agent 当前能不能用（网络通不通、CLI 存不存在）。
+
+---
+
+### 2. 创建对话 Session
+
+```
+POST /api/sessions
+```
+
+**请求体**：
+```json
+{
+  "from": { "adapter": "codex", "label": "Codex" },
+  "to": { "adapter": "opencode", "label": "OpenCode" },
+  "initialPrompt": "帮我写一个 hello world 脚本",
+  "cwd": "/tmp",
+  "maxRounds": 5,
+  "approveMode": false
+}
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `from.adapter` | ✅ | 发起方 agent 名称 |
+| `to.adapter` | ✅ | 接收方 agent 名称 |
+| `initialPrompt` | ✅ | 第一条消息内容 |
+| `from.label` / `to.label` | ❌ | 显示用的名字，不填就用 adapter 名 |
+| `cwd` | ❌ | agent 的工作目录，默认当前目录 |
+| `maxRounds` | ❌ | 最大对话轮数，默认 20 |
+| `approveMode` | ❌ | 是否每轮需要人类审批，默认 false |
+
+**返回**：创建好的 session 对象。对话会自动开始跑。
+
+**流程**：`from` agent 先收到 `initialPrompt`，回复后传给 `to` agent，`to` 回复再传回 `from`……如此往复，直到达到 `maxRounds` 或被手动停止。
+
+---
+
+### 3. 查看所有 Session
+
+```
+GET /api/sessions
+GET /api/sessions?status=active
+```
+
+| 参数 | 说明 |
+|------|------|
+| `status` | 可选，筛选状态：`active` / `paused` / `done` / `error` |
+
+**返回**：session 列表（不含消息内容）。
+
+---
+
+### 4. 查看单个 Session（含消息）
+
+```
+GET /api/sessions/:id
+```
+
+**返回**：session 详情 + 全部消息记录。
+
+```json
+{
+  "id": "3571fcc7-...",
+  "from": { "adapter": "claude-code", "label": "Claude" },
+  "to": { "adapter": "opencode", "label": "OpenCode" },
+  "status": "active",
+  "currentRound": 3,
+  "maxRounds": 20,
+  "messages": [
+    {
+      "id": "f970857a-...",
+      "from": "human",
+      "content": "创建一个文件...",
+      "round": 0,
+      "timestamp": 1776944953314
+    },
+    {
+      "id": "607e445e-...",
+      "from": "opencode",
+      "content": "文件已创建...",
+      "round": 1,
+      "timestamp": 1776944985990
+    }
+  ]
+}
+```
+
+---
+
+### 5. 暂停对话
+
+```
+POST /api/sessions/:id/pause
+```
+
+暂停后 agent 不再自动对话。你可以插入消息后再继续。
+
+---
+
+### 6. 继续对话
+
+```
+POST /api/sessions/:id/resume
+```
+
+**请求体**（可选）：
+```json
+{
+  "extraRounds": 5
+}
+```
+
+`extraRounds` 可以追加额外轮数。不传就用剩余轮数继续。
+
+---
+
+### 7. 停止对话
+
+```
+POST /api/sessions/:id/stop
+```
+
+永久结束这个 session，状态变为 `done`。
+
+---
+
+### 8. 人类插入消息
+
+```
+POST /api/sessions/:id/message
+```
+
+**请求体**：
+```json
+{
+  "content": "等一下，我觉得方向不对，换个思路",
+  "side": "from"
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `content` | 你要说的话 |
+| `side` | `"from"` 或 `"to"`，表示这条消息插入到哪一方的视角。默认 `"from"` |
+
+**注意**：建议先 pause，插入消息，再 resume。
+
+---
+
+### 9. 接管对话（Takeover）
+
+```
+POST /api/sessions/:id/takeover
+```
+
+暂停对话并标记为人类接管。之后你可以通过 `/message` 手动发消息，完全控制对话。
+
+---
+
+### 10. 释放对话（Release）
+
+```
+POST /api/sessions/:id/release
+```
+
+取消接管，恢复 agent 自动对话。
+
+---
+
+## Session 生命周期
+
+```
+创建 → active（自动对话中）
+         ↓ pause
+       paused（暂停）
+         ↓ resume / release
+       active
+         ↓ stop / 达到 maxRounds
+       done
+
+任何阶段出错 → error
+```
+
+## 配置
+
+配置文件：`~/.turing/config.json`
+
+```json
+{
+  "agents": {
+    "claude-code": {
+      "adapter": "claude-code",
+      "env": {
+        "ANTHROPIC_BASE_URL": "https://your-proxy.com",
+        "ANTHROPIC_AUTH_TOKEN": "sk-xxx"
+      }
+    },
+    "opencode": {
+      "adapter": "opencode",
+      "command": "/path/to/opencode"
+    }
+  }
+}
+```
+
+会跟默认配置深度合并，你只需要写要覆盖的部分。
+
+## 数据
+
+- SQLite 数据库：`~/Projects/turing/data/turing.db`
+- 所有 session 和消息都持久化，重启不丢
+
+## WebSocket
+
+Web UI 通过 WebSocket 实时推送事件。连接 `ws://localhost:4590`，接收：
+
+| 事件 | 说明 |
+|------|------|
+| `session:created` | 新 session |
+| `session:updated` | session 状态变化 |
+| `session:done` | 对话结束 |
+| `session:error` | 出错 |
+| `session:paused` | 暂停 |
+| `message:new` | 新消息 |
+| `agent:status` | agent 状态变化 |
