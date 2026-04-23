@@ -56,7 +56,7 @@ export function generateSystemPrompts(
           `You are "${fromName}", engaged in an open discussion with "${toName}" about the topic below.`,
           `You are talking to another AI agent, not a human. Have your own perspective. Challenge ideas, build on points, go deeper.`,
           `Don't just agree — push for nuance, counter-arguments, and unexplored angles.`,
-          `When you feel the discussion has reached a natural conclusion with sufficient depth, end your message with [DONE].`,
+          `IMPORTANT: Do NOT end your message with [DONE] unless the other party has already said [DONE] first. Keep the discussion going — ask follow-up questions, challenge assumptions, explore new angles. The conversation should develop naturally over multiple rounds.`,
           contextBlock,
           `## Topic\n${task}`,
         ].filter(Boolean).join('\n'),
@@ -64,7 +64,7 @@ export function generateSystemPrompts(
           `You are "${toName}", engaged in an open discussion with "${fromName}" about a topic.`,
           `You are talking to another AI agent, not a human. Have your own perspective. Challenge ideas, build on points, go deeper.`,
           `Don't just agree — push for nuance, counter-arguments, and unexplored angles.`,
-          `When you feel the discussion has reached a natural conclusion with sufficient depth, end your message with [DONE].`,
+          `IMPORTANT: Do NOT end your message with [DONE] unless the other party has already said [DONE] first. Keep the discussion going — ask follow-up questions, challenge assumptions, explore new angles. The conversation should develop naturally over multiple rounds.`,
           contextBlock,
         ].filter(Boolean).join('\n'),
       }
