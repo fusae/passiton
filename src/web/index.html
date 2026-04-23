@@ -111,8 +111,21 @@
           <select name="to" id="to-select"></select>
         </div>
         <div class="form-row">
+          <label>Mode</label>
+          <select name="mode" id="mode-select">
+            <option value="collaborate">Collaborate — plan + execute</option>
+            <option value="discuss">Discuss — open debate</option>
+            <option value="review">Review — submit + critique</option>
+            <option value="freeform">Freeform — no preset roles</option>
+          </select>
+        </div>
+        <div class="form-row">
           <label>Initial prompt</label>
           <textarea name="prompt" id="modal-prompt" required placeholder="Describe the task…"></textarea>
+        </div>
+        <div class="form-row">
+          <label>Context <span class="hint">(optional — background from prior conversations)</span></label>
+          <textarea name="context" id="modal-context" rows="2" placeholder="e.g. We discussed using Xray + VLESS for VPN setup…"></textarea>
         </div>
         <div class="form-row-inline">
           <div class="form-row half">

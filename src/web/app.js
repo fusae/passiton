@@ -95,6 +95,7 @@ function renderSessionList() {
       <div class="session-agents">${agentLabel(s.from)} → ${agentLabel(s.to)}</div>
       <div class="session-meta">
         <span class="badge ${s.status}">${s.status}</span>
+        ${s.mode && s.mode !== 'freeform' ? `<span class="mode-chip">${s.mode}</span>` : ''}
         <span class="rounds-chip">R${s.currentRound}/${s.maxRounds}</span>
         <span class="time-chip">${timeAgo(s.updatedAt)}</span>
       </div>
@@ -322,6 +323,8 @@ document.getElementById('modal-form').addEventListener('submit', async e => {
     from: { adapter: fd.get('from') },
     to:   { adapter: fd.get('to') },
     initialPrompt: fd.get('prompt'),
+    mode: fd.get('mode') || 'freeform',
+    context: fd.get('context') || undefined,
     maxRounds: parseInt(fd.get('maxRounds')) || 20,
     approveMode: fd.get('approveMode') === 'on',
     cwd: fd.get('cwd') || undefined,

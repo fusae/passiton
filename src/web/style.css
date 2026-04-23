@@ -148,6 +148,14 @@ header h1 { font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
 .session-empty { padding: 16px 14px; color: var(--muted); font-size: 12px; }
 
 .rounds-chip { font-variant-numeric: tabular-nums; }
+.mode-chip {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(188, 140, 255, 0.15);
+  color: var(--purple);
+  font-weight: 500;
+}
 .time-chip   { margin-left: auto; }
 
 /* ── Badge ──────────────────────────────────────────────────────────────── */
