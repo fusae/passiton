@@ -6,6 +6,9 @@ import { homedir } from 'os'
 import type { AppConfig } from './types.js'
 
 const CONFIG_PATH = join(homedir(), '.turing', 'config.json')
+const DEFAULT_CODEX_COMMAND = process.env.TURING_CODEX_COMMAND ?? 'codex'
+const DEFAULT_CLAUDE_COMMAND = process.env.TURING_CLAUDE_COMMAND ?? 'claude'
+const DEFAULT_OPENCODE_COMMAND = process.env.TURING_OPENCODE_COMMAND ?? 'opencode'
 
 export const DEFAULT_CONFIG: AppConfig = {
   server: {
@@ -14,19 +17,19 @@ export const DEFAULT_CONFIG: AppConfig = {
   agents: {
     codex: {
       adapter: 'codex',
-      command: 'codex',
+      command: DEFAULT_CODEX_COMMAND,
       args: ['exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
       timeout: 300_000,
     },
     'claude-code': {
       adapter: 'claude-code',
-      command: 'claude',
+      command: DEFAULT_CLAUDE_COMMAND,
       args: ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
       timeout: 300_000,
     },
     opencode: {
       adapter: 'opencode',
-      command: 'opencode',
+      command: DEFAULT_OPENCODE_COMMAND,
       args: ['run', '{prompt}', '--dangerously-skip-permissions'],
       timeout: 300_000,
     },

@@ -5,7 +5,7 @@ import type { Session, AdapterSendOpts } from '../types.js'
 import { resolveCommandArgs } from './command-args.js'
 import { buildPrompt, runCommand } from './shared.js'
 
-const DEFAULT_OPENCODE_PATH = 'opencode'
+const DEFAULT_OPENCODE_PATH = process.env.TURING_OPENCODE_COMMAND ?? 'opencode'
 const DEFAULT_OPENCODE_ARGS = ['run', '{prompt}', '--dangerously-skip-permissions']
 
 export interface OpenCodeAdapterConfig {

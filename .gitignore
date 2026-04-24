@@ -1,1 +1,4 @@
-node_modules/\ndist/\ndata/\n*.db
+node_modules/
+dist/
+data/
+*.db

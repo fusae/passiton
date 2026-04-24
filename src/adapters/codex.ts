@@ -5,7 +5,7 @@ import type { Session, AdapterSendOpts } from '../types.js'
 import { resolveCommandArgs } from './command-args.js'
 import { buildPrompt, runCommand } from './shared.js'
 
-const DEFAULT_CODEX_PATH = 'codex'
+const DEFAULT_CODEX_PATH = process.env.TURING_CODEX_COMMAND ?? 'codex'
 const DEFAULT_CODEX_ARGS = ['exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', '{prompt}']
 
 export interface CodexAdapterConfig {
