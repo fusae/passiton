@@ -112,6 +112,7 @@ export class ClaudeCodeAdapter implements Adapter {
         cwd: cwd ?? process.cwd(),
         env: { ...process.env, ...this.env },
         stdio: ['ignore', 'pipe', 'pipe'],
+        shell: true,
       })
 
       let stdout = ''

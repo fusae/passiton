@@ -83,6 +83,7 @@ export class ClaudeCodeAdapter {
                 cwd: cwd ?? process.cwd(),
                 env: { ...process.env, ...this.env },
                 stdio: ['ignore', 'pipe', 'pipe'],
+                shell: true,
             });
             let stdout = '';
             let stderr = '';
