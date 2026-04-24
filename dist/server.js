@@ -13,6 +13,13 @@ const MIME = {
     '.css': 'text/css',
     '.json': 'application/json',
 };
+class HttpError extends Error {
+    status;
+    constructor(status, message) {
+        super(message);
+        this.status = status;
+    }
+}
 function json(res, status, data) {
     const body = JSON.stringify(data);
     res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -45,6 +52,112 @@ function serveStatic(res, filePath) {
         res.writeHead(404);
         res.end('Not found');
     }
+}
+function isRecord(value) {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function requireRecord(value, field) {
+    if (!isRecord(value)) {
+        throw new HttpError(400, `"${field}" must be an object`);
+    }
+    return value;
+}
+function requireNonEmptyString(value, field) {
+    if (typeof value !== 'string' || value.trim() === '') {
+        throw new HttpError(400, `"${field}" must be a non-empty string`);
+    }
+    return value.trim();
+}
+function optionalString(value, field) {
+    if (value === undefined || value === null || value === '') {
+        return undefined;
+    }
+    if (typeof value !== 'string') {
+        throw new HttpError(400, `"${field}" must be a string`);
+    }
+    return value;
+}
+function optionalBoolean(value, field) {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (typeof value !== 'boolean') {
+        throw new HttpError(400, `"${field}" must be a boolean`);
+    }
+    return value;
+}
+function optionalPositiveInt(value, field) {
+    if (value === undefined || value === null || value === '') {
+        return undefined;
+    }
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+        throw new HttpError(400, `"${field}" must be a positive integer`);
+    }
+    return value;
+}
+function parseAgentRef(value, field) {
+    const body = requireRecord(value, field);
+    return {
+        adapter: requireNonEmptyString(body.adapter, `${field}.adapter`),
+        label: optionalString(body.label, `${field}.label`),
+    };
+}
+function parseSessionStatus(value) {
+    if (value === null) {
+        return null;
+    }
+    if (value === 'active' || value === 'paused' || value === 'done' || value === 'error') {
+        return value;
+    }
+    throw new HttpError(400, '"status" must be one of active, paused, done, error');
+}
+function parseSessionMode(value) {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value === 'collaborate' ||
+        value === 'discuss' ||
+        value === 'review' ||
+        value === 'freeform') {
+        return value;
+    }
+    throw new HttpError(400, '"mode" must be one of collaborate, discuss, review, freeform');
+}
+function parseSessionBody(body) {
+    const data = requireRecord(body, 'body');
+    return {
+        from: parseAgentRef(data.from, 'from'),
+        to: parseAgentRef(data.to, 'to'),
+        initialPrompt: requireNonEmptyString(data.initialPrompt, 'initialPrompt'),
+        mode: parseSessionMode(data.mode),
+        context: optionalString(data.context, 'context'),
+        maxRounds: optionalPositiveInt(data.maxRounds, 'maxRounds'),
+        approveMode: optionalBoolean(data.approveMode, 'approveMode'),
+        cwd: optionalString(data.cwd, 'cwd'),
+    };
+}
+function parseResumeBody(body) {
+    const data = requireRecord(body, 'body');
+    return {
+        extraRounds: optionalPositiveInt(data.extraRounds, 'extraRounds'),
+    };
+}
+function parseHumanMessageBody(body) {
+    const data = requireRecord(body, 'body');
+    const side = data.side === undefined ? 'from' : data.side;
+    if (side !== 'from' && side !== 'to') {
+        throw new HttpError(400, '"side" must be "from" or "to"');
+    }
+    return {
+        content: requireNonEmptyString(data.content, 'content'),
+        side,
+    };
+}
+function parseNudgeBody(body) {
+    const data = requireRecord(body, 'body');
+    return {
+        content: requireNonEmptyString(data.content, 'content'),
+    };
 }
 export function createServer(router, port) {
     const clients = new Set();
@@ -82,23 +195,13 @@ export function createServer(router, port) {
             }
             // GET /api/sessions
             if (pathname === '/api/sessions' && method === 'GET') {
-                const statusFilter = url.searchParams.get('status');
+                const statusFilter = parseSessionStatus(url.searchParams.get('status'));
                 const sessions = state.listSessions(statusFilter ? { status: statusFilter } : undefined);
                 return json(res, 200, sessions);
             }
             // POST /api/sessions
             if (pathname === '/api/sessions' && method === 'POST') {
-                const body = await parseBody(req);
-                const session = router.startSession({
-                    from: body.from,
-                    to: body.to,
-                    initialPrompt: body.initialPrompt,
-                    mode: body.mode,
-                    context: body.context,
-                    maxRounds: body.maxRounds,
-                    approveMode: body.approveMode,
-                    cwd: body.cwd,
-                });
+                const session = router.startSession(parseSessionBody(await parseBody(req)));
                 return json(res, 201, session);
             }
             // GET /api/sessions/:id
@@ -119,8 +222,8 @@ export function createServer(router, port) {
             // POST /api/sessions/:id/resume
             const resumeMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/resume$/);
             if (resumeMatch && method === 'POST') {
-                const body = await parseBody(req);
-                const session = await router.resumeSession(resumeMatch[1], body.extraRounds);
+                const { extraRounds } = parseResumeBody(await parseBody(req));
+                const session = await router.resumeSession(resumeMatch[1], extraRounds);
                 return json(res, 200, session);
             }
             // POST /api/sessions/:id/stop
@@ -132,14 +235,14 @@ export function createServer(router, port) {
             // POST /api/sessions/:id/message
             const msgMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/message$/);
             if (msgMatch && method === 'POST') {
-                const body = await parseBody(req);
-                const msg = router.injectMessage(msgMatch[1], body.content, body.side ?? 'from');
+                const body = parseHumanMessageBody(await parseBody(req));
+                const msg = router.injectMessage(msgMatch[1], body.content, body.side);
                 return json(res, 200, msg);
             }
             // POST /api/sessions/:id/nudge — human redirects the conversation mid-flight
             const nudgeMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/nudge$/);
             if (nudgeMatch && method === 'POST') {
-                const body = await parseBody(req);
+                const body = parseNudgeBody(await parseBody(req));
                 const msg = await router.nudge(nudgeMatch[1], body.content);
                 return json(res, 200, msg);
             }
@@ -170,6 +273,9 @@ export function createServer(router, port) {
             json(res, 404, { error: 'Not found' });
         }
         catch (err) {
+            if (err instanceof HttpError) {
+                return json(res, err.status, { error: err.message });
+            }
             console.error('[server] error:', err);
             json(res, 500, { error: String(err) });
         }

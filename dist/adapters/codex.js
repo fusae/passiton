@@ -1,22 +1,25 @@
 // Codex adapter — uses codex exec -p "prompt"
 import { spawn } from 'child_process';
+import { resolveCommandArgs } from './command-args.js';
 const DEFAULT_CODEX_PATH = 'codex';
+const DEFAULT_CODEX_ARGS = ['exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', '{prompt}'];
 export class CodexAdapter {
     name = 'codex';
     config;
     command;
+    args;
     timeout;
     env;
     constructor(cfg = {}) {
         this.command = cfg.command ?? DEFAULT_CODEX_PATH;
+        this.args = cfg.args ?? DEFAULT_CODEX_ARGS;
         this.timeout = cfg.timeout ?? 300_000;
         this.env = cfg.env ?? {};
-        this.config = { command: this.command, timeout: this.timeout };
+        this.config = { command: this.command, args: this.args, timeout: this.timeout };
     }
     async send(session, message, opts) {
-        // Build the full prompt with system context and history
         const fullMessage = this.buildPrompt(message, opts);
-        return this.run([this.command, 'exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', fullMessage], session.cwd);
+        return this.run([this.command, ...resolveCommandArgs(this.args, fullMessage)], session.cwd);
     }
     buildPrompt(message, opts) {
         const parts = [];

@@ -2,6 +2,7 @@ import type { Adapter } from './types.js';
 import type { Session, AdapterSendOpts } from '../types.js';
 export interface OpenCodeAdapterConfig {
     command?: string;
+    args?: string[];
     timeout?: number;
     model?: string;
     env?: Record<string, string>;
@@ -10,6 +11,7 @@ export declare class OpenCodeAdapter implements Adapter {
     readonly name = "opencode";
     readonly config: Record<string, unknown>;
     private command;
+    private args;
     private timeout;
     private model?;
     private env;

@@ -1,20 +1,24 @@
 // Claude Code adapter — uses claude -p "prompt" --output-format stream-json
 import { spawn } from 'child_process';
+import { resolveCommandArgs } from './command-args.js';
+const DEFAULT_CLAUDE_ARGS = ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'];
 export class ClaudeCodeAdapter {
     name = 'claude-code';
     config;
     command;
+    args;
     timeout;
     env;
     constructor(cfg = {}) {
         this.command = cfg.command ?? 'claude';
+        this.args = cfg.args ?? DEFAULT_CLAUDE_ARGS;
         this.timeout = cfg.timeout ?? 300_000;
         this.env = cfg.env ?? {};
-        this.config = { command: this.command, timeout: this.timeout };
+        this.config = { command: this.command, args: this.args, timeout: this.timeout };
     }
     async send(session, message, opts) {
         const fullMessage = this.buildPrompt(message, opts);
-        const raw = await this.run([this.command, '-p', fullMessage, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'], session.cwd);
+        const raw = await this.run([this.command, ...resolveCommandArgs(this.args, fullMessage)], session.cwd);
         return this.extractText(raw);
     }
     buildPrompt(message, opts) {

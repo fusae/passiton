@@ -1,23 +1,27 @@
 // OpenCode adapter — uses opencode run "prompt" --dangerously-skip-permissions --format json
 import { spawn } from 'child_process';
+import { resolveCommandArgs } from './command-args.js';
 const DEFAULT_OPENCODE_PATH = 'opencode';
+const DEFAULT_OPENCODE_ARGS = ['run', '{prompt}', '--dangerously-skip-permissions'];
 export class OpenCodeAdapter {
     name = 'opencode';
     config;
     command;
+    args;
     timeout;
     model;
     env;
     constructor(cfg = {}) {
         this.command = cfg.command ?? DEFAULT_OPENCODE_PATH;
+        this.args = cfg.args ?? DEFAULT_OPENCODE_ARGS;
         this.timeout = cfg.timeout ?? 300_000;
         this.model = cfg.model;
         this.env = cfg.env ?? {};
-        this.config = { command: this.command, timeout: this.timeout, model: this.model };
+        this.config = { command: this.command, args: this.args, timeout: this.timeout, model: this.model };
     }
     async send(session, message, opts) {
         const fullMessage = this.buildPrompt(message, opts);
-        const args = ['run', fullMessage, '--dangerously-skip-permissions'];
+        const args = resolveCommandArgs(this.args, fullMessage);
         if (this.model) {
             args.push('--model', this.model);
         }
