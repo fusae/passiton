@@ -3,11 +3,14 @@
 import { spawn } from 'child_process'
 import type { Adapter } from './types.js'
 import type { Session, AdapterSendOpts } from '../types.js'
+import { resolveCommandArgs } from './command-args.js'
 
 const DEFAULT_CODEX_PATH = 'codex'
+const DEFAULT_CODEX_ARGS = ['exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', '{prompt}']
 
 export interface CodexAdapterConfig {
   command?: string
+  args?: string[]
   timeout?: number
   env?: Record<string, string>
 }
@@ -16,20 +19,21 @@ export class CodexAdapter implements Adapter {
   readonly name = 'codex'
   readonly config: Record<string, unknown>
   private command: string
+  private args: string[]
   private timeout: number
   private env: Record<string, string>
 
   constructor(cfg: CodexAdapterConfig = {}) {
     this.command = cfg.command ?? DEFAULT_CODEX_PATH
+    this.args = cfg.args ?? DEFAULT_CODEX_ARGS
     this.timeout = cfg.timeout ?? 300_000
     this.env = cfg.env ?? {}
-    this.config = { command: this.command, timeout: this.timeout }
+    this.config = { command: this.command, args: this.args, timeout: this.timeout }
   }
 
   async send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string> {
-    // Build the full prompt with system context and history
     const fullMessage = this.buildPrompt(message, opts)
-    return this.run([this.command, 'exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', fullMessage], session.cwd)
+    return this.run([this.command, ...resolveCommandArgs(this.args, fullMessage)], session.cwd)
   }
 
   private buildPrompt(message: string, opts?: AdapterSendOpts): string {

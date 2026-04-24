@@ -23,6 +23,7 @@ async function main(): Promise<void> {
       case 'codex':
         router.registerAdapter(new CodexAdapter({
           command: agentCfg.command,
+          args: agentCfg.args,
           timeout: agentCfg.timeout,
           env: agentCfg.env,
         }))
@@ -30,6 +31,7 @@ async function main(): Promise<void> {
       case 'claude-code':
         router.registerAdapter(new ClaudeCodeAdapter({
           command: agentCfg.command,
+          args: agentCfg.args,
           timeout: agentCfg.timeout,
           env: agentCfg.env,
         }))
@@ -37,6 +39,7 @@ async function main(): Promise<void> {
       case 'opencode':
         router.registerAdapter(new OpenCodeAdapter({
           command: agentCfg.command,
+          args: agentCfg.args,
           timeout: agentCfg.timeout,
           model: (agentCfg as any).model,
           env: agentCfg.env,

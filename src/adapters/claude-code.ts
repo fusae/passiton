@@ -3,9 +3,13 @@
 import { spawn } from 'child_process'
 import type { Adapter } from './types.js'
 import type { Session, AdapterSendOpts } from '../types.js'
+import { resolveCommandArgs } from './command-args.js'
+
+const DEFAULT_CLAUDE_ARGS = ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions']
 
 export interface ClaudeCodeAdapterConfig {
   command?: string
+  args?: string[]
   timeout?: number
   env?: Record<string, string>
 }
@@ -26,22 +30,21 @@ export class ClaudeCodeAdapter implements Adapter {
   readonly name = 'claude-code'
   readonly config: Record<string, unknown>
   private command: string
+  private args: string[]
   private timeout: number
   private env: Record<string, string>
 
   constructor(cfg: ClaudeCodeAdapterConfig = {}) {
     this.command = cfg.command ?? 'claude'
+    this.args = cfg.args ?? DEFAULT_CLAUDE_ARGS
     this.timeout = cfg.timeout ?? 300_000
     this.env = cfg.env ?? {}
-    this.config = { command: this.command, timeout: this.timeout }
+    this.config = { command: this.command, args: this.args, timeout: this.timeout }
   }
 
   async send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string> {
     const fullMessage = this.buildPrompt(message, opts)
-    const raw = await this.run(
-      [this.command, '-p', fullMessage, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
-      session.cwd
-    )
+    const raw = await this.run([this.command, ...resolveCommandArgs(this.args, fullMessage)], session.cwd)
     return this.extractText(raw)
   }
 

@@ -15,19 +15,19 @@ export const DEFAULT_CONFIG: AppConfig = {
     codex: {
       adapter: 'codex',
       command: 'codex',
-      args: ['exec', '-p'],
+      args: ['exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
       timeout: 300_000,
     },
     'claude-code': {
       adapter: 'claude-code',
       command: 'claude',
-      args: ['-p', '--output-format', 'stream-json'],
+      args: ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
       timeout: 300_000,
     },
     opencode: {
       adapter: 'opencode',
       command: 'opencode',
-      args: ['run', '--dangerously-skip-permissions'],
+      args: ['run', '{prompt}', '--dangerously-skip-permissions'],
       timeout: 300_000,
     },
   },

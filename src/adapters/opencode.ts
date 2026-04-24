@@ -3,11 +3,14 @@
 import { spawn } from 'child_process'
 import type { Adapter } from './types.js'
 import type { Session, AdapterSendOpts } from '../types.js'
+import { resolveCommandArgs } from './command-args.js'
 
 const DEFAULT_OPENCODE_PATH = 'opencode'
+const DEFAULT_OPENCODE_ARGS = ['run', '{prompt}', '--dangerously-skip-permissions']
 
 export interface OpenCodeAdapterConfig {
   command?: string
+  args?: string[]
   timeout?: number
   model?: string
   env?: Record<string, string>
@@ -17,21 +20,23 @@ export class OpenCodeAdapter implements Adapter {
   readonly name = 'opencode'
   readonly config: Record<string, unknown>
   private command: string
+  private args: string[]
   private timeout: number
   private model?: string
   private env: Record<string, string>
 
   constructor(cfg: OpenCodeAdapterConfig = {}) {
     this.command = cfg.command ?? DEFAULT_OPENCODE_PATH
+    this.args = cfg.args ?? DEFAULT_OPENCODE_ARGS
     this.timeout = cfg.timeout ?? 300_000
     this.model = cfg.model
     this.env = cfg.env ?? {}
-    this.config = { command: this.command, timeout: this.timeout, model: this.model }
+    this.config = { command: this.command, args: this.args, timeout: this.timeout, model: this.model }
   }
 
   async send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string> {
     const fullMessage = this.buildPrompt(message, opts)
-    const args = ['run', fullMessage, '--dangerously-skip-permissions']
+    const args = resolveCommandArgs(this.args, fullMessage)
     if (this.model) {
       args.push('--model', this.model)
     }

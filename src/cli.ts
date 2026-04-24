@@ -150,6 +150,7 @@ async function serverStart() {
       case 'codex':
         router.registerAdapter(new CodexAdapter({
           command: agentCfg.command,
+          args: agentCfg.args,
           timeout: agentCfg.timeout,
           env: agentCfg.env,
         }))
@@ -157,6 +158,7 @@ async function serverStart() {
       case 'claude-code':
         router.registerAdapter(new ClaudeCodeAdapter({
           command: agentCfg.command,
+          args: agentCfg.args,
           timeout: agentCfg.timeout,
           env: agentCfg.env,
         }))
@@ -164,6 +166,7 @@ async function serverStart() {
       case 'opencode':
         router.registerAdapter(new OpenCodeAdapter({
           command: agentCfg.command,
+          args: agentCfg.args,
           timeout: agentCfg.timeout,
           model: (agentCfg as any).model,
           env: agentCfg.env,
