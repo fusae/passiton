@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   const config = loadConfig()
 
   // Init persistence
-  initDb()
+  initDb(undefined, { messageRetentionMs: config.policy.messageRetentionMs })
 
   // Build router with policy from config
   const router = new Router(config.policy)

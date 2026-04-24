@@ -8,15 +8,25 @@ import type { Session, Message, AgentRef, SessionStatus, SessionMode } from './t
 
 const DB_DIR = join(homedir(), '.turing')
 const DB_PATH = join(DB_DIR, 'turing.db')
+const DEFAULT_MESSAGE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+const MESSAGE_GC_INTERVAL_MS = 60 * 60 * 1000
 
 let db: Database.Database
+let messageRetentionMs = DEFAULT_MESSAGE_RETENTION_MS
+let lastMessageGcAt = 0
 
-export function initDb(dbPath = DB_PATH): void {
+export function initDb(
+  dbPath = DB_PATH,
+  options?: { messageRetentionMs?: number }
+): void {
   mkdirSync(join(homedir(), '.turing'), { recursive: true })
   db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  messageRetentionMs = options?.messageRetentionMs ?? DEFAULT_MESSAGE_RETENTION_MS
+  lastMessageGcAt = 0
   createTables()
+  pruneExpiredMessages()
 }
 
 export function closeDb(): void {
@@ -184,6 +194,7 @@ export function addMessage(msg: Message): Message {
     INSERT INTO messages (id, session_id, from_agent, content, timestamp, round)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(msg.id, msg.sessionId, msg.from, msg.content, msg.timestamp, msg.round)
+  maybeRunMessageGc(msg.timestamp)
   return msg
 }
 
@@ -192,4 +203,18 @@ export function getMessages(sessionId: string): Message[] {
     'SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC'
   ).all(sessionId) as Record<string, unknown>[]
   return rows.map(rowToMessage)
+}
+
+export function pruneExpiredMessages(now = Date.now()): number {
+  if (messageRetentionMs <= 0) return 0
+  const cutoff = now - messageRetentionMs
+  const result = db.prepare('DELETE FROM messages WHERE timestamp < ?').run(cutoff)
+  lastMessageGcAt = now
+  return result.changes
+}
+
+function maybeRunMessageGc(now: number): void {
+  if (messageRetentionMs <= 0) return
+  if (now - lastMessageGcAt < MESSAGE_GC_INTERVAL_MS) return
+  pruneExpiredMessages(now)
 }

@@ -37,6 +37,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   policy: {
     maxRounds: 20,
     messageTimeout: 300_000,
+    messageRetentionMs: 30 * 24 * 60 * 60 * 1000,
     sessionTimeout: 7_200_000,
     retries: 1,
   },
@@ -66,6 +67,7 @@ function validateConfig(config: AppConfig): AppConfig {
   assertPositiveInt(config.server.port, 'server.port')
   assertPositiveInt(config.policy.maxRounds, 'policy.maxRounds')
   assertPositiveInt(config.policy.messageTimeout, 'policy.messageTimeout')
+  assertNonNegativeInt(config.policy.messageRetentionMs, 'policy.messageRetentionMs')
   assertPositiveInt(config.policy.sessionTimeout, 'policy.sessionTimeout')
   assertNonNegativeInt(config.policy.retries, 'policy.retries')
 

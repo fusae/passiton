@@ -75,3 +75,17 @@ node dist/index.js
 - `POST /api/sessions/:id/nudge`
 
 完整说明见 [docs/README.md](/path/to/project/docs/README.md)。
+
+## 数据保留
+
+消息默认保留 30 天，启动时和运行中会自动清理过期消息。
+
+```json
+{
+  "policy": {
+    "messageRetentionMs": 2592000000
+  }
+}
+```
+
+设为 `0` 可关闭消息 GC。

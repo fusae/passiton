@@ -141,7 +141,7 @@ async function serverStart() {
   const { createServer } = await import('./server.js')
   const { installGracefulShutdown } = await import('./shutdown.js')
 
-  initDb()
+  initDb(undefined, { messageRetentionMs: config.policy.messageRetentionMs })
   const router = new Router(config.policy)
   registerConfiguredAdapters(router, config.agents)
 
