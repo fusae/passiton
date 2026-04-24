@@ -18,6 +18,7 @@ export interface Session {
     to: AgentRef;
     status: SessionStatus;
     mode: SessionMode;
+    nextTurn: 'from' | 'to';
     maxRounds: number;
     currentRound: number;
     approveMode: boolean;

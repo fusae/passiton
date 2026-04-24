@@ -10,12 +10,13 @@ export declare function createSession(params: {
         from: string;
         to: string;
     };
+    nextTurn?: 'from' | 'to';
     maxRounds?: number;
     approveMode?: boolean;
     cwd?: string;
 }): Session;
 export declare function getSession(id: string): Session | undefined;
-export declare function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode'>>): Session;
+export declare function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'nextTurn'>>): Session;
 export declare function listSessions(filter?: {
     status?: SessionStatus;
 }): Session[];

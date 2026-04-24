@@ -11,11 +11,14 @@ import {
 } from './policy.js'
 import { generateSystemPrompts } from './prompts.js'
 
+const MAX_HISTORY_MESSAGES = 20
+
 export class Router extends EventEmitter {
   private adapters = new Map<string, Adapter>()
   private policy: PolicyConfig
   // Track in-flight sessions so runSession loops can be cancelled
   private runningLoops = new Set<string>()
+  private runEpochs = new Map<string, number>()
 
   constructor(policy: Partial<PolicyConfig> = {}) {
     super()
@@ -66,6 +69,7 @@ export class Router extends EventEmitter {
       mode,
       context: params.context,
       systemPrompts,
+      nextTurn: 'to',
       maxRounds: params.maxRounds ?? this.policy.maxRounds,
       approveMode: params.approveMode ?? false,
       cwd: params.cwd,
@@ -81,7 +85,7 @@ export class Router extends EventEmitter {
 
     // Kick off the run loop (non-blocking)
     setImmediate(() => {
-      this.runSession(session.id, params.initialPrompt).catch((err) => {
+      this.runSession(session.id, params.initialPrompt, this.nextRunEpoch(session.id)).catch((err) => {
         console.error(`[router] runSession error for ${session.id}:`, err)
         this.markError(session.id)
       })
@@ -92,6 +96,7 @@ export class Router extends EventEmitter {
 
   async pauseSession(id: string): Promise<Session> {
     this.runningLoops.delete(id)
+    this.nextRunEpoch(id)
     const session = state.updateSession(id, { status: 'paused' })
     this.emit('event', { type: 'session:paused', payload: session } satisfies WsEvent)
     return session
@@ -112,9 +117,10 @@ export class Router extends EventEmitter {
     })
 
     this.emit('event', { type: 'session:updated', payload: updated } satisfies WsEvent)
+    const epoch = this.nextRunEpoch(id)
 
     setImmediate(() => {
-      this.runSession(id, lastMessage.content).catch((err) => {
+      this.runSession(id, lastMessage.content, epoch).catch((err) => {
         console.error(`[router] resumeSession error for ${id}:`, err)
         this.markError(id)
       })
@@ -174,15 +180,16 @@ export class Router extends EventEmitter {
    * Run rounds until done / paused / error.
    * firstMessage is the content to send to `to` in the first round.
    */
-  async runSession(sessionId: string, firstMessage: string): Promise<void> {
+  async runSession(sessionId: string, firstMessage: string, epoch: number): Promise<void> {
     this.runningLoops.add(sessionId)
 
-    let nextMessageForTo = firstMessage
+    let nextMessage = firstMessage
 
     // eslint-disable-next-line no-constant-condition
     while (true) {
       // Check if we've been cancelled
       if (!this.runningLoops.has(sessionId)) break
+      if (this.runEpochs.get(sessionId) !== epoch) break
 
       const session = state.getSession(sessionId)
       if (!session) break
@@ -206,13 +213,13 @@ export class Router extends EventEmitter {
       }
 
       try {
-        const result = await this.processRound(sessionId, nextMessageForTo)
+        const result = await this.processTurn(sessionId, nextMessage, epoch)
         if (result.done) {
           const updated = state.updateSession(sessionId, { status: 'done' })
           this.emit('event', { type: 'session:done', payload: updated } satisfies WsEvent)
           break
         }
-        nextMessageForTo = result.nextMessage
+        nextMessage = result.nextMessage
       } catch (err) {
         console.error(`[router] round error session ${sessionId}:`, err)
         this.markError(sessionId)
@@ -224,50 +231,44 @@ export class Router extends EventEmitter {
   }
 
   /**
-   * Execute one full round: send to `to`, get response, send to `from`, get response.
-   * Returns { done, nextMessage } where nextMessage feeds the next round's `to`.
+   * Execute one message turn. `session.nextTurn` decides who should receive the
+   * next message, so pause/resume can safely continue mid-round.
    */
-  private async processRound(
+  private async processTurn(
     sessionId: string,
-    messageForTo: string
+    message: string,
+    epoch: number
   ): Promise<{ done: boolean; nextMessage: string }> {
     const session = state.getSession(sessionId)!
-    const round = session.currentRound + 1
+    const recipient = session.nextTurn
+    const target = recipient === 'to' ? session.to : session.from
+    const round = recipient === 'to' ? session.currentRound + 1 : session.currentRound
+    const adapter = this.adapters.get(target.adapter)
 
-    const toAdapter = this.adapters.get(session.to.adapter)
-    const fromAdapter = this.adapters.get(session.from.adapter)
+    if (!adapter) throw new Error(`Adapter not found: ${target.adapter}`)
 
-    if (!toAdapter) throw new Error(`Adapter not found: ${session.to.adapter}`)
-    if (!fromAdapter) throw new Error(`Adapter not found: ${session.from.adapter}`)
-
-    // Build conversation history and send opts for `to` agent
-    const toOpts = this.buildSendOpts(session, 'to')
-
-    // Send to `to` agent with system prompt + history
-    const toResponse = await this.callWithRetry(toAdapter, session, messageForTo, toOpts)
-    this.recordMessage(sessionId, session.to.adapter, toResponse, round)
-    state.updateSession(sessionId, { currentRound: round })
-
-    // Always let `from` respond — even if `to` said [DONE], let the initiator decide
-    // whether the task is actually complete.
-    if (!this.runningLoops.has(sessionId)) {
-      return { done: false, nextMessage: toResponse }
+    const opts = this.buildSendOpts(session, recipient)
+    const response = await this.callWithRetry(adapter, session, message, opts)
+    if (this.runEpochs.get(sessionId) !== epoch || !this.runningLoops.has(sessionId)) {
+      return { done: false, nextMessage: message }
     }
 
-    // Build send opts for `from` agent
-    const fromOpts = this.buildSendOpts(session, 'from')
+    this.recordMessage(sessionId, target.adapter, response, round)
 
-    const fromResponse = await this.callWithRetry(fromAdapter, session, toResponse, fromOpts)
-    this.recordMessage(sessionId, session.from.adapter, fromResponse, round)
-
-    // The final speaker in a round is `from`, so only end the session when that
-    // response confirms completion. This prevents `to` from terminating the
-    // session before `from` can reject the result and continue the task.
-    if (detectCompletion(fromResponse)) {
-      return { done: true, nextMessage: fromResponse }
+    if (recipient === 'to') {
+      state.updateSession(sessionId, {
+        currentRound: round,
+        nextTurn: 'from',
+      })
+      return { done: false, nextMessage: response }
     }
 
-    return { done: false, nextMessage: fromResponse }
+    state.updateSession(sessionId, { nextTurn: 'to' })
+    if (detectCompletion(response)) {
+      return { done: true, nextMessage: response }
+    }
+
+    return { done: false, nextMessage: response }
   }
 
   /**
@@ -276,7 +277,7 @@ export class Router extends EventEmitter {
    */
   private buildSendOpts(session: Session, perspective: 'from' | 'to'): AdapterSendOpts {
     const systemPrompt = session.systemPrompts?.[perspective]
-    const messages = state.getMessages(session.id)
+    const messages = state.getMessages(session.id).slice(-MAX_HISTORY_MESSAGES)
 
     // Build history from the perspective of this agent
     // Messages from this agent are 'assistant', messages from the other agent (or human) are 'user'
@@ -330,6 +331,12 @@ export class Router extends EventEmitter {
       const session = state.updateSession(sessionId, { status: 'error' })
       this.emit('event', { type: 'session:error', payload: session } satisfies WsEvent)
     } catch (_) { /* best-effort */ }
+  }
+
+  private nextRunEpoch(sessionId: string): number {
+    const next = (this.runEpochs.get(sessionId) ?? 0) + 1
+    this.runEpochs.set(sessionId, next)
+    return next
   }
 }
 

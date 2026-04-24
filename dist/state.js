@@ -23,6 +23,7 @@ function createTables() {
       to_label     TEXT,
       status       TEXT NOT NULL DEFAULT 'active',
       mode         TEXT NOT NULL DEFAULT 'freeform',
+      next_turn    TEXT NOT NULL DEFAULT 'to',
       max_rounds   INTEGER NOT NULL DEFAULT 20,
       current_round INTEGER NOT NULL DEFAULT 0,
       approve_mode INTEGER NOT NULL DEFAULT 0,
@@ -58,6 +59,10 @@ function createTables() {
         db.exec(`ALTER TABLE sessions ADD COLUMN system_prompts TEXT`);
     }
     catch { /* column already exists */ }
+    try {
+        db.exec(`ALTER TABLE sessions ADD COLUMN next_turn TEXT NOT NULL DEFAULT 'to'`);
+    }
+    catch { /* column already exists */ }
 }
 // ── Sessions ──────────────────────────────────────────────────────────────────
 function rowToSession(row) {
@@ -74,6 +79,7 @@ function rowToSession(row) {
         to: { adapter: row.to_adapter, label: row.to_label },
         status: row.status,
         mode: row.mode || 'freeform',
+        nextTurn: row.next_turn || 'to',
         maxRounds: row.max_rounds,
         currentRound: row.current_round,
         approveMode: Boolean(row.approve_mode),
@@ -88,11 +94,11 @@ export function createSession(params) {
     const now = Date.now();
     const stmt = db.prepare(`
     INSERT INTO sessions (id, from_adapter, from_label, to_adapter, to_label,
-      status, mode, max_rounds, current_round, approve_mode, cwd, context, system_prompts,
+      status, mode, next_turn, max_rounds, current_round, approve_mode, cwd, context, system_prompts,
       created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 0, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
   `);
-    stmt.run(params.id, params.from.adapter, params.from.label ?? null, params.to.adapter, params.to.label ?? null, params.mode ?? 'freeform', params.maxRounds ?? 20, params.approveMode ? 1 : 0, params.cwd ?? null, params.context ?? null, params.systemPrompts ? JSON.stringify(params.systemPrompts) : null, now, now);
+    stmt.run(params.id, params.from.adapter, params.from.label ?? null, params.to.adapter, params.to.label ?? null, params.mode ?? 'freeform', params.nextTurn ?? 'to', params.maxRounds ?? 20, params.approveMode ? 1 : 0, params.cwd ?? null, params.context ?? null, params.systemPrompts ? JSON.stringify(params.systemPrompts) : null, now, now);
     return getSession(params.id);
 }
 export function getSession(id) {
@@ -105,6 +111,10 @@ export function updateSession(id, updates) {
     if (updates.status !== undefined) {
         fields.push('status = ?');
         values.push(updates.status);
+    }
+    if (updates.nextTurn !== undefined) {
+        fields.push('next_turn = ?');
+        values.push(updates.nextTurn);
     }
     if (updates.currentRound !== undefined) {
         fields.push('current_round = ?');

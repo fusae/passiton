@@ -4,11 +4,13 @@ import { v4 as uuidv4 } from 'uuid';
 import * as state from './state.js';
 import { checkPreRound, detectCompletion, DEFAULT_POLICY, } from './policy.js';
 import { generateSystemPrompts } from './prompts.js';
+const MAX_HISTORY_MESSAGES = 20;
 export class Router extends EventEmitter {
     adapters = new Map();
     policy;
     // Track in-flight sessions so runSession loops can be cancelled
     runningLoops = new Set();
+    runEpochs = new Map();
     constructor(policy = {}) {
         super();
         this.policy = { ...DEFAULT_POLICY, ...policy };
@@ -35,6 +37,7 @@ export class Router extends EventEmitter {
             mode,
             context: params.context,
             systemPrompts,
+            nextTurn: 'to',
             maxRounds: params.maxRounds ?? this.policy.maxRounds,
             approveMode: params.approveMode ?? false,
             cwd: params.cwd,
@@ -47,7 +50,7 @@ export class Router extends EventEmitter {
         });
         // Kick off the run loop (non-blocking)
         setImmediate(() => {
-            this.runSession(session.id, params.initialPrompt).catch((err) => {
+            this.runSession(session.id, params.initialPrompt, this.nextRunEpoch(session.id)).catch((err) => {
                 console.error(`[router] runSession error for ${session.id}:`, err);
                 this.markError(session.id);
             });
@@ -56,6 +59,7 @@ export class Router extends EventEmitter {
     }
     async pauseSession(id) {
         this.runningLoops.delete(id);
+        this.nextRunEpoch(id);
         const session = state.updateSession(id, { status: 'paused' });
         this.emit('event', { type: 'session:paused', payload: session });
         return session;
@@ -75,8 +79,9 @@ export class Router extends EventEmitter {
             ...(extraRounds !== undefined ? { maxRounds: session.maxRounds + extraRounds } : {}),
         });
         this.emit('event', { type: 'session:updated', payload: updated });
+        const epoch = this.nextRunEpoch(id);
         setImmediate(() => {
-            this.runSession(id, lastMessage.content).catch((err) => {
+            this.runSession(id, lastMessage.content, epoch).catch((err) => {
                 console.error(`[router] resumeSession error for ${id}:`, err);
                 this.markError(id);
             });
@@ -125,13 +130,15 @@ export class Router extends EventEmitter {
      * Run rounds until done / paused / error.
      * firstMessage is the content to send to `to` in the first round.
      */
-    async runSession(sessionId, firstMessage) {
+    async runSession(sessionId, firstMessage, epoch) {
         this.runningLoops.add(sessionId);
-        let nextMessageForTo = firstMessage;
+        let nextMessage = firstMessage;
         // eslint-disable-next-line no-constant-condition
         while (true) {
             // Check if we've been cancelled
             if (!this.runningLoops.has(sessionId))
+                break;
+            if (this.runEpochs.get(sessionId) !== epoch)
                 break;
             const session = state.getSession(sessionId);
             if (!session)
@@ -154,13 +161,13 @@ export class Router extends EventEmitter {
                 break;
             }
             try {
-                const result = await this.processRound(sessionId, nextMessageForTo);
+                const result = await this.processTurn(sessionId, nextMessage, epoch);
                 if (result.done) {
                     const updated = state.updateSession(sessionId, { status: 'done' });
                     this.emit('event', { type: 'session:done', payload: updated });
                     break;
                 }
-                nextMessageForTo = result.nextMessage;
+                nextMessage = result.nextMessage;
             }
             catch (err) {
                 console.error(`[router] round error session ${sessionId}:`, err);
@@ -171,40 +178,35 @@ export class Router extends EventEmitter {
         this.runningLoops.delete(sessionId);
     }
     /**
-     * Execute one full round: send to `to`, get response, send to `from`, get response.
-     * Returns { done, nextMessage } where nextMessage feeds the next round's `to`.
+     * Execute one message turn. `session.nextTurn` decides who should receive the
+     * next message, so pause/resume can safely continue mid-round.
      */
-    async processRound(sessionId, messageForTo) {
+    async processTurn(sessionId, message, epoch) {
         const session = state.getSession(sessionId);
-        const round = session.currentRound + 1;
-        const toAdapter = this.adapters.get(session.to.adapter);
-        const fromAdapter = this.adapters.get(session.from.adapter);
-        if (!toAdapter)
-            throw new Error(`Adapter not found: ${session.to.adapter}`);
-        if (!fromAdapter)
-            throw new Error(`Adapter not found: ${session.from.adapter}`);
-        // Build conversation history and send opts for `to` agent
-        const toOpts = this.buildSendOpts(session, 'to');
-        // Send to `to` agent with system prompt + history
-        const toResponse = await this.callWithRetry(toAdapter, session, messageForTo, toOpts);
-        this.recordMessage(sessionId, session.to.adapter, toResponse, round);
-        state.updateSession(sessionId, { currentRound: round });
-        // Always let `from` respond — even if `to` said [DONE], let the initiator decide
-        // whether the task is actually complete.
-        if (!this.runningLoops.has(sessionId)) {
-            return { done: false, nextMessage: toResponse };
+        const recipient = session.nextTurn;
+        const target = recipient === 'to' ? session.to : session.from;
+        const round = recipient === 'to' ? session.currentRound + 1 : session.currentRound;
+        const adapter = this.adapters.get(target.adapter);
+        if (!adapter)
+            throw new Error(`Adapter not found: ${target.adapter}`);
+        const opts = this.buildSendOpts(session, recipient);
+        const response = await this.callWithRetry(adapter, session, message, opts);
+        if (this.runEpochs.get(sessionId) !== epoch || !this.runningLoops.has(sessionId)) {
+            return { done: false, nextMessage: message };
         }
-        // Build send opts for `from` agent
-        const fromOpts = this.buildSendOpts(session, 'from');
-        const fromResponse = await this.callWithRetry(fromAdapter, session, toResponse, fromOpts);
-        this.recordMessage(sessionId, session.from.adapter, fromResponse, round);
-        // The final speaker in a round is `from`, so only end the session when that
-        // response confirms completion. This prevents `to` from terminating the
-        // session before `from` can reject the result and continue the task.
-        if (detectCompletion(fromResponse)) {
-            return { done: true, nextMessage: fromResponse };
+        this.recordMessage(sessionId, target.adapter, response, round);
+        if (recipient === 'to') {
+            state.updateSession(sessionId, {
+                currentRound: round,
+                nextTurn: 'from',
+            });
+            return { done: false, nextMessage: response };
         }
-        return { done: false, nextMessage: fromResponse };
+        state.updateSession(sessionId, { nextTurn: 'to' });
+        if (detectCompletion(response)) {
+            return { done: true, nextMessage: response };
+        }
+        return { done: false, nextMessage: response };
     }
     /**
      * Build AdapterSendOpts with system prompt and conversation history.
@@ -212,7 +214,7 @@ export class Router extends EventEmitter {
      */
     buildSendOpts(session, perspective) {
         const systemPrompt = session.systemPrompts?.[perspective];
-        const messages = state.getMessages(session.id);
+        const messages = state.getMessages(session.id).slice(-MAX_HISTORY_MESSAGES);
         // Build history from the perspective of this agent
         // Messages from this agent are 'assistant', messages from the other agent (or human) are 'user'
         const selfAdapter = perspective === 'from' ? session.from.adapter : session.to.adapter;
@@ -262,6 +264,11 @@ export class Router extends EventEmitter {
             this.emit('event', { type: 'session:error', payload: session });
         }
         catch (_) { /* best-effort */ }
+    }
+    nextRunEpoch(sessionId) {
+        const next = (this.runEpochs.get(sessionId) ?? 0) + 1;
+        this.runEpochs.set(sessionId, next);
+        return next;
     }
 }
 function sleep(ms) {

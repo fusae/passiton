@@ -4,6 +4,7 @@ export declare class Router extends EventEmitter {
     private adapters;
     private policy;
     private runningLoops;
+    private runEpochs;
     constructor(policy?: Partial<PolicyConfig>);
     registerAdapter(adapter: Adapter): void;
     getAdapter(name: string): Adapter | undefined;
@@ -32,12 +33,12 @@ export declare class Router extends EventEmitter {
      * Run rounds until done / paused / error.
      * firstMessage is the content to send to `to` in the first round.
      */
-    runSession(sessionId: string, firstMessage: string): Promise<void>;
+    runSession(sessionId: string, firstMessage: string, epoch: number): Promise<void>;
     /**
-     * Execute one full round: send to `to`, get response, send to `from`, get response.
-     * Returns { done, nextMessage } where nextMessage feeds the next round's `to`.
+     * Execute one message turn. `session.nextTurn` decides who should receive the
+     * next message, so pause/resume can safely continue mid-round.
      */
-    private processRound;
+    private processTurn;
     /**
      * Build AdapterSendOpts with system prompt and conversation history.
      * `perspective` determines which agent we're building for.
@@ -46,5 +47,6 @@ export declare class Router extends EventEmitter {
     private callWithRetry;
     private recordMessage;
     private markError;
+    private nextRunEpoch;
 }
 //# sourceMappingURL=router.d.ts.map
