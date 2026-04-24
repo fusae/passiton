@@ -40,6 +40,11 @@ export const DEFAULT_CONFIG: AppConfig = {
 }
 
 export function loadConfig(): AppConfig {
+  const merged = readConfig()
+  return validateConfig(merged)
+}
+
+function readConfig(): AppConfig {
   if (!existsSync(CONFIG_PATH)) {
     return DEFAULT_CONFIG
   }
@@ -52,6 +57,40 @@ export function loadConfig(): AppConfig {
     console.warn(`[config] failed to load ${CONFIG_PATH}:`, err)
     return DEFAULT_CONFIG
   }
+}
+
+function validateConfig(config: AppConfig): AppConfig {
+  assertPositiveInt(config.server.port, 'server.port')
+  assertPositiveInt(config.policy.maxRounds, 'policy.maxRounds')
+  assertPositiveInt(config.policy.messageTimeout, 'policy.messageTimeout')
+  assertPositiveInt(config.policy.sessionTimeout, 'policy.sessionTimeout')
+  assertNonNegativeInt(config.policy.retries, 'policy.retries')
+
+  if (!isPlainObject(config.agents) || Object.keys(config.agents).length === 0) {
+    throw new Error('[config] "agents" must be a non-empty object')
+  }
+
+  for (const [name, agent] of Object.entries(config.agents)) {
+    assertNonEmptyString(agent.adapter, `agents.${name}.adapter`)
+    assertNonEmptyString(agent.command, `agents.${name}.command`)
+    assertStringArray(agent.args, `agents.${name}.args`)
+    assertPositiveInt(agent.timeout, `agents.${name}.timeout`)
+
+    if (agent.model !== undefined) {
+      assertNonEmptyString(agent.model, `agents.${name}.model`)
+    }
+
+    if (agent.env !== undefined) {
+      if (!isPlainObject(agent.env)) {
+        throw new Error(`[config] "agents.${name}.env" must be an object`)
+      }
+      for (const [envKey, envValue] of Object.entries(agent.env)) {
+        assertNonEmptyString(envValue, `agents.${name}.env.${envKey}`)
+      }
+    }
+  }
+
+  return config
 }
 
 function deepMerge(base: unknown, override: unknown): unknown {
@@ -67,4 +106,28 @@ function deepMerge(base: unknown, override: unknown): unknown {
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function assertNonEmptyString(value: unknown, field: string): asserts value is string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`[config] "${field}" must be a non-empty string`)
+  }
+}
+
+function assertPositiveInt(value: unknown, field: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new Error(`[config] "${field}" must be a positive integer`)
+  }
+}
+
+function assertNonNegativeInt(value: unknown, field: string): asserts value is number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new Error(`[config] "${field}" must be a non-negative integer`)
+  }
+}
+
+function assertStringArray(value: unknown, field: string): asserts value is string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item === '')) {
+    throw new Error(`[config] "${field}" must be a string array`)
+  }
 }

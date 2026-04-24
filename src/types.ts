@@ -70,6 +70,7 @@ export interface AgentConfig {
   command: string
   args: string[]
   timeout: number
+  model?: string
   env?: Record<string, string>
 }
 
