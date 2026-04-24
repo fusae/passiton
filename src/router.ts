@@ -12,6 +12,9 @@ import {
 import { generateSystemPrompts } from './prompts.js'
 
 const MAX_HISTORY_MESSAGES = 20
+const DISCUSS_MIN_ROUNDS = 3
+const DISCUSS_CONVERGENCE_ROUNDS = 2
+const DISCUSS_MESSAGES_PER_ROUND = 2
 
 export class Router extends EventEmitter {
   private adapters = new Map<string, Adapter>()
@@ -264,7 +267,7 @@ export class Router extends EventEmitter {
     }
 
     state.updateSession(sessionId, { nextTurn: 'to' })
-    if (detectCompletion(response)) {
+    if (this.shouldCompleteSession(sessionId, session, response)) {
       return { done: true, nextMessage: response }
     }
 
@@ -337,6 +340,63 @@ export class Router extends EventEmitter {
     const next = (this.runEpochs.get(sessionId) ?? 0) + 1
     this.runEpochs.set(sessionId, next)
     return next
+  }
+
+  private shouldCompleteSession(sessionId: string, session: Session, response: string): boolean {
+    if (!detectCompletion(response)) return false
+    if (session.mode !== 'discuss') return true
+    if (session.currentRound < DISCUSS_MIN_ROUNDS) return false
+    return this.hasDiscussConverged(sessionId)
+  }
+
+  private hasDiscussConverged(sessionId: string): boolean {
+    const requiredMessages = DISCUSS_CONVERGENCE_ROUNDS * DISCUSS_MESSAGES_PER_ROUND
+    const recentAgentMessages = state.getMessages(sessionId)
+      .filter((msg) => msg.from !== 'human' && msg.round > 0)
+      .slice(-requiredMessages)
+
+    if (recentAgentMessages.length < requiredMessages) return false
+    return recentAgentMessages.every((msg) => !this.hasDiscussNewPoints(msg.content))
+  }
+
+  private hasDiscussNewPoints(content: string): boolean {
+    const section = this.extractDiscussSection(content, 'new points')
+    if (!section) return true
+
+    const lines = section
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+
+    if (lines.length === 0) return true
+
+    return lines.some((line) => {
+      const normalized = line
+        .replace(/^[-*•\d.)\s]+/, '')
+        .trim()
+        .toLowerCase()
+      return !['none', 'none.', 'no new points', 'no new points.', 'n/a', 'na'].includes(normalized)
+    })
+  }
+
+  private extractDiscussSection(content: string, heading: string): string {
+    const lines = content.split('\n')
+    const startIndex = lines.findIndex((line) => line.trim().toLowerCase().startsWith(`${heading}:`))
+    if (startIndex === -1) return ''
+
+    const collected: string[] = []
+    for (let i = startIndex + 1; i < lines.length; i += 1) {
+      const trimmed = lines[i].trim()
+      if (
+        /^response:/i.test(trimmed) ||
+        /^new points:/i.test(trimmed) ||
+        /^challenge:/i.test(trimmed)
+      ) {
+        break
+      }
+      collected.push(lines[i])
+    }
+    return collected.join('\n').trim()
   }
 }
 

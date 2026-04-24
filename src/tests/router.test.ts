@@ -141,3 +141,53 @@ test('history passed to adapters is capped at 20 messages', async () => {
     assert.equal(historyLength, 20)
   })
 })
+
+test('discuss mode ignores early done and waits for convergence', async () => {
+  await withTempDb(async () => {
+    let toCalls = 0
+    let fromCalls = 0
+    const router = new Router()
+
+    router.registerAdapter(new StubAdapter('codex', async () => {
+      fromCalls += 1
+      if (fromCalls === 1) return discussReply(['Fresh angle from planner'], true)
+      return discussReply([], true)
+    }))
+
+    router.registerAdapter(new StubAdapter('claude-code', async () => {
+      toCalls += 1
+      if (toCalls === 1) return discussReply(['Counterpoint from reviewer'])
+      return discussReply([])
+    }))
+
+    const session = router.startSession({
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      initialPrompt: 'Debate the trade-offs.',
+      mode: 'discuss',
+      maxRounds: 5,
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+    assert.equal(toCalls, 3)
+    assert.equal(fromCalls, 3)
+    assert.equal(state.getSession(session.id)?.currentRound, 3)
+  })
+})
+
+function discussReply(newPoints: string[], done = false): string {
+  const points = newPoints.length > 0
+    ? newPoints.map((point) => `- ${point}`).join('\n')
+    : '- None'
+
+  return [
+    'Response:',
+    '- Replying to the previous point.',
+    'New Points:',
+    points,
+    'Challenge:',
+    '- Why should the other side accept this?',
+    done ? '[DONE]' : '',
+  ].filter(Boolean).join('\n')
+}
