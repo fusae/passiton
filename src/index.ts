@@ -3,52 +3,25 @@
 import { loadConfig } from './config.js'
 import { initDb } from './state.js'
 import { Router } from './router.js'
-import { CodexAdapter } from './adapters/codex.js'
-import { ClaudeCodeAdapter } from './adapters/claude-code.js'
-import { OpenCodeAdapter } from './adapters/opencode.js'
+import { registerConfiguredAdapters } from './adapters/factory.js'
 import { createServer } from './server.js'
+import { installGracefulShutdown } from './shutdown.js'
 
 async function main(): Promise<void> {
   const config = loadConfig()
 
   // Init persistence
-  initDb()
+  initDb(undefined, { messageRetentionMs: config.policy.messageRetentionMs })
 
   // Build router with policy from config
   const router = new Router(config.policy)
 
   // Register adapters based on config
-  for (const [name, agentCfg] of Object.entries(config.agents)) {
-    switch (agentCfg.adapter) {
-      case 'codex':
-        router.registerAdapter(new CodexAdapter({
-          command: agentCfg.command,
-          timeout: agentCfg.timeout,
-          env: agentCfg.env,
-        }))
-        break
-      case 'claude-code':
-        router.registerAdapter(new ClaudeCodeAdapter({
-          command: agentCfg.command,
-          timeout: agentCfg.timeout,
-          env: agentCfg.env,
-        }))
-        break
-      case 'opencode':
-        router.registerAdapter(new OpenCodeAdapter({
-          command: agentCfg.command,
-          timeout: agentCfg.timeout,
-          model: (agentCfg as any).model,
-          env: agentCfg.env,
-        }))
-        break
-      default:
-        console.warn(`[init] unknown adapter type "${agentCfg.adapter}" for agent "${name}" — skipping`)
-    }
-  }
+  registerConfiguredAdapters(router, config.agents)
 
   // Start HTTP + WebSocket server
-  createServer(router, config.server.port)
+  const server = createServer(router, config.server.port)
+  installGracefulShutdown(server)
 }
 
 main().catch((err) => {

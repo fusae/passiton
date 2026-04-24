@@ -5,6 +5,7 @@ import type { Session, PolicyConfig, PolicyResult } from './types.js'
 export const DEFAULT_POLICY: PolicyConfig = {
   maxRounds: 20,
   messageTimeout: 5 * 60 * 1000,   // 5 minutes
+  messageRetentionMs: 30 * 24 * 60 * 60 * 1000, // 30 days
   sessionTimeout: 2 * 60 * 60 * 1000, // 2 hours
   retries: 1,
 }

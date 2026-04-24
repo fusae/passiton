@@ -137,44 +137,16 @@ async function serverStart() {
   console.log(`Starting Turing server at ${BASE} ...`)
   const { initDb } = await import('./state.js')
   const { Router } = await import('./router.js')
-  const { CodexAdapter } = await import('./adapters/codex.js')
-  const { ClaudeCodeAdapter } = await import('./adapters/claude-code.js')
-  const { OpenCodeAdapter } = await import('./adapters/opencode.js')
+  const { registerConfiguredAdapters } = await import('./adapters/factory.js')
   const { createServer } = await import('./server.js')
+  const { installGracefulShutdown } = await import('./shutdown.js')
 
-  initDb()
+  initDb(undefined, { messageRetentionMs: config.policy.messageRetentionMs })
   const router = new Router(config.policy)
+  registerConfiguredAdapters(router, config.agents)
 
-  for (const [name, agentCfg] of Object.entries(config.agents)) {
-    switch (agentCfg.adapter) {
-      case 'codex':
-        router.registerAdapter(new CodexAdapter({
-          command: agentCfg.command,
-          timeout: agentCfg.timeout,
-          env: agentCfg.env,
-        }))
-        break
-      case 'claude-code':
-        router.registerAdapter(new ClaudeCodeAdapter({
-          command: agentCfg.command,
-          timeout: agentCfg.timeout,
-          env: agentCfg.env,
-        }))
-        break
-      case 'opencode':
-        router.registerAdapter(new OpenCodeAdapter({
-          command: agentCfg.command,
-          timeout: agentCfg.timeout,
-          model: (agentCfg as any).model,
-          env: agentCfg.env,
-        }))
-        break
-      default:
-        console.warn(`[init] unknown adapter "${agentCfg.adapter}" for "${name}" — skipping`)
-    }
-  }
-
-  createServer(router, config.server.port)
+  const server = createServer(router, config.server.port)
+  installGracefulShutdown(server)
   // foreground — never exit
 }
 

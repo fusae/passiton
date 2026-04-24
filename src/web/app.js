@@ -36,6 +36,19 @@ async function init() {
   setInterval(loadAgents, 30_000)
   setupSideBtns()
   setupFilterBtns()
+  setupMobileMenu()
+  setupMarked()
+  setupMessageActions()
+}
+
+// ── Marked.js setup ───────────────────────────────────────────────────────────
+function setupMarked() {
+  if (typeof marked !== 'undefined') {
+    marked.setOptions({
+      breaks: true,
+      gfm: true,
+    })
+  }
 }
 
 // ── API helpers ───────────────────────────────────────────────────────────────
@@ -90,9 +103,13 @@ function renderSessionList() {
     sessionList.innerHTML = '<div class="session-empty">No sessions</div>'
     return
   }
-  sessionList.innerHTML = visible.map(s => `
+  sessionList.innerHTML = visible.map(s => {
+    const firstMsg = s.messages?.[0]?.content || s.initialPrompt || ''
+    const preview = firstMsg.slice(0, 60) + (firstMsg.length > 60 ? '…' : '')
+    return `
     <div class="session-item ${s.id === activeSessionId ? 'active' : ''}" data-id="${s.id}">
       <div class="session-agents">${agentLabel(s.from)} → ${agentLabel(s.to)}</div>
+      ${preview ? `<div class="session-preview">${escHtml(preview)}</div>` : ''}
       <div class="session-meta">
         <span class="badge ${s.status}">${s.status}</span>
         ${s.mode && s.mode !== 'freeform' ? `<span class="mode-chip">${s.mode}</span>` : ''}
@@ -100,11 +117,18 @@ function renderSessionList() {
         <span class="time-chip">${timeAgo(s.updatedAt)}</span>
       </div>
     </div>
-  `).join('')
+  `}).join('')
 
   sessionList.querySelectorAll('.session-item').forEach(el => {
-    el.addEventListener('click', () => selectSession(el.dataset.id))
+    el.addEventListener('click', () => {
+      selectSession(el.dataset.id)
+      closeMobileMenu()
+    })
   })
+
+  if (!activeSessionId && !emptyState && visible[0]?.id) {
+    selectSession(visible[0].id)
+  }
 }
 
 function agentLabel(ref) {
@@ -125,7 +149,9 @@ async function selectSession(id) {
 }
 
 function renderSessionView(session) {
-  emptyState.classList.add('hidden')
+  if (emptyState) {
+    emptyState.classList.add('hidden')
+  }
   sessionView.classList.remove('hidden')
 
   // Update side-btn labels to reflect actual agent names
@@ -164,49 +190,13 @@ function updateToolbar(session) {
 }
 
 function renderMessages(msgs, session) {
-  const fromName = agentLabel(session?.from)
-  const toName   = agentLabel(session?.to)
-
   let lastRound = -1
   messagesEl.innerHTML = msgs.map(m => {
-    let divider = ''
-    if (m.round !== lastRound && m.round > 0) {
-      divider = `<div class="round-divider"><span>Round ${m.round}</span></div>`
-      lastRound = m.round
-    }
-
-    const isHuman  = m.from === 'human'
-    const isFrom   = m.from === (session?.from?.adapter ?? '')
-    const isTo     = m.from === (session?.to?.adapter ?? '')
-
-    let side = 'left'
-    let bubbleClass = 'msg-agent-from'
-    let senderLabel = m.from
-
-    if (isHuman) {
-      bubbleClass = 'msg-human'
-      senderLabel = 'you'
-      side = 'center'
-    } else if (isFrom) {
-      side = 'left'
-      bubbleClass = 'msg-from'
-      senderLabel = fromName
-    } else if (isTo) {
-      side = 'right'
-      bubbleClass = 'msg-to'
-      senderLabel = toName
-    }
-
-    const ts = new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    return `${divider}<div class="msg-wrapper ${side}">
-      <div class="msg ${bubbleClass}">
-        <div class="msg-header">
-          <span class="msg-sender">${escHtml(senderLabel)}</span>
-          <span class="msg-time">${ts}</span>
-        </div>
-        <div class="msg-bubble"><pre>${escHtml(m.content)}</pre></div>
-      </div>
-    </div>`
+    const divider = m.round !== lastRound && m.round > 0
+      ? `<div class="round-divider"><span>Round ${m.round}</span></div>`
+      : ''
+    lastRound = m.round
+    return divider + buildMessageMarkup(m, session)
   }).join('')
   messagesEl.scrollTop = messagesEl.scrollHeight
 }
@@ -226,6 +216,10 @@ document.getElementById('btn-stop').addEventListener('click', async () => {
   if (!activeSessionId) return
   if (!confirm('Stop this session permanently?')) return
   await api(`/api/sessions/${activeSessionId}/stop`, 'POST')
+})
+
+document.getElementById('btn-export').addEventListener('click', () => {
+  exportSession()
 })
 
 // Rounds banner buttons
@@ -435,32 +429,6 @@ function handleWsEvent(evt) {
 
 // Append a single new message without re-rendering all (performance)
 function appendMessage(msg) {
-  const session = activeSession
-  const fromName = agentLabel(session?.from)
-  const toName   = agentLabel(session?.to)
-
-  const isHuman  = msg.from === 'human'
-  const isFrom   = msg.from === session?.from?.adapter
-  const isTo     = msg.from === session?.to?.adapter
-
-  let side = 'left'
-  let bubbleClass = 'msg-from'
-  let senderLabel = msg.from
-
-  if (isHuman) {
-    bubbleClass = 'msg-human'
-    senderLabel = 'you'
-    side = 'center'
-  } else if (isTo) {
-    side = 'right'
-    bubbleClass = 'msg-to'
-    senderLabel = toName
-  } else if (isFrom) {
-    side = 'left'
-    bubbleClass = 'msg-from'
-    senderLabel = fromName
-  }
-
   // Insert round divider if needed
   const prevMsg = currentMessages[currentMessages.length - 2]
   if (!prevMsg || prevMsg.round !== msg.round) {
@@ -470,19 +438,9 @@ function appendMessage(msg) {
     messagesEl.appendChild(div)
   }
 
-  const ts = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  const wrapper = document.createElement('div')
-  wrapper.className = `msg-wrapper ${side}`
-  wrapper.innerHTML = `
-    <div class="msg ${bubbleClass}">
-      <div class="msg-header">
-        <span class="msg-sender">${escHtml(senderLabel)}</span>
-        <span class="msg-time">${ts}</span>
-      </div>
-      <div class="msg-bubble"><pre>${escHtml(msg.content)}</pre></div>
-    </div>
-  `
-  messagesEl.appendChild(wrapper)
+  const temp = document.createElement('div')
+  temp.innerHTML = buildMessageMarkup(msg, activeSession)
+  messagesEl.appendChild(temp.firstElementChild)
   messagesEl.scrollTop = messagesEl.scrollHeight
 
   // Update rounds label
@@ -510,12 +468,231 @@ function escHtml(str) {
     .replace(/"/g, '&quot;')
 }
 
+function buildMessageMarkup(msg, session) {
+  const { side, bubbleClass, senderLabel } = getMessagePresentation(msg, session)
+  const avatarInitial = senderLabel.charAt(0).toUpperCase()
+  const renderedContent = renderMarkdown(msg.content)
+  return `<div class="msg-wrapper ${side}">
+    <div class="msg ${bubbleClass}">
+      <div class="msg-header">
+        <div class="msg-avatar">${escHtml(avatarInitial)}</div>
+        <span class="msg-sender">${escHtml(senderLabel)}</span>
+      </div>
+      <div class="msg-bubble">${renderedContent}</div>
+      <div class="msg-footer">
+        <span class="msg-time">${formatMessageTime(msg.timestamp)}</span>
+        <button
+          class="msg-copy-btn"
+          type="button"
+          data-message-id="${msg.id}"
+          title="Copy"
+          aria-label="Copy message"
+        >
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <rect x="5" y="2.5" width="8" height="10" rx="2"></rect>
+            <rect x="2.5" y="5.5" width="8" height="8" rx="2"></rect>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>`
+}
+
+function getMessagePresentation(msg, session) {
+  const fromName = agentLabel(session?.from)
+  const toName = agentLabel(session?.to)
+  const isHuman = msg.from === 'human'
+  const isFrom = msg.from === (session?.from?.adapter ?? '')
+  const isTo = msg.from === (session?.to?.adapter ?? '')
+
+  if (isHuman) {
+    return { side: 'center', bubbleClass: 'msg-human', senderLabel: 'you' }
+  }
+  if (isTo) {
+    return { side: 'right', bubbleClass: 'msg-to', senderLabel: toName }
+  }
+  if (isFrom) {
+    return { side: 'left', bubbleClass: 'msg-from', senderLabel: fromName }
+  }
+  return { side: 'left', bubbleClass: 'msg-from', senderLabel: msg.from }
+}
+
+function renderMarkdown(content) {
+  if (typeof marked === 'undefined') {
+    return `<pre>${escHtml(content)}</pre>`
+  }
+  try {
+    const html = marked.parse(content)
+    return `<div class="markdown-content">${sanitizeRenderedHtml(html, content)}</div>`
+  } catch (e) {
+    return `<pre>${escHtml(content)}</pre>`
+  }
+}
+
 function timeAgo(ts) {
   const diff = Date.now() - ts
   if (diff < 60_000)     return 'just now'
   if (diff < 3_600_000)  return `${Math.floor(diff / 60_000)}m ago`
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
   return new Date(ts).toLocaleDateString()
+}
+
+function formatMessageTime(ts) {
+  return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+function setupMessageActions() {
+  messagesEl.addEventListener('click', async (event) => {
+    const btn = event.target.closest('.msg-copy-btn')
+    if (!btn) return
+    const messageId = btn.dataset.messageId
+    const msg = currentMessages.find(item => item.id === messageId)
+    if (!msg) return
+    const ok = await copyText(msg.content)
+    btn.classList.toggle('copied', ok)
+    btn.title = ok ? 'Copied' : 'Copy failed'
+    setTimeout(() => {
+      btn.classList.remove('copied')
+      btn.title = 'Copy'
+    }, 1200)
+  })
+}
+
+async function copyText(content) {
+  try {
+    await navigator.clipboard.writeText(content)
+    return true
+  } catch {
+    const input = document.createElement('textarea')
+    input.value = content
+    input.setAttribute('readonly', '')
+    input.style.position = 'absolute'
+    input.style.left = '-9999px'
+    document.body.appendChild(input)
+    input.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(input)
+    return ok
+  }
+}
+
+function exportSession() {
+  if (!activeSession) return
+  const content = buildSessionExport(activeSession, currentMessages)
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `turing-session-${activeSession.id}.md`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function buildSessionExport(session, messages) {
+  const lines = [
+    `# ${agentLabel(session.from)} -> ${agentLabel(session.to)}`,
+    '',
+    `- Session ID: ${session.id}`,
+    `- Status: ${session.status}`,
+    `- Mode: ${session.mode}`,
+    `- Rounds: ${session.currentRound}/${session.maxRounds}`,
+    `- Exported At: ${new Date().toLocaleString()}`,
+    '',
+  ]
+
+  let lastRound = null
+  for (const msg of messages) {
+    if (msg.round !== lastRound) {
+      lines.push(`## Round ${msg.round}`)
+      lines.push('')
+      lastRound = msg.round
+    }
+    const sender = msg.from === 'human'
+      ? 'you'
+      : msg.from === session.from.adapter
+        ? agentLabel(session.from)
+        : msg.from === session.to.adapter
+          ? agentLabel(session.to)
+          : msg.from
+    lines.push(`### ${sender} · ${formatMessageTime(msg.timestamp)}`)
+    lines.push('')
+    lines.push(msg.content || '_empty_')
+    lines.push('')
+  }
+
+  return lines.join('\n')
+}
+
+function sanitizeRenderedHtml(html, fallbackText) {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META'])
+  let unsafeLinkFound = false
+
+  for (const node of template.content.querySelectorAll('*')) {
+    if (blockedTags.has(node.tagName)) {
+      node.remove()
+      continue
+    }
+    for (const attr of [...node.attributes]) {
+      const name = attr.name.toLowerCase()
+      const value = attr.value.trim()
+      if (name.startsWith('on')) {
+        node.removeAttribute(attr.name)
+        continue
+      }
+      if (name === 'href' || name === 'src') {
+        if (!isSafeUrl(value)) {
+          unsafeLinkFound = true
+          break
+        }
+        if (name === 'href') {
+          node.setAttribute('rel', 'noopener noreferrer nofollow')
+          node.setAttribute('target', '_blank')
+        }
+      }
+    }
+    if (unsafeLinkFound) break
+  }
+
+  if (unsafeLinkFound) {
+    return `<pre>${escHtml(fallbackText)}</pre>`
+  }
+  return template.innerHTML
+}
+
+function isSafeUrl(value) {
+  if (!value) return false
+  if (value.startsWith('#')) return true
+  try {
+    const url = new URL(value, window.location.origin)
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)
+  } catch {
+    return false
+  }
+}
+
+// ── Mobile menu ───────────────────────────────────────────────────────────────
+function setupMobileMenu() {
+  const menuBtn = document.getElementById('mobile-menu-btn')
+  const sidebar = document.getElementById('sidebar')
+  const overlay = document.getElementById('mobile-overlay')
+
+  menuBtn.addEventListener('click', () => {
+    sidebar.classList.add('mobile-open')
+    overlay.classList.add('active')
+  })
+
+  overlay.addEventListener('click', closeMobileMenu)
+}
+
+function closeMobileMenu() {
+  const sidebar = document.getElementById('sidebar')
+  const overlay = document.getElementById('mobile-overlay')
+  sidebar.classList.remove('mobile-open')
+  overlay.classList.remove('active')
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────

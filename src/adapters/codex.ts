@@ -1,13 +1,16 @@
 // Codex adapter — uses codex exec -p "prompt"
 
-import { spawn } from 'child_process'
 import type { Adapter } from './types.js'
 import type { Session, AdapterSendOpts } from '../types.js'
+import { resolveCommandArgs } from './command-args.js'
+import { buildPrompt, runCommand } from './shared.js'
 
-const DEFAULT_CODEX_PATH = 'codex'
+const DEFAULT_CODEX_PATH = process.env.TURING_CODEX_COMMAND ?? 'codex'
+const DEFAULT_CODEX_ARGS = ['exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', '{prompt}']
 
 export interface CodexAdapterConfig {
   command?: string
+  args?: string[]
   timeout?: number
   env?: Record<string, string>
 }
@@ -16,84 +19,44 @@ export class CodexAdapter implements Adapter {
   readonly name = 'codex'
   readonly config: Record<string, unknown>
   private command: string
+  private args: string[]
   private timeout: number
   private env: Record<string, string>
 
   constructor(cfg: CodexAdapterConfig = {}) {
     this.command = cfg.command ?? DEFAULT_CODEX_PATH
+    this.args = cfg.args ?? DEFAULT_CODEX_ARGS
     this.timeout = cfg.timeout ?? 300_000
     this.env = cfg.env ?? {}
-    this.config = { command: this.command, timeout: this.timeout }
+    this.config = { command: this.command, args: this.args, timeout: this.timeout }
   }
 
   async send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string> {
-    // Build the full prompt with system context and history
-    const fullMessage = this.buildPrompt(message, opts)
-    return this.run([this.command, 'exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', fullMessage], session.cwd)
-  }
-
-  private buildPrompt(message: string, opts?: AdapterSendOpts): string {
-    const parts: string[] = []
-    if (opts?.systemPrompt) {
-      parts.push(`[System Instructions]\n${opts.systemPrompt}\n`)
-    }
-    if (opts?.history && opts.history.length > 0) {
-      parts.push('[Conversation History]')
-      for (const msg of opts.history) {
-        const role = msg.role === 'assistant' ? 'You' : 'Other'
-        parts.push(`${role}: ${msg.content}`)
-      }
-      parts.push('')
-    }
-    parts.push(`[Current Message]\n${message}`)
-    return parts.join('\n')
+    const fullMessage = buildPrompt(message, opts)
+    return runCommand({
+      adapterName: this.name,
+      command: this.command,
+      args: resolveCommandArgs(this.args, fullMessage),
+      cwd: session.cwd,
+      env: this.env,
+      timeout: this.timeout,
+      stdinMode: 'pipe',
+    })
   }
 
   async healthCheck(): Promise<boolean> {
     try {
-      await this.run([this.command, '--version'])
+      await runCommand({
+        adapterName: this.name,
+        command: this.command,
+        args: ['--version'],
+        env: this.env,
+        timeout: this.timeout,
+        stdinMode: 'pipe',
+      })
       return true
     } catch {
       return false
     }
-  }
-
-  private run(args: string[], cwd?: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const [cmd, ...rest] = args
-      const proc = spawn(cmd, rest, {
-        cwd: cwd ?? process.cwd(),
-        env: { ...process.env, ...this.env },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-
-      // Close stdin immediately so Codex doesn't wait for input
-      proc.stdin?.end()
-
-      let stdout = ''
-      let stderr = ''
-
-      proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
-      proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
-
-      const timer = setTimeout(() => {
-        proc.kill('SIGTERM')
-        reject(new Error(`[codex] timed out after ${this.timeout}ms`))
-      }, this.timeout)
-
-      proc.on('close', (code) => {
-        clearTimeout(timer)
-        if (code === 0) {
-          resolve(stdout.trim())
-        } else {
-          reject(new Error(`[codex] exited with code ${code}: ${stderr.trim()}`))
-        }
-      })
-
-      proc.on('error', (err) => {
-        clearTimeout(timer)
-        reject(new Error(`[codex] spawn error: ${err.message}`))
-      })
-    })
   }
 }

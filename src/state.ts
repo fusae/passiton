@@ -8,15 +8,31 @@ import type { Session, Message, AgentRef, SessionStatus, SessionMode } from './t
 
 const DB_DIR = join(homedir(), '.turing')
 const DB_PATH = join(DB_DIR, 'turing.db')
+const DEFAULT_MESSAGE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
+const MESSAGE_GC_INTERVAL_MS = 60 * 60 * 1000
 
 let db: Database.Database
+let messageRetentionMs = DEFAULT_MESSAGE_RETENTION_MS
+let lastMessageGcAt = 0
 
-export function initDb(dbPath = DB_PATH): void {
+export function initDb(
+  dbPath = DB_PATH,
+  options?: { messageRetentionMs?: number }
+): void {
   mkdirSync(join(homedir(), '.turing'), { recursive: true })
   db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  messageRetentionMs = options?.messageRetentionMs ?? DEFAULT_MESSAGE_RETENTION_MS
+  lastMessageGcAt = 0
   createTables()
+  pruneExpiredMessages()
+}
+
+export function closeDb(): void {
+  if (db?.open) {
+    db.close()
+  }
 }
 
 function createTables(): void {
@@ -29,6 +45,7 @@ function createTables(): void {
       to_label     TEXT,
       status       TEXT NOT NULL DEFAULT 'active',
       mode         TEXT NOT NULL DEFAULT 'freeform',
+      next_turn    TEXT NOT NULL DEFAULT 'to',
       max_rounds   INTEGER NOT NULL DEFAULT 20,
       current_round INTEGER NOT NULL DEFAULT 0,
       approve_mode INTEGER NOT NULL DEFAULT 0,
@@ -62,6 +79,9 @@ function createTables(): void {
   try {
     db.exec(`ALTER TABLE sessions ADD COLUMN system_prompts TEXT`)
   } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN next_turn TEXT NOT NULL DEFAULT 'to'`)
+  } catch { /* column already exists */ }
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
@@ -77,6 +97,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     to: { adapter: row.to_adapter as string, label: row.to_label as string | undefined },
     status: row.status as SessionStatus,
     mode: (row.mode as SessionMode) || 'freeform',
+    nextTurn: (row.next_turn as 'from' | 'to') || 'to',
     maxRounds: row.max_rounds as number,
     currentRound: row.current_round as number,
     approveMode: Boolean(row.approve_mode),
@@ -95,6 +116,7 @@ export function createSession(params: {
   mode?: SessionMode
   context?: string
   systemPrompts?: { from: string; to: string }
+  nextTurn?: 'from' | 'to'
   maxRounds?: number
   approveMode?: boolean
   cwd?: string
@@ -102,9 +124,9 @@ export function createSession(params: {
   const now = Date.now()
   const stmt = db.prepare(`
     INSERT INTO sessions (id, from_adapter, from_label, to_adapter, to_label,
-      status, mode, max_rounds, current_round, approve_mode, cwd, context, system_prompts,
+      status, mode, next_turn, max_rounds, current_round, approve_mode, cwd, context, system_prompts,
       created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 0, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
   `)
   stmt.run(
     params.id,
@@ -113,6 +135,7 @@ export function createSession(params: {
     params.to.adapter,
     params.to.label ?? null,
     params.mode ?? 'freeform',
+    params.nextTurn ?? 'to',
     params.maxRounds ?? 20,
     params.approveMode ? 1 : 0,
     params.cwd ?? null,
@@ -129,11 +152,12 @@ export function getSession(id: string): Session | undefined {
   return row ? rowToSession(row) : undefined
 }
 
-export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode'>>): Session {
+export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'nextTurn'>>): Session {
   const fields: string[] = ['updated_at = ?']
   const values: unknown[] = [Date.now()]
 
   if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status) }
+  if (updates.nextTurn !== undefined) { fields.push('next_turn = ?'); values.push(updates.nextTurn) }
   if (updates.currentRound !== undefined) { fields.push('current_round = ?'); values.push(updates.currentRound) }
   if (updates.maxRounds !== undefined) { fields.push('max_rounds = ?'); values.push(updates.maxRounds) }
   if (updates.approveMode !== undefined) { fields.push('approve_mode = ?'); values.push(updates.approveMode ? 1 : 0) }
@@ -170,6 +194,7 @@ export function addMessage(msg: Message): Message {
     INSERT INTO messages (id, session_id, from_agent, content, timestamp, round)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(msg.id, msg.sessionId, msg.from, msg.content, msg.timestamp, msg.round)
+  maybeRunMessageGc(msg.timestamp)
   return msg
 }
 
@@ -178,4 +203,18 @@ export function getMessages(sessionId: string): Message[] {
     'SELECT * FROM messages WHERE session_id = ? ORDER BY timestamp ASC'
   ).all(sessionId) as Record<string, unknown>[]
   return rows.map(rowToMessage)
+}
+
+export function pruneExpiredMessages(now = Date.now()): number {
+  if (messageRetentionMs <= 0) return 0
+  const cutoff = now - messageRetentionMs
+  const result = db.prepare('DELETE FROM messages WHERE timestamp < ?').run(cutoff)
+  lastMessageGcAt = now
+  return result.changes
+}
+
+function maybeRunMessageGc(now: number): void {
+  if (messageRetentionMs <= 0) return
+  if (now - lastMessageGcAt < MESSAGE_GC_INTERVAL_MS) return
+  pruneExpiredMessages(now)
 }

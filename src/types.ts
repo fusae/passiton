@@ -25,6 +25,7 @@ export interface Session {
   to: AgentRef
   status: SessionStatus
   mode: SessionMode
+  nextTurn: 'from' | 'to'
   maxRounds: number
   currentRound: number
   approveMode: boolean
@@ -60,6 +61,7 @@ export interface AdapterSendOpts {
 export interface PolicyConfig {
   maxRounds: number
   messageTimeout: number   // ms, default 5 * 60 * 1000
+  messageRetentionMs: number // ms, default 30 days, 0 disables GC
   sessionTimeout: number   // ms, default 2 * 60 * 60 * 1000
   retries: number          // default 1
 }
@@ -70,6 +72,7 @@ export interface AgentConfig {
   command: string
   args: string[]
   timeout: number
+  model?: string
   env?: Record<string, string>
 }
 
