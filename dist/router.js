@@ -189,17 +189,19 @@ export class Router extends EventEmitter {
         const toResponse = await this.callWithRetry(toAdapter, session, messageForTo, toOpts);
         this.recordMessage(sessionId, session.to.adapter, toResponse, round);
         state.updateSession(sessionId, { currentRound: round });
-        const toWantsDone = detectCompletion(toResponse);
-        // Always let `from` respond — even if `to` said [DONE], give `from` a chance to wrap up
+        // Always let `from` respond — even if `to` said [DONE], let the initiator decide
+        // whether the task is actually complete.
         if (!this.runningLoops.has(sessionId)) {
-            return { done: toWantsDone, nextMessage: toResponse };
+            return { done: false, nextMessage: toResponse };
         }
         // Build send opts for `from` agent
         const fromOpts = this.buildSendOpts(session, 'from');
         const fromResponse = await this.callWithRetry(fromAdapter, session, toResponse, fromOpts);
         this.recordMessage(sessionId, session.from.adapter, fromResponse, round);
-        // Done if either side said [DONE]
-        if (toWantsDone || detectCompletion(fromResponse)) {
+        // The final speaker in a round is `from`, so only end the session when that
+        // response confirms completion. This prevents `to` from terminating the
+        // session before `from` can reject the result and continue the task.
+        if (detectCompletion(fromResponse)) {
             return { done: true, nextMessage: fromResponse };
         }
         return { done: false, nextMessage: fromResponse };
