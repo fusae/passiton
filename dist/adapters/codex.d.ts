@@ -15,8 +15,6 @@ export declare class CodexAdapter implements Adapter {
     private env;
     constructor(cfg?: CodexAdapterConfig);
     send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string>;
-    private buildPrompt;
     healthCheck(): Promise<boolean>;
-    private run;
 }
 //# sourceMappingURL=codex.d.ts.map

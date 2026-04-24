@@ -1,6 +1,6 @@
 // OpenCode adapter — uses opencode run "prompt" --dangerously-skip-permissions --format json
-import { spawn } from 'child_process';
 import { resolveCommandArgs } from './command-args.js';
+import { buildPrompt, runCommand } from './shared.js';
 const DEFAULT_OPENCODE_PATH = 'opencode';
 const DEFAULT_OPENCODE_ARGS = ['run', '{prompt}', '--dangerously-skip-permissions'];
 export class OpenCodeAdapter {
@@ -20,7 +20,7 @@ export class OpenCodeAdapter {
         this.config = { command: this.command, args: this.args, timeout: this.timeout, model: this.model };
     }
     async send(session, message, opts) {
-        const fullMessage = this.buildPrompt(message, opts);
+        const fullMessage = buildPrompt(message, opts);
         const args = resolveCommandArgs(this.args, fullMessage);
         if (this.model) {
             args.push('--model', this.model);
@@ -28,28 +28,27 @@ export class OpenCodeAdapter {
         if (session.cwd) {
             args.push('--dir', session.cwd);
         }
-        const raw = await this.run([this.command, ...args], session.cwd);
+        const raw = await runCommand({
+            adapterName: this.name,
+            command: this.command,
+            args,
+            cwd: session.cwd,
+            env: this.env,
+            timeout: this.timeout,
+            stdinMode: 'pipe',
+        });
         return this.extractText(raw);
-    }
-    buildPrompt(message, opts) {
-        const parts = [];
-        if (opts?.systemPrompt) {
-            parts.push(`[System Instructions]\n${opts.systemPrompt}\n`);
-        }
-        if (opts?.history && opts.history.length > 0) {
-            parts.push('[Conversation History]');
-            for (const msg of opts.history) {
-                const role = msg.role === 'assistant' ? 'You' : 'Other';
-                parts.push(`${role}: ${msg.content}`);
-            }
-            parts.push('');
-        }
-        parts.push(`[Current Message]\n${message}`);
-        return parts.join('\n');
     }
     async healthCheck() {
         try {
-            await this.run([this.command, '--version'], undefined, 10_000);
+            await runCommand({
+                adapterName: this.name,
+                command: this.command,
+                args: ['--version'],
+                env: this.env,
+                timeout: 10_000,
+                stdinMode: 'pipe',
+            });
             return true;
         }
         catch {
@@ -94,40 +93,6 @@ export class OpenCodeAdapter {
         }
         // If we found structured text, use it; otherwise return raw output
         return (lastText || raw).trim();
-    }
-    run(args, cwd, timeoutOverride) {
-        const timeout = timeoutOverride ?? this.timeout;
-        return new Promise((resolve, reject) => {
-            const [cmd, ...rest] = args;
-            const proc = spawn(cmd, rest, {
-                cwd: cwd ?? process.cwd(),
-                env: { ...process.env, ...this.env },
-                stdio: ['pipe', 'pipe', 'pipe'],
-            });
-            // Close stdin immediately
-            proc.stdin?.end();
-            let stdout = '';
-            let stderr = '';
-            proc.stdout.on('data', (d) => { stdout += d.toString(); });
-            proc.stderr.on('data', (d) => { stderr += d.toString(); });
-            const timer = setTimeout(() => {
-                proc.kill('SIGTERM');
-                reject(new Error(`[opencode] timed out after ${timeout}ms`));
-            }, timeout);
-            proc.on('close', (code) => {
-                clearTimeout(timer);
-                if (code === 0) {
-                    resolve(stdout.trim());
-                }
-                else {
-                    reject(new Error(`[opencode] exited with code ${code}: ${stderr.trim()}`));
-                }
-            });
-            proc.on('error', (err) => {
-                clearTimeout(timer);
-                reject(new Error(`[opencode] spawn error: ${err.message}`));
-            });
-        });
     }
 }
 //# sourceMappingURL=opencode.js.map

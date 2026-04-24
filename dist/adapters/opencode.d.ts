@@ -17,7 +17,6 @@ export declare class OpenCodeAdapter implements Adapter {
     private env;
     constructor(cfg?: OpenCodeAdapterConfig);
     send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string>;
-    private buildPrompt;
     healthCheck(): Promise<boolean>;
     /**
      * Extract assistant text from opencode output.
@@ -25,6 +24,5 @@ export declare class OpenCodeAdapter implements Adapter {
      * With --format json it outputs NDJSON events — we look for the last assistant text.
      */
     private extractText;
-    private run;
 }
 //# sourceMappingURL=opencode.d.ts.map

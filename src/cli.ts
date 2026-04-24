@@ -137,45 +137,12 @@ async function serverStart() {
   console.log(`Starting Turing server at ${BASE} ...`)
   const { initDb } = await import('./state.js')
   const { Router } = await import('./router.js')
-  const { CodexAdapter } = await import('./adapters/codex.js')
-  const { ClaudeCodeAdapter } = await import('./adapters/claude-code.js')
-  const { OpenCodeAdapter } = await import('./adapters/opencode.js')
+  const { registerConfiguredAdapters } = await import('./adapters/factory.js')
   const { createServer } = await import('./server.js')
 
   initDb()
   const router = new Router(config.policy)
-
-  for (const [name, agentCfg] of Object.entries(config.agents)) {
-    switch (agentCfg.adapter) {
-      case 'codex':
-        router.registerAdapter(new CodexAdapter({
-          command: agentCfg.command,
-          args: agentCfg.args,
-          timeout: agentCfg.timeout,
-          env: agentCfg.env,
-        }))
-        break
-      case 'claude-code':
-        router.registerAdapter(new ClaudeCodeAdapter({
-          command: agentCfg.command,
-          args: agentCfg.args,
-          timeout: agentCfg.timeout,
-          env: agentCfg.env,
-        }))
-        break
-      case 'opencode':
-        router.registerAdapter(new OpenCodeAdapter({
-          command: agentCfg.command,
-          args: agentCfg.args,
-          timeout: agentCfg.timeout,
-          model: (agentCfg as any).model,
-          env: agentCfg.env,
-        }))
-        break
-      default:
-        console.warn(`[init] unknown adapter "${agentCfg.adapter}" for "${name}" — skipping`)
-    }
-  }
+  registerConfiguredAdapters(router, config.agents)
 
   createServer(router, config.server.port)
   // foreground — never exit
