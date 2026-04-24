@@ -36,6 +36,18 @@ async function init() {
   setInterval(loadAgents, 30_000)
   setupSideBtns()
   setupFilterBtns()
+  setupMobileMenu()
+  setupMarked()
+}
+
+// ── Marked.js setup ───────────────────────────────────────────────────────────
+function setupMarked() {
+  if (typeof marked !== 'undefined') {
+    marked.setOptions({
+      breaks: true,
+      gfm: true,
+    })
+  }
 }
 
 // ── API helpers ───────────────────────────────────────────────────────────────
@@ -90,9 +102,13 @@ function renderSessionList() {
     sessionList.innerHTML = '<div class="session-empty">No sessions</div>'
     return
   }
-  sessionList.innerHTML = visible.map(s => `
+  sessionList.innerHTML = visible.map(s => {
+    const firstMsg = s.messages?.[0]?.content || s.initialPrompt || ''
+    const preview = firstMsg.slice(0, 60) + (firstMsg.length > 60 ? '…' : '')
+    return `
     <div class="session-item ${s.id === activeSessionId ? 'active' : ''}" data-id="${s.id}">
       <div class="session-agents">${agentLabel(s.from)} → ${agentLabel(s.to)}</div>
+      ${preview ? `<div class="session-preview">${escHtml(preview)}</div>` : ''}
       <div class="session-meta">
         <span class="badge ${s.status}">${s.status}</span>
         ${s.mode && s.mode !== 'freeform' ? `<span class="mode-chip">${s.mode}</span>` : ''}
@@ -100,11 +116,18 @@ function renderSessionList() {
         <span class="time-chip">${timeAgo(s.updatedAt)}</span>
       </div>
     </div>
-  `).join('')
+  `}).join('')
 
   sessionList.querySelectorAll('.session-item').forEach(el => {
-    el.addEventListener('click', () => selectSession(el.dataset.id))
+    el.addEventListener('click', () => {
+      selectSession(el.dataset.id)
+      closeMobileMenu()
+    })
   })
+
+  if (!activeSessionId && !emptyState && visible[0]?.id) {
+    selectSession(visible[0].id)
+  }
 }
 
 function agentLabel(ref) {
@@ -125,7 +148,9 @@ async function selectSession(id) {
 }
 
 function renderSessionView(session) {
-  emptyState.classList.add('hidden')
+  if (emptyState) {
+    emptyState.classList.add('hidden')
+  }
   sessionView.classList.remove('hidden')
 
   // Update side-btn labels to reflect actual agent names
@@ -198,13 +223,16 @@ function renderMessages(msgs, session) {
     }
 
     const ts = new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const avatarInitial = senderLabel.charAt(0).toUpperCase()
+    const renderedContent = renderMarkdown(m.content)
     return `${divider}<div class="msg-wrapper ${side}">
       <div class="msg ${bubbleClass}">
         <div class="msg-header">
+          <div class="msg-avatar">${avatarInitial}</div>
           <span class="msg-sender">${escHtml(senderLabel)}</span>
           <span class="msg-time">${ts}</span>
         </div>
-        <div class="msg-bubble"><pre>${escHtml(m.content)}</pre></div>
+        <div class="msg-bubble">${renderedContent}</div>
       </div>
     </div>`
   }).join('')
@@ -471,15 +499,18 @@ function appendMessage(msg) {
   }
 
   const ts = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const avatarInitial = senderLabel.charAt(0).toUpperCase()
+  const renderedContent = renderMarkdown(msg.content)
   const wrapper = document.createElement('div')
   wrapper.className = `msg-wrapper ${side}`
   wrapper.innerHTML = `
     <div class="msg ${bubbleClass}">
       <div class="msg-header">
+        <div class="msg-avatar">${avatarInitial}</div>
         <span class="msg-sender">${escHtml(senderLabel)}</span>
         <span class="msg-time">${ts}</span>
       </div>
-      <div class="msg-bubble"><pre>${escHtml(msg.content)}</pre></div>
+      <div class="msg-bubble">${renderedContent}</div>
     </div>
   `
   messagesEl.appendChild(wrapper)
@@ -510,12 +541,45 @@ function escHtml(str) {
     .replace(/"/g, '&quot;')
 }
 
+function renderMarkdown(content) {
+  if (typeof marked === 'undefined') {
+    return `<pre>${escHtml(content)}</pre>`
+  }
+  try {
+    const html = marked.parse(content)
+    return `<div class="markdown-content">${html}</div>`
+  } catch (e) {
+    return `<pre>${escHtml(content)}</pre>`
+  }
+}
+
 function timeAgo(ts) {
   const diff = Date.now() - ts
   if (diff < 60_000)     return 'just now'
   if (diff < 3_600_000)  return `${Math.floor(diff / 60_000)}m ago`
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
   return new Date(ts).toLocaleDateString()
+}
+
+// ── Mobile menu ───────────────────────────────────────────────────────────────
+function setupMobileMenu() {
+  const menuBtn = document.getElementById('mobile-menu-btn')
+  const sidebar = document.getElementById('sidebar')
+  const overlay = document.getElementById('mobile-overlay')
+
+  menuBtn.addEventListener('click', () => {
+    sidebar.classList.add('mobile-open')
+    overlay.classList.add('active')
+  })
+
+  overlay.addEventListener('click', closeMobileMenu)
+}
+
+function closeMobileMenu() {
+  const sidebar = document.getElementById('sidebar')
+  const overlay = document.getElementById('mobile-overlay')
+  sidebar.classList.remove('mobile-open')
+  overlay.classList.remove('active')
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
