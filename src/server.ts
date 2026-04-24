@@ -12,6 +12,7 @@ import type { SessionMode, WsEvent } from './types.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(__dirname, 'web')
+const MAX_BODY_SIZE = 1024 * 1024
 
 const MIME: Record<string, string> = {
   '.html': 'text/html',
@@ -38,7 +39,13 @@ function json(res: http.ServerResponse, status: number, data: unknown): void {
 function parseBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     let body = ''
-    req.on('data', (chunk) => { body += chunk })
+    req.on('data', (chunk) => {
+      body += chunk
+      if (Buffer.byteLength(body) > MAX_BODY_SIZE) {
+        reject(new HttpError(413, `Request body too large (max ${MAX_BODY_SIZE} bytes)`))
+        req.destroy()
+      }
+    })
     req.on('end', () => {
       try { resolve(body ? JSON.parse(body) : {}) }
       catch (e) { reject(e) }
@@ -48,10 +55,17 @@ function parseBody(req: http.IncomingMessage): Promise<unknown> {
 }
 
 function serveStatic(res: http.ServerResponse, filePath: string): void {
+  const resolvedPath = path.resolve(filePath)
+  if (resolvedPath !== WEB_DIR && !resolvedPath.startsWith(`${WEB_DIR}${path.sep}`)) {
+    res.writeHead(403)
+    res.end('Forbidden')
+    return
+  }
+
   const ext = path.extname(filePath)
   const mime = MIME[ext] ?? 'application/octet-stream'
   try {
-    const content = fs.readFileSync(filePath)
+    const content = fs.readFileSync(resolvedPath)
     res.writeHead(200, { 'Content-Type': mime })
     res.end(content)
   } catch {
@@ -304,7 +318,7 @@ export function createServer(router: Router, port: number): http.Server {
         if (pathname === '/' || pathname === '/index.html') {
           return serveStatic(res, path.join(WEB_DIR, 'index.html'))
         }
-        const staticPath = path.join(WEB_DIR, pathname.replace(/^\//, ''))
+        const staticPath = path.resolve(WEB_DIR, pathname.replace(/^\//, ''))
         if (fs.existsSync(staticPath) && fs.statSync(staticPath).isFile()) {
           return serveStatic(res, staticPath)
         }
