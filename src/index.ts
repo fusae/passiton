@@ -5,6 +5,7 @@ import { initDb } from './state.js'
 import { Router } from './router.js'
 import { registerConfiguredAdapters } from './adapters/factory.js'
 import { createServer } from './server.js'
+import { installGracefulShutdown } from './shutdown.js'
 
 async function main(): Promise<void> {
   const config = loadConfig()
@@ -19,7 +20,8 @@ async function main(): Promise<void> {
   registerConfiguredAdapters(router, config.agents)
 
   // Start HTTP + WebSocket server
-  createServer(router, config.server.port)
+  const server = createServer(router, config.server.port)
+  installGracefulShutdown(server)
 }
 
 main().catch((err) => {

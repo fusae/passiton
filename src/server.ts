@@ -13,6 +13,7 @@ import type { SessionMode, WsEvent } from './types.js'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(__dirname, 'web')
 const MAX_BODY_SIZE = 1024 * 1024
+const WS_HEARTBEAT_MS = 30_000
 
 const MIME: Record<string, string> = {
   '.html': 'text/html',
@@ -339,13 +340,38 @@ export function createServer(router: Router, port: number): http.Server {
   // ── WebSocket ──────────────────────────────────────────────────────────────
 
   const wss = new WebSocketServer({ server, path: '/ws' })
+  const heartbeat = setInterval(() => {
+    for (const ws of clients) {
+      const live = ws as WebSocket & { isAlive?: boolean }
+      if (live.isAlive === false) {
+        clients.delete(ws)
+        ws.terminate()
+        continue
+      }
+      live.isAlive = false
+      ws.ping()
+    }
+  }, WS_HEARTBEAT_MS)
+  heartbeat.unref()
 
   wss.on('connection', (ws) => {
+    const live = ws as WebSocket & { isAlive?: boolean }
+    live.isAlive = true
     clients.add(ws)
+    ws.on('pong', () => { live.isAlive = true })
     ws.on('close', () => clients.delete(ws))
     ws.on('error', () => clients.delete(ws))
     // Send current sessions on connect
     ws.send(JSON.stringify({ type: 'init', payload: state.listSessions() }))
+  })
+
+  server.on('close', () => {
+    clearInterval(heartbeat)
+    for (const ws of clients) {
+      ws.terminate()
+    }
+    clients.clear()
+    wss.close()
   })
 
   server.listen(port, () => {

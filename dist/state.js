@@ -13,6 +13,11 @@ export function initDb(dbPath = DB_PATH) {
     db.pragma('foreign_keys = ON');
     createTables();
 }
+export function closeDb() {
+    if (db?.open) {
+        db.close();
+    }
+}
 function createTables() {
     db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (

@@ -19,6 +19,12 @@ export function initDb(dbPath = DB_PATH): void {
   createTables()
 }
 
+export function closeDb(): void {
+  if (db?.open) {
+    db.close()
+  }
+}
+
 function createTables(): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS sessions (

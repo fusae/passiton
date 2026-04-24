@@ -4,6 +4,7 @@ import { initDb } from './state.js';
 import { Router } from './router.js';
 import { registerConfiguredAdapters } from './adapters/factory.js';
 import { createServer } from './server.js';
+import { installGracefulShutdown } from './shutdown.js';
 async function main() {
     const config = loadConfig();
     // Init persistence
@@ -13,7 +14,8 @@ async function main() {
     // Register adapters based on config
     registerConfiguredAdapters(router, config.agents);
     // Start HTTP + WebSocket server
-    createServer(router, config.server.port);
+    const server = createServer(router, config.server.port);
+    installGracefulShutdown(server);
 }
 main().catch((err) => {
     console.error('[fatal]', err);

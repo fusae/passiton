@@ -139,12 +139,14 @@ async function serverStart() {
   const { Router } = await import('./router.js')
   const { registerConfiguredAdapters } = await import('./adapters/factory.js')
   const { createServer } = await import('./server.js')
+  const { installGracefulShutdown } = await import('./shutdown.js')
 
   initDb()
   const router = new Router(config.policy)
   registerConfiguredAdapters(router, config.agents)
 
-  createServer(router, config.server.port)
+  const server = createServer(router, config.server.port)
+  installGracefulShutdown(server)
   // foreground — never exit
 }
 

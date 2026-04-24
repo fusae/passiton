@@ -1,5 +1,6 @@
 import type { Session, Message, AgentRef, SessionStatus, SessionMode } from './types.js';
 export declare function initDb(dbPath?: string): void;
+export declare function closeDb(): void;
 export declare function createSession(params: {
     id: string;
     from: AgentRef;
