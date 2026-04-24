@@ -39,7 +39,7 @@ export class ClaudeCodeAdapter implements Adapter {
   async send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string> {
     const fullMessage = this.buildPrompt(message, opts)
     const raw = await this.run(
-      [this.command, '-p', fullMessage, '--output-format', 'stream-json', '--verbose'],
+      [this.command, '-p', fullMessage, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
       session.cwd
     )
     return this.extractText(raw)

@@ -14,7 +14,7 @@ export class ClaudeCodeAdapter {
     }
     async send(session, message, opts) {
         const fullMessage = this.buildPrompt(message, opts);
-        const raw = await this.run([this.command, '-p', fullMessage, '--output-format', 'stream-json', '--verbose'], session.cwd);
+        const raw = await this.run([this.command, '-p', fullMessage, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'], session.cwd);
         return this.extractText(raw);
     }
     buildPrompt(message, opts) {
