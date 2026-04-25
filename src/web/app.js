@@ -9,10 +9,12 @@ let templates = []
 let activeSessionId = null
 let ws = null
 let currentMessages = []
+let currentSnapshots = []
 let activeSession = null
 let sessionFilter = 'all'
 let appConfig = null
 let editingAgentName = null
+const heartbeats = new Map()
 const AGENT_COMMAND_DEFAULTS = {
   'claude-code': 'claude',
   codex: 'codex',
@@ -32,6 +34,16 @@ const injectInput      = document.getElementById('inject-input')
 const modalOverlay     = document.getElementById('modal-overlay')
 const roundsBanner     = document.getElementById('rounds-banner')
 const roundsBannerMsg  = document.getElementById('rounds-banner-msg')
+const errorBanner      = document.getElementById('error-banner')
+const errorBannerMsg   = document.getElementById('error-banner-msg')
+const errorDetail      = document.getElementById('error-detail')
+const sessionProgress  = document.getElementById('session-progress')
+const progressAgent    = document.getElementById('progress-agent')
+const progressElapsed  = document.getElementById('progress-elapsed')
+const progressOutput   = document.getElementById('progress-output')
+const changesSection   = document.getElementById('changes-section')
+const changesCount     = document.getElementById('changes-count')
+const changesList      = document.getElementById('changes-list')
 const resumeModalOv    = document.getElementById('resume-modal-overlay')
 const wsStatusEl       = document.getElementById('ws-status')
 const scrollToBottomBtn = document.getElementById('scroll-to-bottom')
@@ -57,6 +69,7 @@ async function init() {
   setupMessageActions()
   setupScrollToBottom()
   setupSettingsPanel()
+  setInterval(tickProgressIndicators, 1000)
 }
 
 // ── Marked.js setup ───────────────────────────────────────────────────────────
@@ -235,10 +248,16 @@ function renderSessionList() {
   sessionList.innerHTML = visible.map(s => {
     const firstMsg = s.messages?.[0]?.content || s.initialPrompt || ''
     const preview = firstMsg.slice(0, 60) + (firstMsg.length > 60 ? '…' : '')
+    const hb = heartbeats.get(s.id)
+    const running = s.status === 'active'
+    const progress = running && hb
+      ? `<div class="session-progress-line">${escHtml(hb.agent)} · ${formatDuration(currentHeartbeatElapsed(hb))}${hb.lastOutput ? ` · ${escHtml(hb.lastOutput)}` : ''}</div>`
+      : ''
     return `
-    <div class="session-item ${s.id === activeSessionId ? 'active' : ''}" data-id="${s.id}">
+    <div class="session-item ${s.id === activeSessionId ? 'active' : ''} ${running ? 'running' : ''}" data-id="${s.id}">
       <div class="session-agents">${agentLabel(s.from)} → ${agentLabel(s.to)}</div>
       ${preview ? `<div class="session-preview">${escHtml(preview)}</div>` : ''}
+      ${progress}
       <div class="session-meta">
         <span class="badge ${s.status}">${s.status}</span>
         ${s.mode && s.mode !== 'freeform' ? `<span class="mode-chip">${s.mode}</span>` : ''}
@@ -291,13 +310,15 @@ async function selectSession(id) {
   activeSessionId = id
   renderSessionList()
   try {
-    const [data, logs] = await Promise.all([
+    const [data, logs, snapshots] = await Promise.all([
       api(`/api/sessions/${id}`),
       api(`/api/sessions/${id}/logs`),
+      api(`/api/sessions/${id}/snapshots`),
     ])
     if (activeSessionId !== id) return
     activeSession = data
     currentMessages = data.messages || []
+    currentSnapshots = snapshots || []
     replaceLogEntries(logs || [])
     renderSessionView(data)
   } catch (e) {
@@ -309,6 +330,10 @@ function renderSessionView(session) {
   if (!session) {
     if (emptyState) emptyState.classList.remove('hidden')
     if (sessionView) sessionView.classList.add('hidden')
+    if (sessionProgress) sessionProgress.classList.add('hidden')
+    if (errorBanner) errorBanner.classList.add('hidden')
+    if (errorDetail) errorDetail.classList.add('hidden')
+    if (changesSection) changesSection.classList.add('hidden')
     replaceLogEntries([])
     return
   }
@@ -326,7 +351,9 @@ function renderSessionView(session) {
   sessionRounds.textContent = `R${session.currentRound}/${session.maxRounds}`
 
   updateToolbar(session)
+  updateProgressIndicator()
   renderMessages(currentMessages, session)
+  renderChanges(currentSnapshots)
 }
 
 function updateToolbar(session) {
@@ -347,6 +374,16 @@ function updateToolbar(session) {
     roundsBanner.classList.add('hidden')
   }
 
+  if (isError) {
+    const round = session.errorRound ? `Round ${session.errorRound}: ` : ''
+    errorBannerMsg.textContent = `${round}${session.errorMessage || 'Session failed'}`
+    errorBanner.classList.remove('hidden')
+    renderErrorDetail(session)
+  } else {
+    errorBanner.classList.add('hidden')
+    errorDetail.classList.add('hidden')
+  }
+
   // Allow inject for done sessions (triggers reopen), disable only for error
   injectInput.disabled = isError
   document.getElementById('inject-btn').disabled = isError
@@ -357,6 +394,61 @@ function updateToolbar(session) {
   } else {
     injectInput.placeholder = 'Inject a message… (⌘+Enter to send)'
   }
+}
+
+function renderErrorDetail(session) {
+  if (!errorDetail) return
+  const fields = [
+    ['Type', session.errorType || 'unknown'],
+    ['Round', session.errorRound ?? 'unknown'],
+    ['Message', session.errorMessage || 'Session failed'],
+  ]
+  const lastOutput = session.lastAgentOutput
+    ? `<pre>${escHtml(session.lastAgentOutput)}</pre>`
+    : '<div class="error-empty">No partial output captured</div>'
+  errorDetail.innerHTML = `
+    <div class="error-detail-grid">
+      ${fields.map(([label, value]) => `
+        <div class="error-detail-field">
+          <span>${escHtml(label)}</span>
+          <strong>${escHtml(value)}</strong>
+        </div>
+      `).join('')}
+    </div>
+    <div class="error-last-output">
+      <span>Last output</span>
+      ${lastOutput}
+    </div>
+  `
+  errorDetail.classList.remove('hidden')
+}
+
+function updateProgressIndicator() {
+  if (!activeSession || activeSession.status !== 'active') {
+    sessionProgress.classList.add('hidden')
+    return
+  }
+  const hb = heartbeats.get(activeSession.id)
+  if (!hb) {
+    sessionProgress.classList.add('hidden')
+    return
+  }
+
+  progressAgent.textContent = hb.agent
+  progressElapsed.textContent = formatDuration(currentHeartbeatElapsed(hb))
+  progressOutput.textContent = hb.lastOutput || 'Running...'
+  sessionProgress.classList.remove('hidden')
+}
+
+function tickProgressIndicators() {
+  updateProgressIndicator()
+  if (sessions.some(s => s.status === 'active')) {
+    renderSessionList()
+  }
+}
+
+function currentHeartbeatElapsed(hb) {
+  return hb.elapsed + Math.max(0, Date.now() - hb.receivedAt)
 }
 
 function renderMessages(msgs, session) {
@@ -419,6 +511,25 @@ document.getElementById('btn-resume').addEventListener('click', async () => {
   btn.textContent = '▶ Resuming...'
   try {
     await api(`/api/sessions/${activeSessionId}/resume`, 'POST')
+  } catch (err) {
+    showToast(err.message, 'error')
+  } finally {
+    btn.disabled = false
+    btn.textContent = originalText
+  }
+})
+
+document.getElementById('btn-error-resume').addEventListener('click', async () => {
+  if (!activeSessionId) return
+  const btn = document.getElementById('btn-error-resume')
+  const originalText = btn.textContent
+  btn.disabled = true
+  btn.textContent = 'Resuming...'
+  try {
+    const session = await api(`/api/sessions/${activeSessionId}/resume`, 'POST')
+    activeSession = { ...activeSession, ...session }
+    upsertSession(session)
+    updateToolbar(activeSession)
   } catch (err) {
     showToast(err.message, 'error')
   } finally {
@@ -726,6 +837,7 @@ function handleWsEvent(evt) {
     case 'session:error':
     case 'session:paused': {
       const s = evt.payload?.session ?? evt.payload
+      if (s.status !== 'active') heartbeats.delete(s.id)
       upsertSession(s)
       if (s.id === activeSessionId) {
         activeSession = { ...activeSession, ...s }
@@ -734,7 +846,19 @@ function handleWsEvent(evt) {
         sessionBadge.textContent = s.status
         sessionRounds.textContent = `R${s.currentRound}/${s.maxRounds}`
         updateToolbar(s)
+        updateProgressIndicator()
       }
+      break
+    }
+
+    case 'heartbeat': {
+      const hb = { ...evt, receivedAt: Date.now() }
+      heartbeats.set(hb.sessionId, hb)
+      upsertSessionField(hb.sessionId, 'updatedAt', Date.now())
+      if (hb.sessionId === activeSessionId) {
+        updateProgressIndicator()
+      }
+      renderSessionList()
       break
     }
 
@@ -749,9 +873,19 @@ function handleWsEvent(evt) {
       break
     }
 
+    case 'snapshot:new': {
+      const snapshot = evt.payload
+      if (snapshot.sessionId === activeSessionId) {
+        currentSnapshots.push(snapshot)
+        renderChanges(currentSnapshots)
+      }
+      break
+    }
+
     case 'session:deleted': {
       const id = evt.payload?.id
       sessions = sessions.filter(s => s.id !== id)
+      heartbeats.delete(id)
       if (id === activeSessionId) {
         activeSessionId = null
         activeSession = null
@@ -889,6 +1023,44 @@ function timeAgo(ts) {
   if (diff < 3_600_000)  return `${Math.floor(diff / 60_000)}m ago`
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
   return new Date(ts).toLocaleDateString()
+}
+
+function formatDuration(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
+function renderChanges(snapshots) {
+  if (!changesSection || !changesList || !changesCount) return
+  if (!snapshots.length) {
+    changesSection.classList.add('hidden')
+    changesList.innerHTML = ''
+    changesCount.textContent = ''
+    return
+  }
+
+  changesCount.textContent = `${snapshots.length} snapshot${snapshots.length === 1 ? '' : 's'}`
+  changesList.innerHTML = snapshots.map(snapshot => {
+    const stat = snapshot.diffStat || 'No changes'
+    const full = snapshot.diffFull || 'No diff'
+    return `<details class="change-snapshot">
+      <summary>
+        <span>Round ${escHtml(snapshot.round)}</span>
+        <time>${formatMessageTime(snapshot.timestamp)}</time>
+      </summary>
+      <div class="change-block">
+        <div class="change-label">Stat</div>
+        <pre>${escHtml(stat)}</pre>
+      </div>
+      <div class="change-block">
+        <div class="change-label">Diff</div>
+        <pre>${escHtml(full)}</pre>
+      </div>
+    </details>`
+  }).join('')
+  changesSection.classList.remove('hidden')
 }
 
 function formatMessageTime(ts) {

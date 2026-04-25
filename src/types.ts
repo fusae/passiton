@@ -17,6 +17,7 @@ export interface Message {
   content: string
   timestamp: number
   round: number
+  metadata?: RoundMetadata
 }
 
 export interface SessionLog {
@@ -60,6 +61,11 @@ export interface Session {
     from: string
     to: string
   }
+  errorType?: SessionErrorType
+  errorMessage?: string
+  lastAgentOutput?: string
+  errorRound?: number
+  resumeCount: number
   createdAt: number
   updatedAt: number
 }
@@ -68,11 +74,39 @@ export interface SessionWithMessages extends Session {
   messages: Message[]
 }
 
+export type SessionErrorType =
+  | 'adapter_timeout'
+  | 'adapter_crash'
+  | 'network_error'
+  | 'policy_stop'
+  | 'unknown'
+
+export interface RoundMetadata {
+  filesModified?: string[]
+  commandsRun?: string[]
+  duration?: number
+  tokenEstimate?: number
+}
+
+export interface AdapterResponse {
+  content: string
+  metadata?: RoundMetadata
+}
+
+export interface DiffSnapshot {
+  id: string
+  sessionId: string
+  round: number
+  timestamp: number
+  diffStat: string
+  diffFull: string
+}
+
 // Adapter interface — one per agent type
 export interface Adapter {
   name: string
   config: Record<string, unknown>
-  send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string>
+  send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string | AdapterResponse>
   healthCheck(): Promise<boolean>
 }
 
@@ -80,6 +114,16 @@ export interface Adapter {
 export interface AdapterSendOpts {
   systemPrompt?: string
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
+  onOutput?: (line: string) => void
+}
+
+export interface HeartbeatPayload {
+  sessionId: string
+  round: number
+  agent: string
+  status: 'running'
+  elapsed: number
+  lastOutput: string
 }
 
 // Policy configuration
@@ -125,13 +169,21 @@ export type WsEventType =
   | 'session:paused'
   | 'session:deleted'
   | 'message:new'
+  | 'snapshot:new'
   | 'agent:status'
+  | 'heartbeat'
   | 'log'
 
-export interface WsEvent {
+export interface StandardWsEvent {
   type: WsEventType
   payload: unknown
 }
+
+export interface HeartbeatWsEvent extends HeartbeatPayload {
+  type: 'heartbeat'
+}
+
+export type WsEvent = StandardWsEvent | HeartbeatWsEvent
 
 // Policy check result
 export interface PolicyResult {

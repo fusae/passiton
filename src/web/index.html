@@ -86,7 +86,29 @@
           </div>
         </div>
 
+        <div id="error-banner" class="hidden">
+          <span id="error-banner-msg">Session failed</span>
+          <button id="btn-error-resume" class="banner-btn">Resume</button>
+        </div>
+
+        <div id="error-detail" class="hidden"></div>
+
+        <div id="session-progress" class="hidden">
+          <span class="progress-dot"></span>
+          <span id="progress-agent"></span>
+          <span id="progress-elapsed"></span>
+          <span id="progress-output"></span>
+        </div>
+
         <div id="messages"></div>
+
+        <div id="changes-section" class="hidden">
+          <div class="changes-header">
+            <span>Changes</span>
+            <span id="changes-count"></span>
+          </div>
+          <div id="changes-list"></div>
+        </div>
 
         <button id="scroll-to-bottom" class="hidden" title="Scroll to bottom">
           ↓ New messages

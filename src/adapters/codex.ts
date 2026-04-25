@@ -41,6 +41,7 @@ export class CodexAdapter implements Adapter {
       env: this.env,
       timeout: this.timeout,
       stdinMode: 'pipe',
+      onOutput: opts?.onOutput,
     })
   }
 
