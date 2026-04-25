@@ -167,6 +167,12 @@ export function updateSession(id: string, updates: Partial<Pick<Session, 'status
   return getSession(id)!
 }
 
+export function reopenSession(id: string): Session {
+  const now = Date.now()
+  db.prepare(`UPDATE sessions SET status = 'active', current_round = 0, updated_at = ? WHERE id = ?`).run(now, id)
+  return getSession(id)!
+}
+
 export function listSessions(filter?: { status?: SessionStatus }): Session[] {
   if (filter?.status) {
     const rows = db.prepare('SELECT * FROM sessions WHERE status = ? ORDER BY created_at DESC').all(filter.status) as Record<string, unknown>[]

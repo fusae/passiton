@@ -144,6 +144,26 @@ export class Router extends EventEmitter {
   injectMessage(sessionId: string, content: string, side: 'from' | 'to' = 'from'): Message {
     const session = state.getSession(sessionId)
     if (!session) throw new Error(`Session ${sessionId} not found`)
+
+    // If session is done, reopen it first
+    if (session.status === 'done') {
+      const reopened = state.reopenSession(sessionId)
+      this.emit('event', { type: 'session:updated', payload: reopened } satisfies WsEvent)
+
+      const msg = this.recordMessage(sessionId, 'human', content, reopened.currentRound)
+
+      // Kick off the run loop with the injected message
+      const epoch = this.nextRunEpoch(sessionId)
+      setImmediate(() => {
+        this.runSession(sessionId, content, epoch).catch((err) => {
+          console.error(`[router] runSession error for ${sessionId}:`, err)
+          this.markError(sessionId)
+        })
+      })
+
+      return msg
+    }
+
     const msg = this.recordMessage(sessionId, 'human', content, session.currentRound)
 
     // If session is paused, auto-resume using injected message

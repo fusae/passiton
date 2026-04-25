@@ -177,13 +177,14 @@ function renderSessionView(session) {
 }
 
 function updateToolbar(session) {
-  const isDone    = session.status === 'done' || session.status === 'error'
+  const isError   = session.status === 'error'
+  const isDone    = session.status === 'done'
   const isActive  = session.status === 'active'
   const isPaused  = session.status === 'paused'
 
   document.getElementById('btn-pause').classList.toggle('hidden', !isActive)
   document.getElementById('btn-resume').classList.toggle('hidden', !isPaused)
-  document.getElementById('btn-stop').classList.toggle('hidden', isDone)
+  document.getElementById('btn-stop').classList.toggle('hidden', isDone || isError)
 
   // Check if paused because of round limit
   if (isPaused && session.currentRound >= session.maxRounds) {
@@ -193,9 +194,16 @@ function updateToolbar(session) {
     roundsBanner.classList.add('hidden')
   }
 
-  // Disable inject bar if session is terminal
-  injectInput.disabled = isDone
-  document.getElementById('inject-btn').disabled = isDone
+  // Allow inject for done sessions (triggers reopen), disable only for error
+  injectInput.disabled = isError
+  document.getElementById('inject-btn').disabled = isError
+
+  // Update placeholder to hint reopen behavior
+  if (isDone) {
+    injectInput.placeholder = '发送消息以重启讨论...'
+  } else {
+    injectInput.placeholder = 'Inject a message… (⌘+Enter to send)'
+  }
 }
 
 function renderMessages(msgs, session) {
@@ -271,11 +279,16 @@ injectInput.addEventListener('keydown', e => {
 async function doInject() {
   const content = injectInput.value.trim()
   if (!content || !activeSessionId) return
+  const wasDone = activeSession && activeSession.status === 'done'
   injectInput.value = ''
   await api(`/api/sessions/${activeSessionId}/message`, 'POST', {
     content,
     side: injectSide,
   })
+  // If session was done, refresh to pick up reopened state
+  if (wasDone) {
+    await selectSession(activeSessionId)
+  }
 }
 
 // ── Side selector ─────────────────────────────────────────────────────────────
