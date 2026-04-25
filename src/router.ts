@@ -86,10 +86,13 @@ export class Router extends EventEmitter {
       payload: session,
     } satisfies WsEvent)
 
+    this.emitLog('info', `Session started: ${agentLabel(params.from)} → ${agentLabel(params.to)} [${session.id.slice(0, 8)}] mode=${mode}`)
+
     // Kick off the run loop (non-blocking)
     setImmediate(() => {
       this.runSession(session.id, params.initialPrompt, this.nextRunEpoch(session.id)).catch((err) => {
         console.error(`[router] runSession error for ${session.id}:`, err)
+        this.emitLog('error', `Session run error [${session.id.slice(0, 8)}]: ${String(err)}`)
         this.markError(session.id)
       })
     })
@@ -102,6 +105,7 @@ export class Router extends EventEmitter {
     this.nextRunEpoch(id)
     const session = state.updateSession(id, { status: 'paused' })
     this.emit('event', { type: 'session:paused', payload: session } satisfies WsEvent)
+    this.emitLog('info', `Session paused [${id.slice(0, 8)}] at round ${session.currentRound}`)
     return session
   }
 
@@ -120,11 +124,13 @@ export class Router extends EventEmitter {
     })
 
     this.emit('event', { type: 'session:updated', payload: updated } satisfies WsEvent)
+    this.emitLog('info', `Session resumed [${id.slice(0, 8)}]${extraRounds !== undefined ? ` (+${extraRounds} rounds)` : ''}`)
     const epoch = this.nextRunEpoch(id)
 
     setImmediate(() => {
       this.runSession(id, lastMessage.content, epoch).catch((err) => {
         console.error(`[router] resumeSession error for ${id}:`, err)
+        this.emitLog('error', `Session resume error [${id.slice(0, 8)}]: ${String(err)}`)
         this.markError(id)
       })
     })
@@ -136,6 +142,7 @@ export class Router extends EventEmitter {
     this.runningLoops.delete(id)
     const session = state.updateSession(id, { status: 'done' })
     this.emit('event', { type: 'session:done', payload: session } satisfies WsEvent)
+    this.emitLog('info', `Session stopped [${id.slice(0, 8)}]`)
     return session
   }
 
@@ -149,6 +156,7 @@ export class Router extends EventEmitter {
     if (session.status === 'done') {
       const reopened = state.reopenSession(sessionId)
       this.emit('event', { type: 'session:updated', payload: reopened } satisfies WsEvent)
+      this.emitLog('info', `Session reopened [${sessionId.slice(0, 8)}] via message injection`)
 
       const msg = this.recordMessage(sessionId, 'human', content, reopened.currentRound)
 
@@ -157,6 +165,7 @@ export class Router extends EventEmitter {
       setImmediate(() => {
         this.runSession(sessionId, content, epoch).catch((err) => {
           console.error(`[router] runSession error for ${sessionId}:`, err)
+          this.emitLog('error', `Session reopen error [${sessionId.slice(0, 8)}]: ${String(err)}`)
           this.markError(sessionId)
         })
       })
@@ -221,6 +230,7 @@ export class Router extends EventEmitter {
       // Pre-round policy check
       const preCheck = checkPreRound(session, this.policy)
       if (!preCheck.allowed) {
+        this.emitLog('warn', `Policy check failed [${sessionId.slice(0, 8)}]: ${preCheck.reason ?? 'unknown'}`)
         await this.pauseSession(sessionId)
         this.emit('event', {
           type: 'session:paused',
@@ -231,20 +241,25 @@ export class Router extends EventEmitter {
 
       // If approveMode, pause and wait for external resume
       if (session.approveMode) {
+        this.emitLog('info', `Approve mode — waiting for approval [${sessionId.slice(0, 8)}]`)
         await this.pauseSession(sessionId)
         break
       }
+
+      this.emitLog('info', `Round ${session.currentRound + 1} starting [${sessionId.slice(0, 8)}]`)
 
       try {
         const result = await this.processTurn(sessionId, nextMessage, epoch)
         if (result.done) {
           const updated = state.updateSession(sessionId, { status: 'done' })
           this.emit('event', { type: 'session:done', payload: updated } satisfies WsEvent)
+          this.emitLog('info', `Session completed [${sessionId.slice(0, 8)}] after ${updated.currentRound} rounds`)
           break
         }
         nextMessage = result.nextMessage
       } catch (err) {
         console.error(`[router] round error session ${sessionId}:`, err)
+        this.emitLog('error', `Round error [${sessionId.slice(0, 8)}]: ${String(err)}`)
         this.markError(sessionId)
         break
       }
@@ -270,11 +285,13 @@ export class Router extends EventEmitter {
 
     if (!adapter) throw new Error(`Adapter not found: ${target.adapter}`)
 
+    this.emitLog('info', `Adapter call: ${target.adapter} [${sessionId.slice(0, 8)}] round=${round} turn=${recipient}`)
     const opts = this.buildSendOpts(session, recipient)
     const response = await this.callWithRetry(adapter, session, message, opts)
     if (this.runEpochs.get(sessionId) !== epoch || !this.runningLoops.has(sessionId)) {
       return { done: false, nextMessage: message }
     }
+    this.emitLog('info', `Adapter response: ${target.adapter} [${sessionId.slice(0, 8)}] (${response.length} chars)`)
 
     this.recordMessage(sessionId, target.adapter, response, round)
 
@@ -328,8 +345,11 @@ export class Router extends EventEmitter {
       } catch (err) {
         lastErr = err
         if (attempt < this.policy.retries) {
+          this.emitLog('warn', `Adapter ${adapter.name} attempt ${attempt + 1} failed, retrying… [${session.id.slice(0, 8)}]`)
           console.warn(`[router] adapter ${adapter.name} attempt ${attempt + 1} failed, retrying...`)
           await sleep(1000)
+        } else {
+          this.emitLog('error', `Adapter ${adapter.name} failed after ${attempt + 1} attempts [${session.id.slice(0, 8)}]: ${String(err)}`)
         }
       }
     }
@@ -354,6 +374,13 @@ export class Router extends EventEmitter {
       const session = state.updateSession(sessionId, { status: 'error' })
       this.emit('event', { type: 'session:error', payload: session } satisfies WsEvent)
     } catch (_) { /* best-effort */ }
+  }
+
+  private emitLog(level: 'info' | 'warn' | 'error', message: string): void {
+    this.emit('event', {
+      type: 'log',
+      payload: { timestamp: Date.now(), level, message },
+    } satisfies WsEvent)
   }
 
   private nextRunEpoch(sessionId: string): number {
@@ -422,4 +449,8 @@ export class Router extends EventEmitter {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+function agentLabel(ref: AgentRef): string {
+  return ref.label ?? ref.adapter
 }

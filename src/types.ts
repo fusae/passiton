@@ -94,6 +94,7 @@ export type WsEventType =
   | 'session:paused'
   | 'message:new'
   | 'agent:status'
+  | 'log'
 
 export interface WsEvent {
   type: WsEventType

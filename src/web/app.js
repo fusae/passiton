@@ -510,6 +510,11 @@ function handleWsEvent(evt) {
       renderSessionList()
       break
     }
+
+    case 'log': {
+      handleLogEvent(evt.payload)
+      break
+    }
   }
 }
 
@@ -779,6 +784,121 @@ function closeMobileMenu() {
   const overlay = document.getElementById('mobile-overlay')
   sidebar.classList.remove('mobile-open')
   overlay.classList.remove('active')
+}
+
+// ── Log panel ─────────────────────────────────────────────────────────────────
+const LOG_MAX = 500
+const logEntries = []
+let logPanelOpen = false
+let logHasUnseenError = false
+
+const logToggle    = document.getElementById('log-toggle')
+const logPanel     = document.getElementById('log-panel')
+const logEntriesEl = document.getElementById('log-entries')
+const logErrorDot  = document.getElementById('log-error-dot')
+const logClearBtn  = document.getElementById('log-clear-btn')
+const logCloseBtn  = document.getElementById('log-close-btn')
+const logResize    = document.getElementById('log-panel-resize')
+
+logToggle.addEventListener('click', () => {
+  logPanelOpen = !logPanelOpen
+  logPanel.classList.toggle('hidden', !logPanelOpen)
+  logToggle.classList.toggle('active', logPanelOpen)
+  if (logPanelOpen) {
+    logHasUnseenError = false
+    logErrorDot.classList.add('hidden')
+    renderLogEntries()
+  }
+})
+
+logCloseBtn.addEventListener('click', () => {
+  logPanelOpen = false
+  logPanel.classList.add('hidden')
+  logToggle.classList.remove('active')
+})
+
+logClearBtn.addEventListener('click', () => {
+  logEntries.length = 0
+  logHasUnseenError = false
+  logErrorDot.classList.add('hidden')
+  renderLogEntries()
+})
+
+// Resize by drag
+let logResizing = false
+logResize.addEventListener('mousedown', (e) => {
+  e.preventDefault()
+  logResizing = true
+  const startY = e.clientY
+  const startH = logPanel.offsetHeight
+
+  function onMove(ev) {
+    if (!logResizing) return
+    const delta = startY - ev.clientY
+    const newH = Math.max(100, Math.min(window.innerHeight * 0.7, startH + delta))
+    logPanel.style.height = newH + 'px'
+  }
+  function onUp() {
+    logResizing = false
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
+})
+
+function handleLogEvent(payload) {
+  const entry = {
+    timestamp: payload.timestamp,
+    level: payload.level,
+    message: payload.message,
+  }
+  logEntries.push(entry)
+  while (logEntries.length > LOG_MAX) logEntries.shift()
+
+  if (entry.level === 'error' && !logPanelOpen) {
+    logHasUnseenError = true
+    logErrorDot.classList.remove('hidden')
+  }
+
+  if (logPanelOpen) {
+    appendLogEntry(entry)
+    scrollLogToBottom()
+  }
+}
+
+function renderLogEntries() {
+  if (!logEntries.length) {
+    logEntriesEl.innerHTML = '<div class="log-empty">No log entries yet</div>'
+    return
+  }
+  logEntriesEl.innerHTML = logEntries.map(formatLogEntry).join('')
+  scrollLogToBottom()
+}
+
+function appendLogEntry(entry) {
+  // Remove empty placeholder if present
+  const empty = logEntriesEl.querySelector('.log-empty')
+  if (empty) empty.remove()
+
+  const div = document.createElement('div')
+  div.innerHTML = formatLogEntry(entry)
+  logEntriesEl.appendChild(div.firstElementChild)
+}
+
+function formatLogEntry(entry) {
+  const ts = new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return `<div class="log-entry ${escHtml(entry.level)}">
+    <span class="log-ts">${ts}</span>
+    <span class="log-level ${escHtml(entry.level)}">${escHtml(entry.level)}</span>
+    <span class="log-msg">${escHtml(entry.message)}</span>
+  </div>`
+}
+
+function scrollLogToBottom() {
+  requestAnimationFrame(() => {
+    logEntriesEl.scrollTop = logEntriesEl.scrollHeight
+  })
 }
 
 // ── Boot ──────────────────────────────────────────────────────────────────────

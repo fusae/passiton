@@ -165,6 +165,23 @@
     </div>
   </div>
 
+  <!-- Log Panel -->
+  <button id="log-toggle" title="Toggle execution logs">
+    📋 <span>Logs</span>
+    <span id="log-error-dot" class="log-error-dot hidden"></span>
+  </button>
+  <div id="log-panel" class="hidden">
+    <div id="log-panel-header">
+      <span class="log-panel-title">Execution Logs</span>
+      <div class="log-panel-actions">
+        <button id="log-clear-btn" class="log-action-btn" title="Clear logs">Clear</button>
+        <button id="log-close-btn" class="log-action-btn" title="Close">✕</button>
+      </div>
+    </div>
+    <div id="log-panel-resize" title="Drag to resize"></div>
+    <div id="log-entries"></div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>
