@@ -58,7 +58,35 @@ async function api(path, method = 'GET', body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } }
   if (body !== undefined) opts.body = JSON.stringify(body)
   const r = await fetch(API + path, opts)
+  if (!r.ok) {
+    let errorMsg = `HTTP ${r.status}`
+    try {
+      const errorData = await r.json()
+      errorMsg = errorData.error || errorMsg
+    } catch {
+      errorMsg = await r.text() || errorMsg
+    }
+    throw new Error(errorMsg)
+  }
   return r.json()
+}
+
+// ── Toast notifications ───────────────────────────────────────────────────────
+function showToast(message, type = 'error') {
+  const container = document.getElementById('toast-container')
+  if (!container) return
+
+  const toast = document.createElement('div')
+  toast.className = `toast toast-${type}`
+  toast.textContent = message
+  container.appendChild(toast)
+
+  setTimeout(() => toast.classList.add('show'), 10)
+
+  setTimeout(() => {
+    toast.classList.remove('show')
+    setTimeout(() => toast.remove(), 300)
+  }, 3000)
 }
 
 // ── Agents ────────────────────────────────────────────────────────────────────
@@ -192,8 +220,12 @@ function renderSessionList() {
     })
   })
 
-  if (!activeSessionId && !emptyState && visible[0]?.id) {
+  const emptyState = document.getElementById('empty-state')
+  if (!activeSessionId && visible.length > 0 && visible[0]?.id) {
     selectSession(visible[0].id)
+  } else if (!activeSessionId && visible.length === 0 && emptyState) {
+    emptyState.classList.remove('hidden')
+    sessionView.classList.add('hidden')
   }
 }
 
@@ -215,6 +247,7 @@ async function selectSession(id) {
 }
 
 function renderSessionView(session) {
+  const emptyState = document.getElementById('empty-state')
   if (emptyState) {
     emptyState.classList.add('hidden')
   }
@@ -278,18 +311,30 @@ function renderMessages(msgs, session) {
 // ── Session controls ──────────────────────────────────────────────────────────
 document.getElementById('btn-pause').addEventListener('click', async () => {
   if (!activeSessionId) return
-  await api(`/api/sessions/${activeSessionId}/pause`, 'POST')
+  try {
+    await api(`/api/sessions/${activeSessionId}/pause`, 'POST')
+  } catch (err) {
+    showToast(err.message)
+  }
 })
 
 document.getElementById('btn-resume').addEventListener('click', async () => {
   if (!activeSessionId) return
-  await api(`/api/sessions/${activeSessionId}/resume`, 'POST')
+  try {
+    await api(`/api/sessions/${activeSessionId}/resume`, 'POST')
+  } catch (err) {
+    showToast(err.message)
+  }
 })
 
 document.getElementById('btn-stop').addEventListener('click', async () => {
   if (!activeSessionId) return
   if (!confirm('Stop this session permanently?')) return
-  await api(`/api/sessions/${activeSessionId}/stop`, 'POST')
+  try {
+    await api(`/api/sessions/${activeSessionId}/stop`, 'POST')
+  } catch (err) {
+    showToast(err.message)
+  }
 })
 
 document.getElementById('btn-export').addEventListener('click', () => {
@@ -299,8 +344,12 @@ document.getElementById('btn-export').addEventListener('click', () => {
 // Rounds banner buttons
 document.getElementById('btn-continue-10').addEventListener('click', async () => {
   if (!activeSessionId) return
-  await api(`/api/sessions/${activeSessionId}/resume`, 'POST', { extraRounds: 10 })
-  roundsBanner.classList.add('hidden')
+  try {
+    await api(`/api/sessions/${activeSessionId}/resume`, 'POST', { extraRounds: 10 })
+    roundsBanner.classList.add('hidden')
+  } catch (err) {
+    showToast(err.message)
+  }
 })
 
 document.getElementById('btn-continue-custom').addEventListener('click', () => {
@@ -309,8 +358,12 @@ document.getElementById('btn-continue-custom').addEventListener('click', () => {
 
 document.getElementById('btn-end-session').addEventListener('click', async () => {
   if (!activeSessionId) return
-  await api(`/api/sessions/${activeSessionId}/stop`, 'POST')
-  roundsBanner.classList.add('hidden')
+  try {
+    await api(`/api/sessions/${activeSessionId}/stop`, 'POST')
+    roundsBanner.classList.add('hidden')
+  } catch (err) {
+    showToast(err.message)
+  }
 })
 
 // Resume +N modal
@@ -323,8 +376,12 @@ document.getElementById('resume-modal-ok').addEventListener('click', async () =>
   if (!n || n < 1) return
   resumeModalOv.classList.add('hidden')
   if (!activeSessionId) return
-  await api(`/api/sessions/${activeSessionId}/resume`, 'POST', { extraRounds: n })
-  roundsBanner.classList.add('hidden')
+  try {
+    await api(`/api/sessions/${activeSessionId}/resume`, 'POST', { extraRounds: n })
+    roundsBanner.classList.add('hidden')
+  } catch (err) {
+    showToast(err.message)
+  }
 })
 
 // Inject message
@@ -338,13 +395,17 @@ async function doInject() {
   if (!content || !activeSessionId) return
   const wasDone = activeSession && activeSession.status === 'done'
   injectInput.value = ''
-  await api(`/api/sessions/${activeSessionId}/message`, 'POST', {
-    content,
-    side: injectSide,
-  })
-  // If session was done, refresh to pick up reopened state
-  if (wasDone) {
-    await selectSession(activeSessionId)
+  try {
+    await api(`/api/sessions/${activeSessionId}/message`, 'POST', {
+      content,
+      side: injectSide,
+    })
+    // If session was done, refresh to pick up reopened state
+    if (wasDone) {
+      await selectSession(activeSessionId)
+    }
+  } catch (err) {
+    showToast(err.message)
   }
 }
 
@@ -414,12 +475,11 @@ document.getElementById('modal-form').addEventListener('submit', async e => {
 
   try {
     const session = await api('/api/sessions', 'POST', body)
-    if (session.error) { alert('Error: ' + session.error); return }
     sessions.unshift(session)
     renderSessionList()
     await selectSession(session.id)
   } catch (err) {
-    alert('Failed to create session: ' + err.message)
+    showToast(err.message)
   }
 })
 
@@ -439,6 +499,9 @@ function populateAgentSelects() {
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 let wsRetryTimer = null
+let wsRetryDelay = 1000
+let wsRetryCount = 0
+const WS_MAX_DELAY = 15000
 
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -448,6 +511,9 @@ function connectWs() {
     wsStatusEl.textContent = 'live'
     wsStatusEl.className = 'ws-badge connected'
     document.getElementById('server-dot').className = 'dot green'
+    // Reset backoff on successful connection
+    wsRetryDelay = 1000
+    wsRetryCount = 0
     if (wsRetryTimer) { clearTimeout(wsRetryTimer); wsRetryTimer = null }
   })
 
@@ -456,10 +522,14 @@ function connectWs() {
   })
 
   ws.addEventListener('close', () => {
-    wsStatusEl.textContent = 'disconnected'
+    wsRetryCount++
+    wsStatusEl.textContent = `reconnecting (${wsRetryCount})…`
     wsStatusEl.className = 'ws-badge disconnected'
     document.getElementById('server-dot').className = 'dot red'
-    wsRetryTimer = setTimeout(connectWs, 3000)
+
+    wsRetryTimer = setTimeout(connectWs, wsRetryDelay)
+    // Exponential backoff: 1s → 2s → 4s → 8s → 15s cap
+    wsRetryDelay = Math.min(wsRetryDelay * 2, WS_MAX_DELAY)
   })
 
   ws.addEventListener('error', () => {
