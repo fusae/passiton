@@ -1,2 +1,2 @@
 // Re-export Adapter interface from main types
-export type { Adapter } from '../types.js'
+export type { Adapter, AdapterResponse, RoundMetadata } from '../types.js'

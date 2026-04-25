@@ -52,6 +52,7 @@ export class ClaudeCodeAdapter implements Adapter {
       env: this.env,
       timeout: this.timeout,
       stdinMode: 'ignore',
+      onOutput: opts?.onOutput,
     })
     return this.extractText(raw)
   }

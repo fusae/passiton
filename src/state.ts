@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { homedir } from 'os'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
-import type { Session, Message, SessionLog, AgentRef, SessionStatus, SessionMode, SessionContext } from './types.js'
+import type { Session, Message, SessionLog, AgentRef, SessionStatus, SessionMode, SessionContext, RoundMetadata, DiffSnapshot } from './types.js'
 
 const DB_DIR = join(homedir(), '.turing')
 const DB_PATH = join(DB_DIR, 'turing.db')
@@ -52,6 +52,11 @@ function createTables(): void {
       cwd          TEXT,
       context      TEXT,
       system_prompts TEXT,
+      error_type   TEXT,
+      error_round  INTEGER,
+      error_message TEXT,
+      last_agent_output TEXT,
+      resume_count INTEGER NOT NULL DEFAULT 0,
       created_at   INTEGER NOT NULL,
       updated_at   INTEGER NOT NULL
     );
@@ -62,7 +67,8 @@ function createTables(): void {
       from_agent  TEXT NOT NULL,
       content     TEXT NOT NULL,
       timestamp   INTEGER NOT NULL,
-      round       INTEGER NOT NULL
+      round       INTEGER NOT NULL,
+      metadata    TEXT
     );
 
     CREATE TABLE IF NOT EXISTS session_logs (
@@ -73,8 +79,18 @@ function createTables(): void {
       message     TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS snapshots (
+      id          TEXT PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES sessions(id),
+      round       INTEGER NOT NULL,
+      timestamp   INTEGER NOT NULL,
+      diff_stat   TEXT NOT NULL,
+      diff_full   TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_session_logs_session ON session_logs(session_id, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots(session_id, round, timestamp);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
   `)
 
@@ -90,6 +106,24 @@ function createTables(): void {
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE sessions ADD COLUMN next_turn TEXT NOT NULL DEFAULT 'to'`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN error_type TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN error_round INTEGER`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN error_message TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN last_agent_output TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE messages ADD COLUMN metadata TEXT`)
   } catch { /* column already exists */ }
 }
 
@@ -117,6 +151,11 @@ function rowToSession(row: Record<string, unknown>): Session {
     cwd: row.cwd as string | undefined,
     context,
     systemPrompts,
+    errorType: row.error_type as Session['errorType'] | undefined,
+    errorRound: row.error_round as number | undefined,
+    errorMessage: row.error_message as string | undefined,
+    lastAgentOutput: row.last_agent_output as string | undefined,
+    resumeCount: (row.resume_count as number | undefined) ?? 0,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
   }
@@ -165,7 +204,7 @@ export function getSession(id: string): Session | undefined {
   return row ? rowToSession(row) : undefined
 }
 
-export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'nextTurn'>>): Session {
+export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'nextTurn' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount'>>): Session {
   const fields: string[] = ['updated_at = ?']
   const values: unknown[] = [Date.now()]
 
@@ -174,6 +213,11 @@ export function updateSession(id: string, updates: Partial<Pick<Session, 'status
   if (updates.currentRound !== undefined) { fields.push('current_round = ?'); values.push(updates.currentRound) }
   if (updates.maxRounds !== undefined) { fields.push('max_rounds = ?'); values.push(updates.maxRounds) }
   if (updates.approveMode !== undefined) { fields.push('approve_mode = ?'); values.push(updates.approveMode ? 1 : 0) }
+  if (updates.errorType !== undefined) { fields.push('error_type = ?'); values.push(updates.errorType) }
+  if (updates.errorRound !== undefined) { fields.push('error_round = ?'); values.push(updates.errorRound) }
+  if (updates.errorMessage !== undefined) { fields.push('error_message = ?'); values.push(updates.errorMessage) }
+  if (updates.lastAgentOutput !== undefined) { fields.push('last_agent_output = ?'); values.push(updates.lastAgentOutput) }
+  if (updates.resumeCount !== undefined) { fields.push('resume_count = ?'); values.push(updates.resumeCount) }
 
   values.push(id)
   db.prepare(`UPDATE sessions SET ${fields.join(', ')} WHERE id = ?`).run(...values)
@@ -182,7 +226,16 @@ export function updateSession(id: string, updates: Partial<Pick<Session, 'status
 
 export function reopenSession(id: string): Session {
   const now = Date.now()
-  db.prepare(`UPDATE sessions SET status = 'active', updated_at = ? WHERE id = ?`).run(now, id)
+  db.prepare(`
+    UPDATE sessions
+    SET status = 'active',
+        error_type = NULL,
+        error_round = NULL,
+        error_message = NULL,
+        last_agent_output = NULL,
+        updated_at = ?
+    WHERE id = ?
+  `).run(now, id)
   return getSession(id)!
 }
 
@@ -198,6 +251,7 @@ export function listSessions(filter?: { status?: SessionStatus }): Session[] {
 export function deleteSession(id: string): void {
   const tx = db.transaction((sessionId: string) => {
     db.prepare('DELETE FROM session_logs WHERE session_id = ?').run(sessionId)
+    db.prepare('DELETE FROM snapshots WHERE session_id = ?').run(sessionId)
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId)
     db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId)
   })
@@ -207,6 +261,10 @@ export function deleteSession(id: string): void {
 // ── Messages ──────────────────────────────────────────────────────────────────
 
 function rowToMessage(row: Record<string, unknown>): Message {
+  let metadata: RoundMetadata | undefined
+  if (row.metadata) {
+    try { metadata = JSON.parse(row.metadata as string) } catch { /* ignore */ }
+  }
   return {
     id: row.id as string,
     sessionId: row.session_id as string,
@@ -214,14 +272,23 @@ function rowToMessage(row: Record<string, unknown>): Message {
     content: row.content as string,
     timestamp: row.timestamp as number,
     round: row.round as number,
+    metadata,
   }
 }
 
 export function addMessage(msg: Message): Message {
   db.prepare(`
-    INSERT INTO messages (id, session_id, from_agent, content, timestamp, round)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(msg.id, msg.sessionId, msg.from, msg.content, msg.timestamp, msg.round)
+    INSERT INTO messages (id, session_id, from_agent, content, timestamp, round, metadata)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    msg.id,
+    msg.sessionId,
+    msg.from,
+    msg.content,
+    msg.timestamp,
+    msg.round,
+    msg.metadata ? JSON.stringify(msg.metadata) : null
+  )
   maybeRunMessageGc(msg.timestamp)
   return msg
 }
@@ -257,6 +324,39 @@ export function getLogs(sessionId: string): SessionLog[] {
     'SELECT * FROM session_logs WHERE session_id = ? ORDER BY timestamp ASC'
   ).all(sessionId) as Record<string, unknown>[]
   return rows.map(rowToSessionLog)
+}
+
+function rowToSnapshot(row: Record<string, unknown>): DiffSnapshot {
+  return {
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    round: row.round as number,
+    timestamp: row.timestamp as number,
+    diffStat: row.diff_stat as string,
+    diffFull: row.diff_full as string,
+  }
+}
+
+export function addSnapshot(snapshot: DiffSnapshot): DiffSnapshot {
+  db.prepare(`
+    INSERT INTO snapshots (id, session_id, round, timestamp, diff_stat, diff_full)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    snapshot.id,
+    snapshot.sessionId,
+    snapshot.round,
+    snapshot.timestamp,
+    snapshot.diffStat,
+    snapshot.diffFull
+  )
+  return snapshot
+}
+
+export function getSnapshots(sessionId: string): DiffSnapshot[] {
+  const rows = db.prepare(
+    'SELECT * FROM snapshots WHERE session_id = ? ORDER BY round ASC, timestamp ASC'
+  ).all(sessionId) as Record<string, unknown>[]
+  return rows.map(rowToSnapshot)
 }
 
 export function pruneExpiredMessages(now = Date.now()): number {

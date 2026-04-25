@@ -485,6 +485,14 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return json(res, 200, state.getLogs(session.id))
       }
 
+      // GET /api/sessions/:id/snapshots
+      const sessionSnapshotsMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/snapshots$/)
+      if (sessionSnapshotsMatch && method === 'GET') {
+        const session = state.getSession(sessionSnapshotsMatch[1])
+        if (!session) return json(res, 404, { error: 'Not found' })
+        return json(res, 200, state.getSnapshots(session.id))
+      }
+
       // POST /api/sessions/:id/pause
       const pauseMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/pause$/)
       if (pauseMatch && method === 'POST') {
@@ -496,7 +504,11 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       const resumeMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/resume$/)
       if (resumeMatch && method === 'POST') {
         const { extraRounds } = parseResumeBody(await parseBody(req))
-        const session = await router.resumeSession(resumeMatch[1], extraRounds)
+        const current = state.getSession(resumeMatch[1])
+        if (!current) return json(res, 404, { error: 'Not found' })
+        const session = current.status === 'error'
+          ? await router.resumeErrorSession(resumeMatch[1])
+          : await router.resumeSession(resumeMatch[1], extraRounds)
         return json(res, 200, session)
       }
 
