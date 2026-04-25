@@ -302,6 +302,7 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
   flex-direction: column;
   gap: 10px;
 }
+#empty-state.hidden { display: none; }
 #empty-state svg { opacity: .2; }
 #empty-state p { font-size: 13px; }
 

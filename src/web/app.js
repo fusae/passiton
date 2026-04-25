@@ -57,18 +57,28 @@ function setupMarked() {
 async function api(path, method = 'GET', body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } }
   if (body !== undefined) opts.body = JSON.stringify(body)
-  const r = await fetch(API + path, opts)
-  if (!r.ok) {
-    let errorMsg = `HTTP ${r.status}`
+  let r
+  try {
+    r = await fetch(API + path, opts)
+  } catch {
+    throw new Error('Cannot reach Turing server')
+  }
+
+  const text = await r.text()
+  let data = null
+  if (text) {
     try {
-      const errorData = await r.json()
-      errorMsg = errorData.error || errorMsg
+      data = JSON.parse(text)
     } catch {
-      errorMsg = await r.text() || errorMsg
+      data = null
     }
+  }
+
+  if (!r.ok) {
+    const errorMsg = data?.error || text || `HTTP ${r.status}`
     throw new Error(errorMsg)
   }
-  return r.json()
+  return data
 }
 
 // ── Toast notifications ───────────────────────────────────────────────────────
@@ -220,12 +230,8 @@ function renderSessionList() {
     })
   })
 
-  const emptyState = document.getElementById('empty-state')
-  if (!activeSessionId && visible.length > 0 && visible[0]?.id) {
-    selectSession(visible[0].id)
-  } else if (!activeSessionId && visible.length === 0 && emptyState) {
-    emptyState.classList.remove('hidden')
-    sessionView.classList.add('hidden')
+  if (!activeSessionId) {
+    renderSessionView(null)
   }
 }
 
@@ -247,11 +253,18 @@ async function selectSession(id) {
 }
 
 function renderSessionView(session) {
-  const emptyState = document.getElementById('empty-state')
+  if (!session) {
+    if (emptyState) emptyState.classList.remove('hidden')
+    if (sessionView) sessionView.classList.add('hidden')
+    return
+  }
+
   if (emptyState) {
     emptyState.classList.add('hidden')
   }
-  sessionView.classList.remove('hidden')
+  if (sessionView) {
+    sessionView.classList.remove('hidden')
+  }
 
   // Update side-btn labels to reflect actual agent names
   document.getElementById('side-from-btn').textContent = `from: ${agentLabel(session.from)}`
@@ -540,38 +553,52 @@ function populateAgentSelects() {
 let wsRetryTimer = null
 let wsRetryDelay = 1000
 let wsRetryCount = 0
+const WS_BASE_DELAY = 1000
 const WS_MAX_DELAY = 15000
 
 function connectWs() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  ws = new WebSocket(`${proto}://${location.host}/ws`)
+  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return
+  if (wsRetryTimer) {
+    clearTimeout(wsRetryTimer)
+    wsRetryTimer = null
+  }
 
-  ws.addEventListener('open', () => {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  const socket = new WebSocket(`${proto}://${location.host}/ws`)
+  ws = socket
+
+  socket.addEventListener('open', () => {
+    if (socket !== ws) return
     wsStatusEl.textContent = 'live'
     wsStatusEl.className = 'ws-badge connected'
     document.getElementById('server-dot').className = 'dot green'
-    // Reset backoff on successful connection
-    wsRetryDelay = 1000
+    wsRetryDelay = WS_BASE_DELAY
     wsRetryCount = 0
-    if (wsRetryTimer) { clearTimeout(wsRetryTimer); wsRetryTimer = null }
   })
 
-  ws.addEventListener('message', ({ data }) => {
-    handleWsEvent(JSON.parse(data))
+  socket.addEventListener('message', ({ data }) => {
+    if (socket !== ws) return
+    try {
+      handleWsEvent(JSON.parse(data))
+    } catch {
+      showToast('Received invalid WebSocket message', 'error')
+    }
   })
 
-  ws.addEventListener('close', () => {
+  socket.addEventListener('close', () => {
+    if (socket !== ws) return
     wsRetryCount++
-    wsStatusEl.textContent = `reconnecting (${wsRetryCount})…`
+    const delay = wsRetryDelay
+    wsStatusEl.textContent = `reconnecting #${wsRetryCount} (${Math.ceil(delay / 1000)}s)`
     wsStatusEl.className = 'ws-badge disconnected'
     document.getElementById('server-dot').className = 'dot red'
 
-    wsRetryTimer = setTimeout(connectWs, wsRetryDelay)
-    // Exponential backoff: 1s → 2s → 4s → 8s → 15s cap
+    wsRetryTimer = setTimeout(connectWs, delay)
     wsRetryDelay = Math.min(wsRetryDelay * 2, WS_MAX_DELAY)
   })
 
-  ws.addEventListener('error', () => {
+  socket.addEventListener('error', () => {
+    if (socket !== ws) return
     wsStatusEl.textContent = 'error'
     wsStatusEl.className = 'ws-badge disconnected'
   })
