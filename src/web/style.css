@@ -960,23 +960,19 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
 
 /* ── Log panel ──────────────────────────────────────────────────────────── */
 #log-toggle {
-  position: fixed;
-  bottom: 16px;
-  right: 16px;
-  z-index: 300;
   background: var(--surface2);
   border: 1px solid var(--border);
   color: var(--muted);
-  border-radius: 8px;
-  padding: 8px 14px;
+  border-radius: 6px;
+  padding: 4px 10px;
   font-size: 12px;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   transition: all .15s;
-  box-shadow: var(--shadow);
   font-family: var(--font);
+  margin-right: 8px;
 }
 #log-toggle:hover { color: var(--text); border-color: var(--accent); }
 #log-toggle.active { color: var(--accent); border-color: var(--accent); background: rgba(91, 141, 239, 0.08); }

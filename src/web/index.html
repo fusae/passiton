@@ -16,6 +16,10 @@
       <span class="header-sub">agent-to-agent proxy</span>
     </div>
     <div class="header-right">
+      <button id="log-toggle" title="Toggle execution logs">
+        📋 <span>Logs</span>
+        <span id="log-error-dot" class="log-error-dot hidden"></span>
+      </button>
       <span id="ws-status" class="ws-badge">connecting…</span>
     </div>
   </header>
@@ -166,10 +170,6 @@
   </div>
 
   <!-- Log Panel -->
-  <button id="log-toggle" title="Toggle execution logs">
-    📋 <span>Logs</span>
-    <span id="log-error-dot" class="log-error-dot hidden"></span>
-  </button>
   <div id="log-panel" class="hidden">
     <div id="log-panel-header">
       <span class="log-panel-title">Execution Logs</span>
