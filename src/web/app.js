@@ -293,9 +293,14 @@ async function selectSession(id) {
   activeSessionId = id
   renderSessionList()
   try {
-    const data = await api(`/api/sessions/${id}`)
+    const [data, logs] = await Promise.all([
+      api(`/api/sessions/${id}`),
+      api(`/api/sessions/${id}/logs`),
+    ])
+    if (activeSessionId !== id) return
     activeSession = data
     currentMessages = data.messages || []
+    replaceLogEntries(logs || [])
     renderSessionView(data)
   } catch (e) {
     console.error('Failed to load session', e)
@@ -306,6 +311,7 @@ function renderSessionView(session) {
   if (!session) {
     if (emptyState) emptyState.classList.remove('hidden')
     if (sessionView) sessionView.classList.add('hidden')
+    replaceLogEntries([])
     return
   }
 
@@ -753,6 +759,7 @@ function handleWsEvent(evt) {
         activeSessionId = null
         activeSession = null
         currentMessages = []
+        replaceLogEntries([])
         if (sessionView) sessionView.classList.add('hidden')
         if (emptyState) emptyState.classList.remove('hidden')
       }
@@ -761,7 +768,9 @@ function handleWsEvent(evt) {
     }
 
     case 'log': {
-      handleLogEvent(evt.payload)
+      if (evt.payload?.sessionId === activeSessionId) {
+        handleLogEvent(evt.payload)
+      }
       break
     }
   }
@@ -1313,6 +1322,7 @@ logResize.addEventListener('mousedown', (e) => {
 
 function handleLogEvent(payload) {
   const entry = {
+    sessionId: payload.sessionId,
     timestamp: payload.timestamp,
     level: payload.level,
     message: payload.message,
@@ -1331,7 +1341,23 @@ function handleLogEvent(payload) {
   }
 }
 
+function replaceLogEntries(entries) {
+  logEntries.length = 0
+  for (const entry of entries.slice(-LOG_MAX)) {
+    logEntries.push(entry)
+  }
+  logHasUnseenError = false
+  logErrorDot.classList.add('hidden')
+  if (logPanelOpen) {
+    renderLogEntries()
+  }
+}
+
 function renderLogEntries() {
+  if (!activeSessionId) {
+    logEntriesEl.innerHTML = '<div class="log-empty">Select a session to view logs</div>'
+    return
+  }
   if (!logEntries.length) {
     logEntriesEl.innerHTML = '<div class="log-empty">No log entries yet</div>'
     return

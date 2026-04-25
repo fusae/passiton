@@ -62,7 +62,12 @@ function readConfig(): AppConfig {
     const user = JSON.parse(raw) as Partial<AppConfig>
     const merged = deepMerge(DEFAULT_CONFIG, user) as AppConfig
     if (isPlainObject(user.agents)) {
-      merged.agents = user.agents as AppConfig['agents']
+      merged.agents = Object.fromEntries(
+        Object.entries(user.agents).map(([name, agent]) => {
+          const baseAgent = merged.agents?.[name]
+          return [name, deepMerge(baseAgent ?? {}, agent) as AppConfig['agents'][string]]
+        })
+      )
     }
     return normalizeConfig(merged)
   } catch (err) {

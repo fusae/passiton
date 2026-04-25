@@ -19,6 +19,14 @@ export interface Message {
   round: number
 }
 
+export interface SessionLog {
+  id: string
+  sessionId: string
+  timestamp: number
+  level: 'info' | 'warn' | 'error'
+  message: string
+}
+
 export interface Session {
   id: string
   from: AgentRef

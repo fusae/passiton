@@ -422,6 +422,14 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return json(res, 200, { ...session, messages })
       }
 
+      // GET /api/sessions/:id/logs
+      const sessionLogsMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/logs$/)
+      if (sessionLogsMatch && method === 'GET') {
+        const session = state.getSession(sessionLogsMatch[1])
+        if (!session) return json(res, 404, { error: 'Not found' })
+        return json(res, 200, state.getLogs(session.id))
+      }
+
       // POST /api/sessions/:id/pause
       const pauseMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/pause$/)
       if (pauseMatch && method === 'POST') {

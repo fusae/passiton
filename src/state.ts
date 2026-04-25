@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { homedir } from 'os'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
-import type { Session, Message, AgentRef, SessionStatus, SessionMode } from './types.js'
+import type { Session, Message, SessionLog, AgentRef, SessionStatus, SessionMode } from './types.js'
 
 const DB_DIR = join(homedir(), '.turing')
 const DB_PATH = join(DB_DIR, 'turing.db')
@@ -65,7 +65,16 @@ function createTables(): void {
       round       INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS session_logs (
+      id          TEXT PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES sessions(id),
+      timestamp   INTEGER NOT NULL,
+      level       TEXT NOT NULL,
+      message     TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_session_logs_session ON session_logs(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
   `)
 
@@ -184,6 +193,7 @@ export function listSessions(filter?: { status?: SessionStatus }): Session[] {
 
 export function deleteSession(id: string): void {
   const tx = db.transaction((sessionId: string) => {
+    db.prepare('DELETE FROM session_logs WHERE session_id = ?').run(sessionId)
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId)
     db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId)
   })
@@ -219,12 +229,39 @@ export function getMessages(sessionId: string): Message[] {
   return rows.map(rowToMessage)
 }
 
+function rowToSessionLog(row: Record<string, unknown>): SessionLog {
+  return {
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    timestamp: row.timestamp as number,
+    level: row.level as SessionLog['level'],
+    message: row.message as string,
+  }
+}
+
+export function addLog(log: SessionLog): SessionLog {
+  db.prepare(`
+    INSERT INTO session_logs (id, session_id, timestamp, level, message)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(log.id, log.sessionId, log.timestamp, log.level, log.message)
+  maybeRunMessageGc(log.timestamp)
+  return log
+}
+
+export function getLogs(sessionId: string): SessionLog[] {
+  const rows = db.prepare(
+    'SELECT * FROM session_logs WHERE session_id = ? ORDER BY timestamp ASC'
+  ).all(sessionId) as Record<string, unknown>[]
+  return rows.map(rowToSessionLog)
+}
+
 export function pruneExpiredMessages(now = Date.now()): number {
   if (messageRetentionMs <= 0) return 0
   const cutoff = now - messageRetentionMs
-  const result = db.prepare('DELETE FROM messages WHERE timestamp < ?').run(cutoff)
+  const deletedMessages = db.prepare('DELETE FROM messages WHERE timestamp < ?').run(cutoff).changes
+  const deletedLogs = db.prepare('DELETE FROM session_logs WHERE timestamp < ?').run(cutoff).changes
   lastMessageGcAt = now
-  return result.changes
+  return deletedMessages + deletedLogs
 }
 
 function maybeRunMessageGc(now: number): void {
