@@ -34,6 +34,10 @@ export class Router extends EventEmitter {
     this.adapters.set(adapter.name, adapter)
   }
 
+  clearAdapters(): void {
+    this.adapters.clear()
+  }
+
   getAdapter(name: string): Adapter | undefined {
     return this.adapters.get(name)
   }

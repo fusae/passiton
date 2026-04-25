@@ -76,12 +76,18 @@ export interface AgentConfig {
   env?: Record<string, string>
 }
 
+export interface DefaultsConfig {
+  maxRounds: number
+  mode: SessionMode
+}
+
 // Full app config
 export interface AppConfig {
   server: {
     port: number
   }
   agents: Record<string, AgentConfig>
+  defaults: DefaultsConfig
   policy: PolicyConfig
 }
 

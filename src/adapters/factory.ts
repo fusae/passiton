@@ -61,6 +61,7 @@ export function registerConfiguredAdapters(
       console.warn(`[init] unknown adapter "${agentCfg.adapter}" for "${name}" — skipping`)
       continue
     }
+    ;(adapter as { name: string }).name = name
     router.registerAdapter(adapter)
   }
 }

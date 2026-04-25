@@ -12,6 +12,13 @@ let currentMessages = []
 let activeSession = null
 let injectSide = 'from'
 let sessionFilter = 'all'
+let appConfig = null
+let editingAgentName = null
+const AGENT_COMMAND_DEFAULTS = {
+  'claude-code': 'claude',
+  codex: 'codex',
+  opencode: 'opencode',
+}
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const sessionList      = document.getElementById('session-list')
@@ -29,9 +36,17 @@ const roundsBannerMsg  = document.getElementById('rounds-banner-msg')
 const resumeModalOv    = document.getElementById('resume-modal-overlay')
 const wsStatusEl       = document.getElementById('ws-status')
 const scrollToBottomBtn = document.getElementById('scroll-to-bottom')
+const settingsToggle   = document.getElementById('settings-toggle')
+const settingsPanel    = document.getElementById('settings-panel')
+const settingsClose    = document.getElementById('settings-close')
+const agentsConfigList = document.getElementById('agents-config-list')
+const agentFormSlot    = document.getElementById('agent-config-form-slot')
+const addAgentBtn      = document.getElementById('add-agent-btn')
+const saveGlobalBtn    = document.getElementById('save-global-settings-btn')
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
+  await loadAppConfig()
   await loadAgents()
   await loadTemplates()
   await loadSessions()
@@ -43,6 +58,7 @@ async function init() {
   setupMarked()
   setupMessageActions()
   setupScrollToBottom()
+  setupSettingsPanel()
 }
 
 // ── Marked.js setup ───────────────────────────────────────────────────────────
@@ -81,6 +97,15 @@ async function api(path, method = 'GET', body) {
     throw new Error(errorMsg)
   }
   return data
+}
+
+async function loadAppConfig() {
+  try {
+    appConfig = await api('/api/config')
+    applyConfigDefaultsToNewSession()
+  } catch {
+    appConfig = null
+  }
 }
 
 // ── Toast notifications ───────────────────────────────────────────────────────
@@ -172,7 +197,7 @@ function applyTemplate(templateId) {
   const promptEl = document.getElementById('modal-prompt')
   if (!templateId) {
     // Custom — reset to defaults
-    modeSelect.value = 'collaborate'
+    modeSelect.value = appConfig?.defaults?.mode || 'collaborate'
     promptEl.value = ''
     promptEl.placeholder = 'Describe the task…'
     return
@@ -537,6 +562,7 @@ function setupFilterBtns() {
 // ── New session modal ─────────────────────────────────────────────────────────
 document.getElementById('new-btn').addEventListener('click', () => {
   populateAgentSelects()
+  applyConfigDefaultsToNewSession()
   // Reset template selection to "custom"
   const container = document.getElementById('template-selector')
   if (container) {
@@ -559,6 +585,7 @@ document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return
   if (!modalOverlay.classList.contains('hidden')) closeModal()
   if (!resumeModalOv.classList.contains('hidden')) closeResumeModal()
+  if (!settingsPanel.classList.contains('hidden')) closeSettingsPanel()
 })
 
 function closeModal() {
@@ -572,9 +599,9 @@ document.getElementById('modal-form').addEventListener('submit', async e => {
     from: { adapter: fd.get('from') },
     to:   { adapter: fd.get('to') },
     initialPrompt: fd.get('prompt'),
-    mode: fd.get('mode') || 'freeform',
+    mode: fd.get('mode') || appConfig?.defaults?.mode || 'freeform',
     context: fd.get('context') || undefined,
-    maxRounds: parseInt(fd.get('maxRounds')) || 20,
+    maxRounds: parseInt(fd.get('maxRounds')) || appConfig?.defaults?.maxRounds || 20,
     approveMode: fd.get('approveMode') === 'on',
     cwd: fd.get('cwd') || undefined,
   }
@@ -611,6 +638,14 @@ function populateAgentSelects() {
     if (current && names.includes(current)) el.value = current
     else if (names[idx]) el.value = names[idx]
   })
+}
+
+function applyConfigDefaultsToNewSession() {
+  if (!appConfig?.defaults) return
+  const modeSelect = document.getElementById('mode-select')
+  const maxRoundsInput = document.querySelector('input[name="maxRounds"]')
+  if (modeSelect) modeSelect.value = appConfig.defaults.mode
+  if (maxRoundsInput) maxRoundsInput.value = appConfig.defaults.maxRounds
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
@@ -1006,6 +1041,213 @@ function closeMobileMenu() {
   const overlay = document.getElementById('mobile-overlay')
   sidebar.classList.remove('mobile-open')
   overlay.classList.remove('active')
+}
+
+// ── Settings ─────────────────────────────────────────────────────────────────
+function setupSettingsPanel() {
+  settingsToggle.addEventListener('click', openSettingsPanel)
+  settingsClose.addEventListener('click', closeSettingsPanel)
+  settingsPanel.querySelector('.settings-overlay').addEventListener('click', closeSettingsPanel)
+  addAgentBtn.addEventListener('click', () => showAgentForm())
+  saveGlobalBtn.addEventListener('click', saveGlobalSettings)
+
+  agentsConfigList.addEventListener('click', async (event) => {
+    const editBtn = event.target.closest('[data-agent-edit]')
+    const deleteBtn = event.target.closest('[data-agent-delete]')
+    if (editBtn) {
+      showAgentForm(editBtn.dataset.agentEdit)
+      return
+    }
+    if (deleteBtn) {
+      await deleteAgent(deleteBtn.dataset.agentDelete)
+    }
+  })
+}
+
+async function openSettingsPanel() {
+  await loadAppConfig()
+  renderSettingsPanel()
+  settingsPanel.classList.remove('hidden')
+  settingsToggle.classList.add('active')
+}
+
+function closeSettingsPanel() {
+  settingsPanel.classList.add('hidden')
+  settingsToggle.classList.remove('active')
+  editingAgentName = null
+  agentFormSlot.innerHTML = ''
+  addAgentBtn.classList.remove('hidden')
+}
+
+function renderSettingsPanel() {
+  if (!appConfig) return
+  document.getElementById('global-max-rounds').value = appConfig.defaults?.maxRounds ?? 20
+  document.getElementById('global-port').value = appConfig.server?.port ?? 4590
+  document.getElementById('global-mode').value = appConfig.defaults?.mode ?? 'collaborate'
+  renderAgentConfigList()
+}
+
+function renderAgentConfigList() {
+  const entries = Object.entries(appConfig?.agents || {})
+  if (!entries.length) {
+    agentsConfigList.innerHTML = '<div class="settings-empty">No configured agents</div>'
+    return
+  }
+
+  agentsConfigList.innerHTML = entries.map(([name, cfg]) => {
+    const env = Object.entries(cfg.env || {})
+    return `<div class="agent-config-item">
+      <div class="agent-config-header">
+        <div class="agent-config-name">${escHtml(name)}</div>
+        <div class="agent-config-actions">
+          <button class="agent-config-btn" data-agent-edit="${escHtml(name)}">Edit</button>
+          <button class="agent-config-btn danger" data-agent-delete="${escHtml(name)}">Delete</button>
+        </div>
+      </div>
+      <div class="agent-config-details">
+        <div><span class="agent-config-label">Adapter</span><span class="agent-config-value">${escHtml(cfg.adapter)}</span></div>
+        <div><span class="agent-config-label">Command</span><span class="agent-config-value">${escHtml(cfg.command)}</span></div>
+        <div><span class="agent-config-label">Env</span><span class="agent-config-value">${env.length ? env.map(([k, v]) => `${escHtml(k)}=${escHtml(v)}`).join(', ') : 'none'}</span></div>
+      </div>
+    </div>`
+  }).join('')
+}
+
+function showAgentForm(agentName) {
+  editingAgentName = agentName || null
+  const cfg = editingAgentName ? appConfig?.agents?.[editingAgentName] : null
+  const selectedAdapter = cfg?.adapter || 'codex'
+  const envEntries = Object.entries(cfg?.env || {})
+  addAgentBtn.classList.add('hidden')
+  agentFormSlot.innerHTML = `<form class="agent-config-form" id="agent-config-form">
+    <div class="form-row">
+      <label>Name</label>
+      <input name="name" type="text" required value="${escHtml(editingAgentName || '')}" />
+    </div>
+    <div class="form-row">
+      <label>Adapter</label>
+      <select name="adapter">
+        ${['claude-code', 'codex', 'opencode'].map(adapter => `
+          <option value="${adapter}" ${selectedAdapter === adapter ? 'selected' : ''}>${adapter}</option>
+        `).join('')}
+      </select>
+    </div>
+    <div class="form-row">
+      <label>Command Path</label>
+      <input name="command" type="text" required value="${escHtml(cfg?.command || AGENT_COMMAND_DEFAULTS[selectedAdapter])}" placeholder="codex" />
+    </div>
+    <div class="form-row">
+      <label>Environment Variables</label>
+      <div class="env-vars-list">
+        ${envEntries.map(([key, value]) => envRowMarkup(key, value)).join('')}
+      </div>
+      <button type="button" class="add-env-btn">+ Add env var</button>
+    </div>
+    <div class="agent-form-actions">
+      <button type="button" class="settings-btn" id="agent-form-cancel">Cancel</button>
+      <button type="submit" class="settings-btn primary">${editingAgentName ? 'Save Agent' : 'Create Agent'}</button>
+    </div>
+  </form>`
+
+  const form = document.getElementById('agent-config-form')
+  const adapterSelect = form.querySelector('select[name="adapter"]')
+  const commandInput = form.querySelector('input[name="command"]')
+  form.addEventListener('submit', saveAgent)
+  adapterSelect.addEventListener('change', () => {
+    const currentDefault = Object.values(AGENT_COMMAND_DEFAULTS).includes(commandInput.value)
+    if (!editingAgentName || currentDefault) {
+      commandInput.value = AGENT_COMMAND_DEFAULTS[adapterSelect.value] || ''
+    }
+  })
+  form.querySelector('#agent-form-cancel').addEventListener('click', clearAgentForm)
+  form.querySelector('.add-env-btn').addEventListener('click', () => {
+    form.querySelector('.env-vars-list').insertAdjacentHTML('beforeend', envRowMarkup())
+  })
+  form.querySelector('.env-vars-list').addEventListener('click', (event) => {
+    const btn = event.target.closest('.env-var-remove')
+    if (btn) btn.closest('.env-var-row').remove()
+  })
+  form.querySelector('input[name="name"]').focus()
+}
+
+function envRowMarkup(key = '', value = '') {
+  return `<div class="env-var-row">
+    <input name="envKey" type="text" placeholder="KEY" value="${escHtml(key)}" />
+    <input name="envValue" type="text" placeholder="value" value="${escHtml(value)}" />
+    <button type="button" class="env-var-remove" title="Remove">✕</button>
+  </div>`
+}
+
+function clearAgentForm() {
+  editingAgentName = null
+  agentFormSlot.innerHTML = ''
+  addAgentBtn.classList.remove('hidden')
+}
+
+function collectEnv(form) {
+  const env = {}
+  form.querySelectorAll('.env-var-row').forEach(row => {
+    const key = row.querySelector('input[name="envKey"]').value.trim()
+    const value = row.querySelector('input[name="envValue"]').value
+    if (key && value) env[key] = value
+  })
+  return env
+}
+
+async function saveAgent(event) {
+  event.preventDefault()
+  const form = event.target
+  const fd = new FormData(form)
+  const body = {
+    name: String(fd.get('name') || '').trim(),
+    adapter: fd.get('adapter'),
+    command: String(fd.get('command') || '').trim(),
+    env: collectEnv(form),
+  }
+  const path = editingAgentName
+    ? `/api/config/agents/${encodeURIComponent(editingAgentName)}`
+    : '/api/config/agents'
+  const method = editingAgentName ? 'PUT' : 'POST'
+
+  try {
+    appConfig = await api(path, method, body)
+    await loadAgents()
+    clearAgentForm()
+    renderSettingsPanel()
+    showToast('Agent saved', 'success')
+  } catch (err) {
+    showToast(err.message, 'error')
+  }
+}
+
+async function deleteAgent(name) {
+  if (!name || !confirm(`Delete agent "${name}"?`)) return
+  try {
+    appConfig = await api(`/api/config/agents/${encodeURIComponent(name)}`, 'DELETE')
+    await loadAgents()
+    clearAgentForm()
+    renderSettingsPanel()
+    showToast('Agent deleted', 'success')
+  } catch (err) {
+    showToast(err.message, 'error')
+  }
+}
+
+async function saveGlobalSettings() {
+  const maxRounds = parseInt(document.getElementById('global-max-rounds').value)
+  const port = parseInt(document.getElementById('global-port').value)
+  const mode = document.getElementById('global-mode').value
+  try {
+    appConfig = await api('/api/config', 'PUT', {
+      defaults: { maxRounds, mode },
+      server: { port },
+    })
+    applyConfigDefaultsToNewSession()
+    renderSettingsPanel()
+    showToast('Settings saved. Restart required for port changes.', 'success')
+  } catch (err) {
+    showToast(err.message, 'error')
+  }
 }
 
 // ── Log panel ─────────────────────────────────────────────────────────────────

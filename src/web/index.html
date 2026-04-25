@@ -20,6 +20,7 @@
         📋 <span>Logs</span>
         <span id="log-error-dot" class="log-error-dot hidden"></span>
       </button>
+      <button id="settings-toggle" title="Settings">⚙ <span>Settings</span></button>
       <span id="ws-status" class="ws-badge">connecting…</span>
     </div>
   </header>
@@ -194,6 +195,50 @@
     </div>
     <div id="log-panel-resize" title="Drag to resize"></div>
     <div id="log-entries"></div>
+  </div>
+
+  <!-- Settings Panel -->
+  <div id="settings-panel" class="hidden">
+    <div class="settings-overlay"></div>
+    <div class="settings-content">
+      <div class="settings-header">
+        <h2>Settings</h2>
+        <button id="settings-close" class="modal-close-btn">✕</button>
+      </div>
+
+      <div class="settings-body">
+        <!-- Agent Management Section -->
+        <section class="settings-section">
+          <h3>Agent Management</h3>
+          <div id="agents-config-list"></div>
+          <div id="agent-config-form-slot"></div>
+          <button id="add-agent-btn" class="settings-btn">+ Add Agent</button>
+        </section>
+
+        <!-- Global Settings Section -->
+        <section class="settings-section">
+          <h3>Global Settings</h3>
+          <div class="form-row">
+            <label>Default Max Rounds</label>
+            <input id="global-max-rounds" type="number" min="1" max="500" />
+          </div>
+          <div class="form-row">
+            <label>Server Port <span class="hint">(requires restart)</span></label>
+            <input id="global-port" type="number" min="1024" max="65535" />
+          </div>
+          <div class="form-row">
+            <label>Default Mode</label>
+            <select id="global-mode">
+              <option value="collaborate">Collaborate</option>
+              <option value="discuss">Discuss</option>
+              <option value="review">Review</option>
+              <option value="freeform">Freeform</option>
+            </select>
+          </div>
+          <button id="save-global-settings-btn" class="settings-btn primary">Save Global Settings</button>
+        </section>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

@@ -1,9 +1,9 @@
 // Config module — load ~/.turing/config.json and merge with defaults
 
-import { readFileSync, existsSync } from 'fs'
-import { join } from 'path'
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
+import { join, dirname } from 'path'
 import { homedir } from 'os'
-import type { AppConfig } from './types.js'
+import type { AppConfig, SessionMode } from './types.js'
 
 const CONFIG_PATH = join(homedir(), '.turing', 'config.json')
 const DEFAULT_CODEX_COMMAND = process.env.TURING_CODEX_COMMAND ?? 'codex'
@@ -13,6 +13,10 @@ const DEFAULT_OPENCODE_COMMAND = process.env.TURING_OPENCODE_COMMAND ?? 'opencod
 export const DEFAULT_CONFIG: AppConfig = {
   server: {
     port: 4590,
+  },
+  defaults: {
+    maxRounds: 20,
+    mode: 'collaborate',
   },
   agents: {
     codex: {
@@ -56,7 +60,11 @@ function readConfig(): AppConfig {
   try {
     const raw = readFileSync(CONFIG_PATH, 'utf-8')
     const user = JSON.parse(raw) as Partial<AppConfig>
-    return deepMerge(DEFAULT_CONFIG, user) as AppConfig
+    const merged = deepMerge(DEFAULT_CONFIG, user) as AppConfig
+    if (isPlainObject(user.agents)) {
+      merged.agents = user.agents as AppConfig['agents']
+    }
+    return normalizeConfig(merged)
   } catch (err) {
     console.warn(`[config] failed to load ${CONFIG_PATH}:`, err)
     return DEFAULT_CONFIG
@@ -64,7 +72,10 @@ function readConfig(): AppConfig {
 }
 
 function validateConfig(config: AppConfig): AppConfig {
-  assertPositiveInt(config.server.port, 'server.port')
+  config = normalizeConfig(config)
+  assertPort(config.server.port, 'server.port')
+  assertPositiveInt(config.defaults.maxRounds, 'defaults.maxRounds')
+  assertSessionMode(config.defaults.mode, 'defaults.mode')
   assertPositiveInt(config.policy.maxRounds, 'policy.maxRounds')
   assertPositiveInt(config.policy.messageTimeout, 'policy.messageTimeout')
   assertNonNegativeInt(config.policy.messageRetentionMs, 'policy.messageRetentionMs')
@@ -90,12 +101,29 @@ function validateConfig(config: AppConfig): AppConfig {
         throw new Error(`[config] "agents.${name}.env" must be an object`)
       }
       for (const [envKey, envValue] of Object.entries(agent.env)) {
+        assertNonEmptyString(envKey, `agents.${name}.env key`)
         assertNonEmptyString(envValue, `agents.${name}.env.${envKey}`)
       }
     }
   }
 
   return config
+}
+
+function normalizeConfig(config: AppConfig): AppConfig {
+  const defaults = {
+    maxRounds: config.defaults?.maxRounds ?? config.policy?.maxRounds ?? DEFAULT_CONFIG.defaults.maxRounds,
+    mode: config.defaults?.mode ?? DEFAULT_CONFIG.defaults.mode,
+  }
+
+  return {
+    ...config,
+    defaults,
+    policy: {
+      ...config.policy,
+      maxRounds: defaults.maxRounds,
+    },
+  }
 }
 
 function deepMerge(base: unknown, override: unknown): unknown {
@@ -125,6 +153,13 @@ function assertPositiveInt(value: unknown, field: string): asserts value is numb
   }
 }
 
+function assertPort(value: unknown, field: string): asserts value is number {
+  assertPositiveInt(value, field)
+  if (value > 65535) {
+    throw new Error(`[config] "${field}" must be between 1 and 65535`)
+  }
+}
+
 function assertNonNegativeInt(value: unknown, field: string): asserts value is number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
     throw new Error(`[config] "${field}" must be a non-negative integer`)
@@ -135,4 +170,25 @@ function assertStringArray(value: unknown, field: string): asserts value is stri
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item === '')) {
     throw new Error(`[config] "${field}" must be a string array`)
   }
+}
+
+function assertSessionMode(value: unknown, field: string): asserts value is SessionMode {
+  if (value !== 'collaborate' && value !== 'discuss' && value !== 'review' && value !== 'freeform') {
+    throw new Error(`[config] "${field}" must be one of collaborate, discuss, review, freeform`)
+  }
+}
+
+export function writeConfig(config: AppConfig): void {
+  const validated = validateConfig(config)
+  const configDir = dirname(CONFIG_PATH)
+
+  if (!existsSync(configDir)) {
+    mkdirSync(configDir, { recursive: true })
+  }
+
+  writeFileSync(CONFIG_PATH, JSON.stringify(validated, null, 2), 'utf-8')
+}
+
+export function getConfigPath(): string {
+  return CONFIG_PATH
 }

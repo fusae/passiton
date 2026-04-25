@@ -7,9 +7,11 @@ import { fileURLToPath } from 'url'
 import { WebSocketServer } from 'ws'
 import type { WebSocket } from 'ws'
 import type { AgentCatalog } from './agents.js'
+import { createDiscoveredAgentConfig, registerConfiguredAdapters } from './adapters/factory.js'
+import { loadConfig, writeConfig } from './config.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { SessionMode, WsEvent } from './types.js'
+import type { AgentConfig, AppConfig, SessionMode, WsEvent } from './types.js'
 import { templates } from './templates.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -125,6 +127,91 @@ function optionalPositiveInt(value: unknown, field: string): number | undefined 
   return value
 }
 
+function optionalPort(value: unknown, field: string): number | undefined {
+  const port = optionalPositiveInt(value, field)
+  if (port !== undefined && port > 65535) {
+    throw new HttpError(400, `"${field}" must be between 1 and 65535`)
+  }
+  return port
+}
+
+function requireSessionMode(value: unknown, field: string): SessionMode {
+  const mode = parseSessionMode(value)
+  if (!mode) {
+    throw new HttpError(400, `"${field}" is required`)
+  }
+  return mode
+}
+
+function parseEnv(value: unknown, field: string): Record<string, string> | undefined {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  const env = requireRecord(value, field)
+  const parsed: Record<string, string> = {}
+  for (const [key, envValue] of Object.entries(env)) {
+    const trimmedKey = key.trim()
+    if (!trimmedKey) {
+      throw new HttpError(400, `"${field}" cannot contain empty keys`)
+    }
+    parsed[trimmedKey] = requireNonEmptyString(envValue, `${field}.${key}`)
+  }
+  return parsed
+}
+
+function parseGlobalConfigBody(body: unknown): { maxRounds: number; mode: SessionMode; port: number } {
+  const data = requireRecord(body, 'body')
+  const defaults = isRecord(data.defaults) ? data.defaults : data
+  const server = isRecord(data.server) ? data.server : data
+
+  return {
+    maxRounds: optionalPositiveInt(defaults.maxRounds, 'defaults.maxRounds') ?? optionalPositiveInt(data.maxRounds, 'maxRounds') ?? 20,
+    mode: requireSessionMode(defaults.mode ?? data.mode, 'defaults.mode'),
+    port: optionalPort(server.port, 'server.port') ?? optionalPort(data.port, 'port') ?? portDefault(),
+  }
+}
+
+function portDefault(): number {
+  return loadConfig().server.port
+}
+
+function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: string; config: AgentConfig } {
+  const data = requireRecord(body, 'body')
+  const name = requireNonEmptyString(data.name, 'name')
+  const adapter = requireNonEmptyString(data.adapter, 'adapter')
+  const command = requireNonEmptyString(data.command, 'command')
+  const defaults = createDiscoveredAgentConfig(adapter, command)
+  if (!defaults) {
+    throw new HttpError(400, '"adapter" must be one of claude-code, codex, opencode')
+  }
+
+  const env = parseEnv(data.env, 'env')
+  return {
+    name,
+    config: {
+      ...defaults,
+      args: existing && existing.adapter === adapter ? existing.args : defaults.args,
+      timeout: existing && existing.adapter === adapter ? existing.timeout : defaults.timeout,
+      model: existing && existing.adapter === adapter ? existing.model : defaults.model,
+      command,
+      ...(env && Object.keys(env).length > 0 ? { env } : {}),
+    },
+  }
+}
+
+function agentNameFromPath(pathname: string): string | undefined {
+  const match = pathname.match(/^\/api\/config\/agents\/([^/]+)$/)
+  return match ? decodeURIComponent(match[1]) : undefined
+}
+
+async function reloadAgents(router: Router, agentCatalog: AgentCatalog, config: AppConfig): Promise<void> {
+  router.clearAdapters()
+  agentCatalog.setConfiguredAgents(config.agents)
+  await agentCatalog.discover()
+  registerConfiguredAdapters(router, config.agents)
+  agentCatalog.registerDiscoveredAdapters(router)
+}
+
 function parseAgentRef(value: unknown, field: string): { adapter: string; label?: string } {
   const body = requireRecord(value, field)
   return {
@@ -219,7 +306,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
     // CORS for local dev
     res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS')
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
     if (method === 'OPTIONS') { res.writeHead(204); res.end(); return }
 
@@ -237,6 +324,76 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return json(res, 200, templates)
       }
 
+      // GET /api/config
+      if (pathname === '/api/config' && method === 'GET') {
+        return json(res, 200, loadConfig())
+      }
+
+      // PUT /api/config
+      if (pathname === '/api/config' && method === 'PUT') {
+        const current = loadConfig()
+        const global = parseGlobalConfigBody(await parseBody(req))
+        const updated: AppConfig = {
+          ...current,
+          server: { ...current.server, port: global.port },
+          defaults: { maxRounds: global.maxRounds, mode: global.mode },
+          policy: { ...current.policy, maxRounds: global.maxRounds },
+        }
+        writeConfig(updated)
+        return json(res, 200, loadConfig())
+      }
+
+      // POST /api/config/agents
+      if (pathname === '/api/config/agents' && method === 'POST') {
+        const current = loadConfig()
+        const { name, config } = parseAgentConfigBody(await parseBody(req))
+        if (current.agents[name]) {
+          throw new HttpError(409, `Agent "${name}" already exists`)
+        }
+        const updated: AppConfig = {
+          ...current,
+          agents: { ...current.agents, [name]: config },
+        }
+        writeConfig(updated)
+        const saved = loadConfig()
+        await reloadAgents(router, agentCatalog, saved)
+        return json(res, 201, saved)
+      }
+
+      const configAgentName = agentNameFromPath(pathname)
+      if (configAgentName && method === 'PUT') {
+        const current = loadConfig()
+        const existing = current.agents[configAgentName]
+        if (!existing) return json(res, 404, { error: 'Not found' })
+        const { name, config } = parseAgentConfigBody(await parseBody(req), existing)
+        if (name !== configAgentName && current.agents[name]) {
+          throw new HttpError(409, `Agent "${name}" already exists`)
+        }
+        const agents = { ...current.agents }
+        delete agents[configAgentName]
+        agents[name] = config
+        const updated: AppConfig = { ...current, agents }
+        writeConfig(updated)
+        const saved = loadConfig()
+        await reloadAgents(router, agentCatalog, saved)
+        return json(res, 200, saved)
+      }
+
+      if (configAgentName && method === 'DELETE') {
+        const current = loadConfig()
+        if (!current.agents[configAgentName]) return json(res, 404, { error: 'Not found' })
+        if (Object.keys(current.agents).length <= 1) {
+          throw new HttpError(400, 'At least one agent is required')
+        }
+        const agents = { ...current.agents }
+        delete agents[configAgentName]
+        const updated: AppConfig = { ...current, agents }
+        writeConfig(updated)
+        const saved = loadConfig()
+        await reloadAgents(router, agentCatalog, saved)
+        return json(res, 200, saved)
+      }
+
       // GET /api/sessions
       if (pathname === '/api/sessions' && method === 'GET') {
         const statusFilter = parseSessionStatus(url.searchParams.get('status'))
@@ -246,7 +403,13 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // POST /api/sessions
       if (pathname === '/api/sessions' && method === 'POST') {
-        const session = router.startSession(parseSessionBody(await parseBody(req)))
+        const defaults = loadConfig().defaults
+        const params = parseSessionBody(await parseBody(req))
+        const session = router.startSession({
+          ...params,
+          mode: params.mode ?? defaults.mode,
+          maxRounds: params.maxRounds ?? defaults.maxRounds,
+        })
         return json(res, 201, session)
       }
 

@@ -55,6 +55,11 @@ export class AgentCatalog {
   private probeCache = new Map<string, ProbeCacheEntry>()
 
   constructor(configuredAgents: Record<string, AgentConfig>) {
+    this.setConfiguredAgents(configuredAgents)
+  }
+
+  setConfiguredAgents(configuredAgents: Record<string, AgentConfig>): void {
+    this.entries.clear()
     for (const [name, agentCfg] of Object.entries(configuredAgents)) {
       this.entries.set(name, {
         name,
@@ -65,6 +70,7 @@ export class AgentCatalog {
         availableForSessions: createAdapter(agentCfg) !== undefined,
       })
     }
+    this.probeCache.clear()
   }
 
   async discover(): Promise<void> {
