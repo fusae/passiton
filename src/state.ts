@@ -182,6 +182,14 @@ export function listSessions(filter?: { status?: SessionStatus }): Session[] {
   return rows.map(rowToSession)
 }
 
+export function deleteSession(id: string): void {
+  const tx = db.transaction((sessionId: string) => {
+    db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId)
+    db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId)
+  })
+  tx(id)
+}
+
 // ── Messages ──────────────────────────────────────────────────────────────────
 
 function rowToMessage(row: Record<string, unknown>): Message {

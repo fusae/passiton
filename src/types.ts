@@ -92,6 +92,7 @@ export type WsEventType =
   | 'session:done'
   | 'session:error'
   | 'session:paused'
+  | 'session:deleted'
   | 'message:new'
   | 'agent:status'
   | 'log'

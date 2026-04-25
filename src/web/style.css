@@ -156,6 +156,29 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
   cursor: pointer;
   transition: background .12s;
   border-left: 2px solid transparent;
+  position: relative;
+}
+.session-item .session-delete-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--red);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 14px;
+  cursor: pointer;
+  opacity: 0;
+  transition: all .15s;
+}
+.session-item:hover .session-delete-btn {
+  opacity: 1;
+}
+.session-item .session-delete-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: var(--red);
 }
 .session-item:hover { background: rgba(255,255,255,.025); }
 .session-item.active {
@@ -312,6 +335,7 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
   flex-direction: column;
   flex: 1;
   overflow: hidden;
+  position: relative;
 }
 #session-view.hidden { display: none; }
 
@@ -355,6 +379,7 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
 .toolbar-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* ── Rounds banner ──────────────────────────────────────────────────────── */
@@ -961,7 +986,7 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
   }
 
   #inject-bar {
-    padding: 12px 16px 20px;
+    padding: 12px 24px 20px;
   }
 
   #modal,
@@ -1156,28 +1181,26 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
 /* ── Scroll-to-bottom button ────────────────────────────────────────────── */
 #scroll-to-bottom {
   position: absolute;
-  bottom: 20px;
-  right: 20px;
+  right: 32px;
+  bottom: 120px;
   background: var(--accent);
   color: #fff;
-  border: none;
-  border-radius: 50%;
-  width: 48px;
-  height: 48px;
-  font-size: 20px;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
   box-shadow: 0 4px 12px rgba(0,0,0,.4);
   transition: all .2s;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10;
 }
-#scroll-to-bottom.visible {
-  display: flex;
-}
+#scroll-to-bottom.hidden { display: none; }
 #scroll-to-bottom:hover {
-  transform: scale(1.05);
+  transform: translateY(-1px);
   box-shadow: 0 6px 16px rgba(0,0,0,.5);
 }
 

@@ -28,6 +28,7 @@ const roundsBanner     = document.getElementById('rounds-banner')
 const roundsBannerMsg  = document.getElementById('rounds-banner-msg')
 const resumeModalOv    = document.getElementById('resume-modal-overlay')
 const wsStatusEl       = document.getElementById('ws-status')
+const scrollToBottomBtn = document.getElementById('scroll-to-bottom')
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
@@ -41,6 +42,7 @@ async function init() {
   setupMobileMenu()
   setupMarked()
   setupMessageActions()
+  setupScrollToBottom()
 }
 
 // ── Marked.js setup ───────────────────────────────────────────────────────────
@@ -146,8 +148,8 @@ function renderTemplateSelector() {
   if (!container || !templates.length) return
   container.innerHTML =
     `<div class="template-card selected" data-template="">
-      <div class="template-name">自定义</div>
-      <div class="template-desc">从头配置 session 参数</div>
+      <div class="template-name">Custom</div>
+      <div class="template-desc">Configure session parameters from scratch</div>
     </div>` +
     templates.map(t => `
       <div class="template-card" data-template="${t.id}">
@@ -220,13 +222,36 @@ function renderSessionList() {
         <span class="rounds-chip">R${s.currentRound}/${s.maxRounds}</span>
         <span class="time-chip">${timeAgo(s.updatedAt)}</span>
       </div>
+      <button class="session-delete-btn" data-id="${s.id}" title="Delete session">🗑</button>
     </div>
   `}).join('')
 
   sessionList.querySelectorAll('.session-item').forEach(el => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', (e) => {
+      // Don't select if clicking delete button
+      if (e.target.classList.contains('session-delete-btn')) return
       selectSession(el.dataset.id)
       closeMobileMenu()
+    })
+  })
+
+  sessionList.querySelectorAll('.session-delete-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation()
+      const id = btn.dataset.id
+      if (!confirm('Delete this session?')) return
+      try {
+        await api(`/api/sessions/${id}`, 'DELETE')
+        sessions = sessions.filter(s => s.id !== id)
+        if (activeSessionId === id) {
+          activeSessionId = null
+          if (emptyState) emptyState.classList.remove('hidden')
+          if (sessionView) sessionView.classList.add('hidden')
+        }
+        renderSessionList()
+      } catch (err) {
+        showToast(err.message, 'error')
+      }
     })
   })
 
@@ -303,7 +328,7 @@ function updateToolbar(session) {
 
   // Update placeholder to hint reopen behavior
   if (isDone) {
-    injectInput.placeholder = '发送消息以重启讨论...'
+    injectInput.placeholder = 'Send a message to reopen...'
   } else {
     injectInput.placeholder = 'Inject a message… (⌘+Enter to send)'
   }
@@ -316,9 +341,32 @@ function renderMessages(msgs, session) {
       ? `<div class="round-divider"><span>Round ${m.round}</span></div>`
       : ''
     lastRound = m.round
-    return divider + buildMessageMarkup(m, session)
+    return divider + buildMessageMarkup(m, session, { noAnimate: true })
   }).join('')
+  scrollToBottom()
+  updateScrollToBottomButton()
+}
+
+function scrollToBottom() {
   messagesEl.scrollTop = messagesEl.scrollHeight
+}
+
+function isScrolledToBottom() {
+  const threshold = 100
+  return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < threshold
+}
+
+function setupScrollToBottom() {
+  messagesEl.addEventListener('scroll', updateScrollToBottomButton)
+
+  scrollToBottomBtn.addEventListener('click', () => {
+    scrollToBottom()
+    updateScrollToBottomButton()
+  })
+}
+
+function updateScrollToBottomButton() {
+  scrollToBottomBtn.classList.toggle('hidden', isScrolledToBottom())
 }
 
 // ── Session controls ──────────────────────────────────────────────────────────
@@ -331,7 +379,7 @@ document.getElementById('btn-pause').addEventListener('click', async () => {
   try {
     await api(`/api/sessions/${activeSessionId}/pause`, 'POST')
   } catch (err) {
-    showToast(err.message)
+    showToast(err.message, 'error')
   } finally {
     btn.disabled = false
     btn.textContent = originalText
@@ -347,7 +395,7 @@ document.getElementById('btn-resume').addEventListener('click', async () => {
   try {
     await api(`/api/sessions/${activeSessionId}/resume`, 'POST')
   } catch (err) {
-    showToast(err.message)
+    showToast(err.message, 'error')
   } finally {
     btn.disabled = false
     btn.textContent = originalText
@@ -364,7 +412,7 @@ document.getElementById('btn-stop').addEventListener('click', async () => {
   try {
     await api(`/api/sessions/${activeSessionId}/stop`, 'POST')
   } catch (err) {
-    showToast(err.message)
+    showToast(err.message, 'error')
   } finally {
     btn.disabled = false
     btn.textContent = originalText
@@ -382,7 +430,7 @@ document.getElementById('btn-continue-10').addEventListener('click', async () =>
     await api(`/api/sessions/${activeSessionId}/resume`, 'POST', { extraRounds: 10 })
     roundsBanner.classList.add('hidden')
   } catch (err) {
-    showToast(err.message)
+    showToast(err.message, 'error')
   }
 })
 
@@ -396,25 +444,36 @@ document.getElementById('btn-end-session').addEventListener('click', async () =>
     await api(`/api/sessions/${activeSessionId}/stop`, 'POST')
     roundsBanner.classList.add('hidden')
   } catch (err) {
-    showToast(err.message)
+    showToast(err.message, 'error')
   }
 })
 
 // Resume +N modal
 document.getElementById('resume-modal-cancel').addEventListener('click', () => {
-  resumeModalOv.classList.add('hidden')
+  closeResumeModal()
 })
+
+function closeResumeModal() {
+  resumeModalOv.classList.add('hidden')
+}
 
 document.getElementById('resume-modal-ok').addEventListener('click', async () => {
   const n = parseInt(document.getElementById('resume-rounds-input').value)
   if (!n || n < 1) return
-  resumeModalOv.classList.add('hidden')
-  if (!activeSessionId) return
+  const btn = document.getElementById('resume-modal-ok')
+  const originalText = btn.textContent
+  btn.disabled = true
+  btn.textContent = 'Continuing...'
   try {
+    if (!activeSessionId) return
     await api(`/api/sessions/${activeSessionId}/resume`, 'POST', { extraRounds: n })
     roundsBanner.classList.add('hidden')
+    closeResumeModal()
   } catch (err) {
-    showToast(err.message)
+    showToast(err.message, 'error')
+  } finally {
+    btn.disabled = false
+    btn.textContent = originalText
   }
 })
 
@@ -444,7 +503,7 @@ async function doInject() {
       await selectSession(activeSessionId)
     }
   } catch (err) {
-    showToast(err.message)
+    showToast(err.message, 'error')
   } finally {
     injectInput.disabled = false
     btn.disabled = false
@@ -496,6 +555,12 @@ modalOverlay.addEventListener('click', e => {
   if (e.target === modalOverlay) closeModal()
 })
 
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return
+  if (!modalOverlay.classList.contains('hidden')) closeModal()
+  if (!resumeModalOv.classList.contains('hidden')) closeResumeModal()
+})
+
 function closeModal() {
   modalOverlay.classList.add('hidden')
 }
@@ -519,16 +584,15 @@ document.getElementById('modal-form').addEventListener('submit', async e => {
   submitBtn.disabled = true
   submitBtn.textContent = 'Creating...'
 
-  closeModal()
-  e.target.reset()
-
   try {
     const session = await api('/api/sessions', 'POST', body)
     sessions.unshift(session)
     renderSessionList()
     await selectSession(session.id)
+    closeModal()
+    e.target.reset()
   } catch (err) {
-    showToast(err.message)
+    showToast(err.message, 'error')
   } finally {
     submitBtn.disabled = false
     submitBtn.textContent = originalText
@@ -647,6 +711,20 @@ function handleWsEvent(evt) {
       break
     }
 
+    case 'session:deleted': {
+      const id = evt.payload?.id
+      sessions = sessions.filter(s => s.id !== id)
+      if (id === activeSessionId) {
+        activeSessionId = null
+        activeSession = null
+        currentMessages = []
+        if (sessionView) sessionView.classList.add('hidden')
+        if (emptyState) emptyState.classList.remove('hidden')
+      }
+      renderSessionList()
+      break
+    }
+
     case 'log': {
       handleLogEvent(evt.payload)
       break
@@ -656,6 +734,8 @@ function handleWsEvent(evt) {
 
 // Append a single new message without re-rendering all (performance)
 function appendMessage(msg) {
+  const wasAtBottom = isScrolledToBottom()
+
   // Insert round divider if needed
   const prevMsg = currentMessages[currentMessages.length - 2]
   if (!prevMsg || prevMsg.round !== msg.round) {
@@ -668,7 +748,12 @@ function appendMessage(msg) {
   const temp = document.createElement('div')
   temp.innerHTML = buildMessageMarkup(msg, activeSession)
   messagesEl.appendChild(temp.firstElementChild)
-  messagesEl.scrollTop = messagesEl.scrollHeight
+
+  // Auto-scroll only if already at bottom
+  if (wasAtBottom) {
+    scrollToBottom()
+  }
+  updateScrollToBottomButton()
 
   // Update rounds label
   sessionRounds.textContent = `R${msg.round}/${activeSession?.maxRounds ?? '?'}`
@@ -695,11 +780,12 @@ function escHtml(str) {
     .replace(/"/g, '&quot;')
 }
 
-function buildMessageMarkup(msg, session) {
+function buildMessageMarkup(msg, session, opts = {}) {
   const { side, bubbleClass, senderLabel } = getMessagePresentation(msg, session)
+  const animationClass = opts.noAnimate ? ' no-animate' : ''
   const avatarInitial = senderLabel.charAt(0).toUpperCase()
   const renderedContent = renderMarkdown(msg.content)
-  return `<div class="msg-wrapper ${side}">
+  return `<div class="msg-wrapper ${side}${animationClass}">
     <div class="msg ${bubbleClass}">
       <div class="msg-header">
         <div class="msg-avatar">${escHtml(avatarInitial)}</div>

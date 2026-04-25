@@ -219,7 +219,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
     // CORS for local dev
     res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS')
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
     if (method === 'OPTIONS') { res.writeHead(204); res.end(); return }
 
@@ -279,6 +279,19 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       if (stopMatch && method === 'POST') {
         const session = await router.stopSession(stopMatch[1])
         return json(res, 200, session)
+      }
+
+      // DELETE /api/sessions/:id
+      const deleteMatch = pathname.match(/^\/api\/sessions\/([^/]+)$/)
+      if (deleteMatch && method === 'DELETE') {
+        const sessionId = deleteMatch[1]
+        const session = state.getSession(sessionId)
+        if (!session) return json(res, 404, { error: 'Not found' })
+
+        state.deleteSession(sessionId)
+        router.emit('event', { type: 'session:deleted', payload: { id: sessionId } })
+
+        return json(res, 200, { success: true })
       }
 
       // POST /api/sessions/:id/message
