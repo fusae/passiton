@@ -10,6 +10,7 @@ import type { AgentCatalog } from './agents.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
 import type { SessionMode, WsEvent } from './types.js'
+import { templates } from './templates.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(__dirname, 'web')
@@ -229,6 +230,11 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       if (pathname === '/api/agents' && method === 'GET') {
         const agents = await agentCatalog.listAgents()
         return json(res, 200, agents)
+      }
+
+      // GET /api/templates
+      if (pathname === '/api/templates' && method === 'GET') {
+        return json(res, 200, templates)
       }
 
       // GET /api/sessions

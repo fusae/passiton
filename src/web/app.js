@@ -5,6 +5,7 @@ const API = ''  // same origin
 // ── State ─────────────────────────────────────────────────────────────────────
 let sessions = []
 let agents = []
+let templates = []
 let activeSessionId = null
 let ws = null
 let currentMessages = []
@@ -31,6 +32,7 @@ const wsStatusEl       = document.getElementById('ws-status')
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
   await loadAgents()
+  await loadTemplates()
   await loadSessions()
   connectWs()
   setInterval(loadAgents, 30_000)
@@ -92,6 +94,61 @@ function renderAgents() {
 }
 
 document.getElementById('refresh-agents-btn').addEventListener('click', loadAgents)
+
+// ── Templates ─────────────────────────────────────────────────────────────────
+async function loadTemplates() {
+  try {
+    templates = await api('/api/templates')
+    renderTemplateSelector()
+  } catch { /* server might be down */ }
+}
+
+function renderTemplateSelector() {
+  const container = document.getElementById('template-selector')
+  if (!container || !templates.length) return
+  container.innerHTML =
+    `<div class="template-card selected" data-template="">
+      <div class="template-name">自定义</div>
+      <div class="template-desc">从头配置 session 参数</div>
+    </div>` +
+    templates.map(t => `
+      <div class="template-card" data-template="${t.id}">
+        <div class="template-name">${escHtml(t.name)}</div>
+        <div class="template-desc">${escHtml(t.description)}</div>
+      </div>
+    `).join('')
+
+  container.querySelectorAll('.template-card').forEach(card => {
+    card.addEventListener('click', () => {
+      container.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'))
+      card.classList.add('selected')
+      applyTemplate(card.dataset.template)
+    })
+  })
+}
+
+function applyTemplate(templateId) {
+  const modeSelect = document.getElementById('mode-select')
+  const promptEl = document.getElementById('modal-prompt')
+  if (!templateId) {
+    // Custom — reset to defaults
+    modeSelect.value = 'collaborate'
+    promptEl.value = ''
+    promptEl.placeholder = 'Describe the task…'
+    return
+  }
+  const tpl = templates.find(t => t.id === templateId)
+  if (!tpl) return
+  modeSelect.value = tpl.mode
+  if (tpl.promptPrefix) {
+    promptEl.value = tpl.promptPrefix
+    promptEl.setSelectionRange(tpl.promptPrefix.length, tpl.promptPrefix.length)
+  } else {
+    promptEl.value = ''
+  }
+  promptEl.placeholder = tpl.description
+  promptEl.focus()
+}
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
 async function loadSessions() {
@@ -317,6 +374,13 @@ function setupFilterBtns() {
 // ── New session modal ─────────────────────────────────────────────────────────
 document.getElementById('new-btn').addEventListener('click', () => {
   populateAgentSelects()
+  // Reset template selection to "custom"
+  const container = document.getElementById('template-selector')
+  if (container) {
+    container.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'))
+    const customCard = container.querySelector('[data-template=""]')
+    if (customCard) customCard.classList.add('selected')
+  }
   modalOverlay.classList.remove('hidden')
   setTimeout(() => document.getElementById('modal-prompt').focus(), 50)
 })
