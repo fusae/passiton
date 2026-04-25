@@ -2,7 +2,7 @@
 
 import { EventEmitter } from 'events'
 import { v4 as uuidv4 } from 'uuid'
-import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode } from './types.js'
+import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext } from './types.js'
 import * as state from './state.js'
 import {
   checkPreRound,
@@ -53,7 +53,7 @@ export class Router extends EventEmitter {
     to: AgentRef
     initialPrompt: string
     mode?: SessionMode
-    context?: string
+    context?: SessionContext
     maxRounds?: number
     approveMode?: boolean
     cwd?: string
@@ -152,7 +152,7 @@ export class Router extends EventEmitter {
 
   // ── Human message injection ─────────────────────────────────────────────────
 
-  injectMessage(sessionId: string, content: string, side: 'from' | 'to' = 'from'): Message {
+  injectMessage(sessionId: string, content: string): Message {
     const session = state.getSession(sessionId)
     if (!session) throw new Error(`Session ${sessionId} not found`)
 
@@ -288,7 +288,6 @@ export class Router extends EventEmitter {
     const adapter = this.adapters.get(target.adapter)
 
     if (!adapter) throw new Error(`Adapter not found: ${target.adapter}`)
-
     this.emitLog('info', `Adapter call: ${target.adapter} [${sessionId.slice(0, 8)}] round=${round} turn=${recipient}`, sessionId)
     const opts = this.buildSendOpts(session, recipient)
     const response = await this.callWithRetry(adapter, session, message, opts)
@@ -456,6 +455,7 @@ export class Router extends EventEmitter {
     }
     return collected.join('\n').trim()
   }
+
 }
 
 function sleep(ms: number): Promise<void> {

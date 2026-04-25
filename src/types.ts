@@ -27,6 +27,23 @@ export interface SessionLog {
   message: string
 }
 
+export interface SessionContextFile {
+  path: string
+  content: string
+}
+
+export interface SessionContextInput {
+  files?: string[]
+  rules?: string
+  text?: string
+}
+
+export interface SessionContext {
+  files?: SessionContextFile[]
+  rules?: string             // constraints/rules to inject
+  text?: string              // free-form background text
+}
+
 export interface Session {
   id: string
   from: AgentRef
@@ -38,7 +55,7 @@ export interface Session {
   currentRound: number
   approveMode: boolean
   cwd?: string
-  context?: string           // background context from prior conversations
+  context?: SessionContext   // structured context injected every round
   systemPrompts?: {          // per-agent system prompts (generated from mode + context)
     from: string
     to: string

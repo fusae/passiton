@@ -11,7 +11,7 @@ import { createDiscoveredAgentConfig, registerConfiguredAdapters } from './adapt
 import { loadConfig, writeConfig } from './config.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { AgentConfig, AppConfig, SessionMode, WsEvent } from './types.js'
+import type { AgentConfig, AppConfig, SessionMode, SessionContext, SessionContextInput, WsEvent } from './types.js'
 import { templates } from './templates.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -245,6 +245,65 @@ function parseSessionMode(value: unknown): SessionMode | undefined {
   throw new HttpError(400, '"mode" must be one of collaborate, discuss, review, freeform')
 }
 
+function parseSessionContext(value: unknown, field: string): SessionContextInput | undefined {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  const ctx = requireRecord(value, field)
+  const result: SessionContextInput = {}
+
+  if (ctx.files !== undefined) {
+    if (!Array.isArray(ctx.files)) {
+      throw new HttpError(400, `"${field}.files" must be an array`)
+    }
+    result.files = ctx.files.map((f, i) => requireNonEmptyString(f, `${field}.files[${i}]`))
+  }
+
+  if (ctx.rules !== undefined) {
+    result.rules = optionalString(ctx.rules, `${field}.rules`)
+  }
+
+  if (ctx.text !== undefined) {
+    result.text = optionalString(ctx.text, `${field}.text`)
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined
+}
+
+function resolveSessionContext(context: SessionContextInput | undefined, cwd?: string): SessionContext | undefined {
+  if (!context) return undefined
+
+  const result: SessionContext = {}
+
+  if (context.rules) {
+    result.rules = context.rules
+  }
+
+  if (context.text) {
+    result.text = context.text
+  }
+
+  if (context.files && context.files.length > 0) {
+    const baseDir = cwd ? path.resolve(cwd) : process.cwd()
+    result.files = context.files.map((filePath) => {
+      const resolvedPath = path.resolve(baseDir, filePath)
+      try {
+        return {
+          path: filePath,
+          content: fs.readFileSync(resolvedPath, 'utf-8'),
+        }
+      } catch (err) {
+        return {
+          path: filePath,
+          content: `[Error reading file: ${String(err)}]`,
+        }
+      }
+    })
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined
+}
+
 function parseSessionBody(body: unknown) {
   const data = requireRecord(body, 'body')
 
@@ -253,7 +312,7 @@ function parseSessionBody(body: unknown) {
     to: parseAgentRef(data.to, 'to'),
     initialPrompt: requireNonEmptyString(data.initialPrompt, 'initialPrompt'),
     mode: parseSessionMode(data.mode),
-    context: optionalString(data.context, 'context'),
+    context: parseSessionContext(data.context, 'context'),
     maxRounds: optionalPositiveInt(data.maxRounds, 'maxRounds'),
     approveMode: optionalBoolean(data.approveMode, 'approveMode'),
     cwd: optionalString(data.cwd, 'cwd'),
@@ -267,15 +326,10 @@ function parseResumeBody(body: unknown): { extraRounds?: number } {
   }
 }
 
-function parseHumanMessageBody(body: unknown): { content: string; side: 'from' | 'to' } {
+function parseHumanMessageBody(body: unknown): { content: string } {
   const data = requireRecord(body, 'body')
-  const side = data.side === undefined ? 'from' : data.side
-  if (side !== 'from' && side !== 'to') {
-    throw new HttpError(400, '"side" must be "from" or "to"')
-  }
   return {
     content: requireNonEmptyString(data.content, 'content'),
-    side,
   }
 }
 
@@ -407,6 +461,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const params = parseSessionBody(await parseBody(req))
         const session = router.startSession({
           ...params,
+          context: resolveSessionContext(params.context, params.cwd),
           mode: params.mode ?? defaults.mode,
           maxRounds: params.maxRounds ?? defaults.maxRounds,
         })
@@ -469,11 +524,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       const msgMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/message$/)
       if (msgMatch && method === 'POST') {
         const body = parseHumanMessageBody(await parseBody(req))
-        const msg = router.injectMessage(
-          msgMatch[1],
-          body.content,
-          body.side
-        )
+        const msg = router.injectMessage(msgMatch[1], body.content)
         return json(res, 200, msg)
       }
 

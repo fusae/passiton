@@ -80,6 +80,11 @@ POST /api/sessions
   "from": { "adapter": "codex", "label": "Codex" },
   "to": { "adapter": "opencode", "label": "OpenCode" },
   "initialPrompt": "帮我写一个 hello world 脚本",
+  "context": {
+    "files": ["src/web/app.js", "src/web/style.css"],
+    "rules": "vanilla JS, dark theme, no frameworks",
+    "text": "Any free-form background text"
+  },
   "cwd": "/tmp",
   "maxRounds": 5,
   "approveMode": false
@@ -92,6 +97,9 @@ POST /api/sessions
 | `to.adapter` | ✅ | 接收方 agent 名称 |
 | `initialPrompt` | ✅ | 第一条消息内容 |
 | `from.label` / `to.label` | ❌ | 显示用的名字，不填就用 adapter 名 |
+| `context.files` | ❌ | 文件路径列表。创建 session 时会读取内容并缓存，后续每轮都注入给 agent |
+| `context.rules` | ❌ | 约束 / 规则文本 |
+| `context.text` | ❌ | 自由背景说明 |
 | `cwd` | ❌ | agent 的工作目录，默认当前目录 |
 | `maxRounds` | ❌ | 最大对话轮数，默认 20 |
 | `approveMode` | ❌ | 是否每轮需要人类审批，默认 false |
@@ -99,6 +107,24 @@ POST /api/sessions
 **返回**：创建好的 session 对象。对话会自动开始跑。
 
 **流程**：`from` agent 先收到 `initialPrompt`，回复后传给 `to` agent，`to` 回复再传回 `from`……如此往复，直到达到 `maxRounds` 或被手动停止。
+
+**Context 注入示例**：
+
+```json
+{
+  "from": { "adapter": "codex" },
+  "to": { "adapter": "claude-code" },
+  "initialPrompt": "重构这个页面",
+  "cwd": "/path/to/project",
+  "context": {
+    "files": ["src/web/app.js", "src/web/style.css"],
+    "rules": "vanilla JS, dark theme, no frameworks",
+    "text": "保留现有功能，不要引入构建工具"
+  }
+}
+```
+
+`context` 会在创建 session 时读取文件并缓存，然后作为系统级上下文在每一轮都注入给两个 agent。
 
 ---
 
@@ -200,17 +226,15 @@ POST /api/sessions/:id/message
 **请求体**：
 ```json
 {
-  "content": "等一下，我觉得方向不对，换个思路",
-  "side": "from"
+  "content": "等一下，我觉得方向不对，换个思路"
 }
 ```
 
 | 字段 | 说明 |
 |------|------|
 | `content` | 你要说的话 |
-| `side` | `"from"` 或 `"to"`，表示这条消息插入到哪一方的视角。默认 `"from"` |
 
-**注意**：建议先 pause，插入消息，再 resume。
+注入消息固定按 `human` 角色记录。`done` 状态下发送消息会自动把 session 重新打开为 `active`，并从当前轮数继续。
 
 ---
 

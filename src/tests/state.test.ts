@@ -90,3 +90,31 @@ test('session logs are deleted with their session', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('reopen keeps the existing round count', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
+
+  try {
+    state.initDb(join(dir, 'turing.db'))
+    state.createSession({
+      id: 'reopen-session',
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      maxRounds: 5,
+    })
+
+    state.updateSession('reopen-session', {
+      status: 'done',
+      currentRound: 3,
+      nextTurn: 'to',
+    })
+
+    const reopened = state.reopenSession('reopen-session')
+
+    assert.equal(reopened.status, 'active')
+    assert.equal(reopened.currentRound, 3)
+  } finally {
+    state.closeDb()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

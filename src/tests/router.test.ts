@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Router } from '../router.js'
@@ -173,6 +173,52 @@ test('discuss mode ignores early done and waits for convergence', async () => {
     assert.equal(toCalls, 3)
     assert.equal(fromCalls, 3)
     assert.equal(state.getSession(session.id)?.currentRound, 3)
+  })
+})
+
+test('context is cached at session start and injected via system prompt', async () => {
+  await withTempDb(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turing-context-'))
+    try {
+      const filePath = join(dir, 'context.txt')
+      writeFileSync(filePath, 'cached file content', 'utf-8')
+
+      let firstMessage = ''
+      let firstSystemPrompt = ''
+      const router = new Router()
+
+      router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+      router.registerAdapter(new StubAdapter('claude-code', async (_session, message, opts) => {
+        firstMessage = message
+        firstSystemPrompt = opts?.systemPrompt ?? ''
+        return 'executor reply'
+      }))
+
+      const session = router.startSession({
+        from: { adapter: 'codex' },
+        to: { adapter: 'claude-code' },
+        initialPrompt: 'Implement the task.',
+        mode: 'collaborate',
+        context: {
+          rules: 'vanilla JS only',
+          text: 'Keep the UI dark.',
+          files: [
+            { path: filePath, content: 'cached file content' },
+          ],
+        },
+        maxRounds: 2,
+      })
+
+      await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+      assert.equal(firstMessage, 'Implement the task.')
+      assert.match(firstSystemPrompt, /\[Session Context\]/)
+      assert.match(firstSystemPrompt, /Rules: vanilla JS only/)
+      assert.match(firstSystemPrompt, /cached file content/)
+      assert.match(firstSystemPrompt, /Background: Keep the UI dark\./)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

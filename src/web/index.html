@@ -95,8 +95,7 @@
         <div id="inject-bar">
           <div id="inject-side-selector">
             <span class="inject-label">Send as:</span>
-            <button class="side-btn active" data-side="from" id="side-from-btn">from</button>
-            <button class="side-btn" data-side="to" id="side-to-btn">to</button>
+            <span class="side-chip active" id="inject-human-chip">human</span>
           </div>
           <div id="inject-input-row">
             <textarea id="inject-input" rows="2" placeholder="Inject a message… (⌘+Enter to send)"></textarea>
@@ -141,8 +140,24 @@
           <textarea name="prompt" id="modal-prompt" required placeholder="Describe the task…"></textarea>
         </div>
         <div class="form-row">
-          <label>Context <span class="hint">(optional — background from prior conversations)</span></label>
-          <textarea name="context" id="modal-context" rows="2" placeholder="e.g. We discussed using Xray + VLESS for VPN setup…"></textarea>
+          <label>Context <span class="hint">(optional — injected every round)</span></label>
+          <details class="context-details">
+            <summary>Expand to add context</summary>
+            <div class="context-fields">
+              <div class="context-field">
+                <label>Rules / Constraints</label>
+                <textarea name="contextRules" id="modal-context-rules" rows="2" placeholder="e.g. vanilla JS, dark theme, no frameworks"></textarea>
+              </div>
+              <div class="context-field">
+                <label>Background Text</label>
+                <textarea name="contextText" id="modal-context-text" rows="2" placeholder="e.g. We discussed using Xray + VLESS for VPN setup…"></textarea>
+              </div>
+              <div class="context-field">
+                <label>File Paths <span class="hint">(comma-separated or one per line)</span></label>
+                <textarea name="contextFiles" id="modal-context-files" rows="3" placeholder="src/web/app.js, src/web/style.css"></textarea>
+              </div>
+            </div>
+          </details>
         </div>
         <div class="form-row-inline">
           <div class="form-row half">

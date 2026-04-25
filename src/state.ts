@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { homedir } from 'os'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
-import type { Session, Message, SessionLog, AgentRef, SessionStatus, SessionMode } from './types.js'
+import type { Session, Message, SessionLog, AgentRef, SessionStatus, SessionMode, SessionContext } from './types.js'
 
 const DB_DIR = join(homedir(), '.turing')
 const DB_PATH = join(DB_DIR, 'turing.db')
@@ -100,6 +100,10 @@ function rowToSession(row: Record<string, unknown>): Session {
   if (row.system_prompts) {
     try { systemPrompts = JSON.parse(row.system_prompts as string) } catch { /* ignore */ }
   }
+  let context: SessionContext | undefined
+  if (row.context) {
+    try { context = JSON.parse(row.context as string) } catch { /* ignore */ }
+  }
   return {
     id: row.id as string,
     from: { adapter: row.from_adapter as string, label: row.from_label as string | undefined },
@@ -111,7 +115,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     currentRound: row.current_round as number,
     approveMode: Boolean(row.approve_mode),
     cwd: row.cwd as string | undefined,
-    context: row.context as string | undefined,
+    context,
     systemPrompts,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
@@ -123,7 +127,7 @@ export function createSession(params: {
   from: AgentRef
   to: AgentRef
   mode?: SessionMode
-  context?: string
+  context?: SessionContext
   systemPrompts?: { from: string; to: string }
   nextTurn?: 'from' | 'to'
   maxRounds?: number
@@ -148,7 +152,7 @@ export function createSession(params: {
     params.maxRounds ?? 20,
     params.approveMode ? 1 : 0,
     params.cwd ?? null,
-    params.context ?? null,
+    params.context ? JSON.stringify(params.context) : null,
     params.systemPrompts ? JSON.stringify(params.systemPrompts) : null,
     now,
     now
@@ -178,7 +182,7 @@ export function updateSession(id: string, updates: Partial<Pick<Session, 'status
 
 export function reopenSession(id: string): Session {
   const now = Date.now()
-  db.prepare(`UPDATE sessions SET status = 'active', current_round = 0, updated_at = ? WHERE id = ?`).run(now, id)
+  db.prepare(`UPDATE sessions SET status = 'active', updated_at = ? WHERE id = ?`).run(now, id)
   return getSession(id)!
 }
 

@@ -10,7 +10,6 @@ let activeSessionId = null
 let ws = null
 let currentMessages = []
 let activeSession = null
-let injectSide = 'from'
 let sessionFilter = 'all'
 let appConfig = null
 let editingAgentName = null
@@ -52,7 +51,6 @@ async function init() {
   await loadSessions()
   connectWs()
   setInterval(loadAgents, 30_000)
-  setupSideBtns()
   setupFilterBtns()
   setupMobileMenu()
   setupMarked()
@@ -322,10 +320,6 @@ function renderSessionView(session) {
     sessionView.classList.remove('hidden')
   }
 
-  // Update side-btn labels to reflect actual agent names
-  document.getElementById('side-from-btn').textContent = `from: ${agentLabel(session.from)}`
-  document.getElementById('side-to-btn').textContent   = `to: ${agentLabel(session.to)}`
-
   sessionTitle.textContent = `${agentLabel(session.from)} → ${agentLabel(session.to)}`
   sessionBadge.className   = `badge ${session.status}`
   sessionBadge.textContent = session.status
@@ -525,10 +519,7 @@ async function doInject() {
   btn.disabled = true
   btn.textContent = 'Sending...'
   try {
-    await api(`/api/sessions/${activeSessionId}/message`, 'POST', {
-      content,
-      side: injectSide,
-    })
+    await api(`/api/sessions/${activeSessionId}/message`, 'POST', { content })
     // If session was done, refresh to pick up reopened state
     if (wasDone) {
       await selectSession(activeSessionId)
@@ -540,17 +531,6 @@ async function doInject() {
     btn.disabled = false
     btn.textContent = originalText
   }
-}
-
-// ── Side selector ─────────────────────────────────────────────────────────────
-function setupSideBtns() {
-  document.querySelectorAll('.side-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      injectSide = btn.dataset.side
-      document.querySelectorAll('.side-btn').forEach(b => b.classList.remove('active'))
-      btn.classList.add('active')
-    })
-  })
 }
 
 // ── Filter bar ────────────────────────────────────────────────────────────────
@@ -601,12 +581,29 @@ function closeModal() {
 document.getElementById('modal-form').addEventListener('submit', async e => {
   e.preventDefault()
   const fd = new FormData(e.target)
+
+  // Build context object if any fields are filled
+  const contextRules = fd.get('contextRules')?.trim()
+  const contextText = fd.get('contextText')?.trim()
+  const contextFilesRaw = fd.get('contextFiles')?.trim()
+  const contextFiles = contextFilesRaw
+    ? contextFilesRaw.split(/[\n,]/).map(f => f.trim()).filter(Boolean)
+    : []
+
+  let context = undefined
+  if (contextRules || contextText || contextFiles.length > 0) {
+    context = {}
+    if (contextRules) context.rules = contextRules
+    if (contextText) context.text = contextText
+    if (contextFiles.length > 0) context.files = contextFiles
+  }
+
   const body = {
     from: { adapter: fd.get('from') },
     to:   { adapter: fd.get('to') },
     initialPrompt: fd.get('prompt'),
     mode: fd.get('mode') || appConfig?.defaults?.mode || 'freeform',
-    context: fd.get('context') || undefined,
+    context,
     maxRounds: parseInt(fd.get('maxRounds')) || appConfig?.defaults?.maxRounds || 20,
     approveMode: fd.get('approveMode') === 'on',
     cwd: fd.get('cwd') || undefined,

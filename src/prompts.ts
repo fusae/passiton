@@ -1,6 +1,6 @@
 // Prompts module — system prompt templates for each session mode
 
-import type { SessionMode, AgentRef } from './types.js'
+import type { SessionMode, AgentRef, SessionContext } from './types.js'
 
 interface PromptPair {
   from: string
@@ -9,26 +9,24 @@ interface PromptPair {
 
 /**
  * Generate system prompts for both agents based on session mode.
- * 
+ *
  * @param mode - Session mode
  * @param from - The initiating agent
  * @param to - The receiving agent
  * @param task - The initial prompt / task description
- * @param context - Optional background context from prior conversations
+ * @param context - Optional structured context with files, rules, and text
  */
 export function generateSystemPrompts(
   mode: SessionMode,
   from: AgentRef,
   to: AgentRef,
   task: string,
-  context?: string
+  context?: SessionContext
 ): PromptPair {
   const fromName = from.label || from.adapter
   const toName = to.label || to.adapter
 
-  const contextBlock = context
-    ? `\n\n## Background Context\nThe user previously discussed this topic and provided the following context:\n${context}\n`
-    : ''
+  const contextBlock = formatContextBlock(context)
 
   switch (mode) {
     case 'collaborate':
@@ -116,4 +114,34 @@ export function generateSystemPrompts(
         ].filter(Boolean).join('\n'),
       }
   }
+}
+
+/**
+ * Format the cached session context for injection into system prompts.
+ */
+function formatContextBlock(context?: SessionContext): string {
+  if (!context) return ''
+
+  const parts: string[] = []
+
+  if (context.rules) {
+    parts.push(`Rules: ${context.rules}`)
+  }
+
+  if (context.files && context.files.length > 0) {
+    parts.push('Files:')
+    for (const file of context.files) {
+      parts.push(`--- ${file.path} ---`)
+      parts.push(file.content)
+      parts.push('---')
+    }
+  }
+
+  if (context.text) {
+    parts.push(`Background: ${context.text}`)
+  }
+
+  if (parts.length === 0) return ''
+
+  return '\n\n[Session Context]\n' + parts.join('\n') + '\n[End Context]\n'
 }
