@@ -5,6 +5,7 @@
 import http from 'http'
 import https from 'https'
 import { createInterface } from 'readline'
+import { AgentCatalog } from './agents.js'
 import { loadConfig } from './config.js'
 
 // ── Config / base URL ─────────────────────────────────────────────────────────
@@ -143,9 +144,12 @@ async function serverStart() {
 
   initDb(undefined, { messageRetentionMs: config.policy.messageRetentionMs })
   const router = new Router(config.policy)
+  const agentCatalog = new AgentCatalog(config.agents)
+  await agentCatalog.discover()
   registerConfiguredAdapters(router, config.agents)
+  agentCatalog.registerDiscoveredAdapters(router)
 
-  const server = createServer(router, config.server.port)
+  const server = createServer(router, config.server.port, agentCatalog)
   installGracefulShutdown(server)
   // foreground — never exit
 }

@@ -76,8 +76,17 @@ function renderAgents() {
   agentsList.innerHTML = agents.map(a => `
     <div class="agent-row">
       <span class="agent-dot ${a.healthy ? 'ok' : 'err'}"></span>
-      <span class="agent-name">${a.name}</span>
-      <span class="agent-status ${a.healthy ? 'ok' : 'err'}">${a.healthy ? 'online' : 'offline'}</span>
+      <div class="agent-meta">
+        <div class="agent-line">
+          <span class="agent-name">${a.name}</span>
+          <span class="agent-status ${a.healthy ? 'ok' : 'err'}">${a.healthy ? 'online' : 'offline'}</span>
+        </div>
+        <div class="agent-subline">
+          <span class="agent-kind">${a.adapter}</span>
+          <span class="agent-source">${a.source}</span>
+          ${a.version ? `<span class="agent-version">${escHtml(a.version)}</span>` : ''}
+        </div>
+      </div>
     </div>
   `).join('')
 }
@@ -338,7 +347,7 @@ document.getElementById('modal-form').addEventListener('submit', async e => {
 })
 
 function populateAgentSelects() {
-  const names = agents.map(a => a.name)
+  const names = agents.filter(a => a.availableForSessions).map(a => a.name)
   ;['from-select', 'to-select'].forEach((id, idx) => {
     const el = document.getElementById(id)
     if (!el) return

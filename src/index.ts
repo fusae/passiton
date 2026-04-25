@@ -1,6 +1,7 @@
 // Turing — entry point
 
 import { loadConfig } from './config.js'
+import { AgentCatalog } from './agents.js'
 import { initDb } from './state.js'
 import { Router } from './router.js'
 import { registerConfiguredAdapters } from './adapters/factory.js'
@@ -15,12 +16,15 @@ async function main(): Promise<void> {
 
   // Build router with policy from config
   const router = new Router(config.policy)
+  const agentCatalog = new AgentCatalog(config.agents)
+  await agentCatalog.discover()
 
   // Register adapters based on config
   registerConfiguredAdapters(router, config.agents)
+  agentCatalog.registerDiscoveredAdapters(router)
 
   // Start HTTP + WebSocket server
-  const server = createServer(router, config.server.port)
+  const server = createServer(router, config.server.port, agentCatalog)
   installGracefulShutdown(server)
 }
 

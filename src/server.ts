@@ -6,6 +6,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { WebSocketServer } from 'ws'
 import type { WebSocket } from 'ws'
+import type { AgentCatalog } from './agents.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
 import type { SessionMode, WsEvent } from './types.js'
@@ -197,7 +198,7 @@ function parseNudgeBody(body: unknown): { content: string } {
   }
 }
 
-export function createServer(router: Router, port: number): http.Server {
+export function createServer(router: Router, port: number, agentCatalog: AgentCatalog): http.Server {
   const clients = new Set<WebSocket>()
 
   // Forward router events to all WebSocket clients
@@ -226,12 +227,7 @@ export function createServer(router: Router, port: number): http.Server {
 
       // GET /api/agents
       if (pathname === '/api/agents' && method === 'GET') {
-        const agents = await Promise.all(
-          router.listAdapters().map(async (a) => ({
-            name: a.name,
-            healthy: await a.healthCheck().catch(() => false),
-          }))
-        )
+        const agents = await agentCatalog.listAgents()
         return json(res, 200, agents)
       }
 

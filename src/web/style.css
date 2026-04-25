@@ -254,10 +254,42 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
 .agent-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .agent-dot.ok  { background: var(--green); }
 .agent-dot.err { background: var(--red); }
-.agent-name { flex: 1; }
+.agent-meta { flex: 1; min-width: 0; }
+.agent-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.agent-subline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.agent-name { flex: 1; min-width: 0; font-weight: 500; }
 .agent-status { font-size: 11px; }
 .agent-status.ok  { color: var(--green); }
 .agent-status.err { color: var(--red); }
+.agent-kind,
+.agent-source,
+.agent-version {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,.02);
+}
+.agent-version {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .no-agents { color: var(--muted); font-size: 11px; }
 
 /* ── Empty state ────────────────────────────────────────────────────────── */

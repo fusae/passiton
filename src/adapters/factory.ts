@@ -4,6 +4,24 @@ import { ClaudeCodeAdapter } from './claude-code.js'
 import { CodexAdapter } from './codex.js'
 import { OpenCodeAdapter } from './opencode.js'
 
+const DISCOVERED_DEFAULTS: Record<string, Omit<AgentConfig, 'command'>> = {
+  codex: {
+    adapter: 'codex',
+    args: ['exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
+    timeout: 300_000,
+  },
+  'claude-code': {
+    adapter: 'claude-code',
+    args: ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
+    timeout: 300_000,
+  },
+  opencode: {
+    adapter: 'opencode',
+    args: ['run', '{prompt}', '--dangerously-skip-permissions'],
+    timeout: 300_000,
+  },
+}
+
 export function createAdapter(agentCfg: AgentConfig): Adapter | undefined {
   switch (agentCfg.adapter) {
     case 'codex':
@@ -44,5 +62,14 @@ export function registerConfiguredAdapters(
       continue
     }
     router.registerAdapter(adapter)
+  }
+}
+
+export function createDiscoveredAgentConfig(adapter: string, command: string): AgentConfig | undefined {
+  const defaults = DISCOVERED_DEFAULTS[adapter]
+  if (!defaults) return undefined
+  return {
+    ...defaults,
+    command,
   }
 }
