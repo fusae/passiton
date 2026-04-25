@@ -351,6 +351,10 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
 .toolbar-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(91, 141, 239, 0.05); }
 .toolbar-btn.danger:hover { border-color: var(--red); color: var(--red); background: rgba(239, 68, 68, 0.05); }
 .toolbar-btn.hidden { display: none; }
+.toolbar-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 
 /* ── Rounds banner ──────────────────────────────────────────────────────── */
 #rounds-banner {
@@ -388,6 +392,9 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
   flex-direction: column;
   gap: 0;
   width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  position: relative;
 }
 
 .round-divider {
@@ -410,6 +417,8 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
 .msg-wrapper {
   display: flex;
   margin-bottom: 14px;
+}
+.msg-wrapper:not(.no-animate) {
   animation: messageSlideIn 0.3s ease-out;
 }
 .msg-wrapper.left   { justify-content: flex-start; }
@@ -639,7 +648,7 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
 
 /* ── Inject bar ─────────────────────────────────────────────────────────── */
 #inject-bar {
-  padding: 16px 48px 24px;
+  padding: 16px 24px 24px;
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -876,6 +885,11 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
   transition: opacity .15s;
 }
 .modal-submit:hover { opacity: .85; }
+.modal-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 
 /* ── Mobile ─────────────────────────────────────────────────────────────── */
 #mobile-menu-btn {
@@ -1136,6 +1150,34 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
   border-color: var(--accent);
   background: rgba(91, 141, 239, 0.1);
   color: var(--accent);
+}
+
+/* ── Scroll-to-bottom button ────────────────────────────────────────────── */
+#scroll-to-bottom {
+  position: absolute;
+  bottom: 20px;
+  right: 20px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+  font-size: 20px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,.4);
+  transition: all .2s;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+#scroll-to-bottom.visible {
+  display: flex;
+}
+#scroll-to-bottom:hover {
+  transform: scale(1.05);
+  box-shadow: 0 6px 16px rgba(0,0,0,.5);
 }
 
 /* ── Scrollbar ──────────────────────────────────────────────────────────── */

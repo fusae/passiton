@@ -311,29 +311,50 @@ function renderMessages(msgs, session) {
 // ── Session controls ──────────────────────────────────────────────────────────
 document.getElementById('btn-pause').addEventListener('click', async () => {
   if (!activeSessionId) return
+  const btn = document.getElementById('btn-pause')
+  const originalText = btn.textContent
+  btn.disabled = true
+  btn.textContent = '⏸ Pausing...'
   try {
     await api(`/api/sessions/${activeSessionId}/pause`, 'POST')
   } catch (err) {
     showToast(err.message)
+  } finally {
+    btn.disabled = false
+    btn.textContent = originalText
   }
 })
 
 document.getElementById('btn-resume').addEventListener('click', async () => {
   if (!activeSessionId) return
+  const btn = document.getElementById('btn-resume')
+  const originalText = btn.textContent
+  btn.disabled = true
+  btn.textContent = '▶ Resuming...'
   try {
     await api(`/api/sessions/${activeSessionId}/resume`, 'POST')
   } catch (err) {
     showToast(err.message)
+  } finally {
+    btn.disabled = false
+    btn.textContent = originalText
   }
 })
 
 document.getElementById('btn-stop').addEventListener('click', async () => {
   if (!activeSessionId) return
   if (!confirm('Stop this session permanently?')) return
+  const btn = document.getElementById('btn-stop')
+  const originalText = btn.textContent
+  btn.disabled = true
+  btn.textContent = '⏹ Stopping...'
   try {
     await api(`/api/sessions/${activeSessionId}/stop`, 'POST')
   } catch (err) {
     showToast(err.message)
+  } finally {
+    btn.disabled = false
+    btn.textContent = originalText
   }
 })
 
@@ -394,7 +415,12 @@ async function doInject() {
   const content = injectInput.value.trim()
   if (!content || !activeSessionId) return
   const wasDone = activeSession && activeSession.status === 'done'
+  const btn = document.getElementById('inject-btn')
+  const originalText = btn.textContent
   injectInput.value = ''
+  injectInput.disabled = true
+  btn.disabled = true
+  btn.textContent = 'Sending...'
   try {
     await api(`/api/sessions/${activeSessionId}/message`, 'POST', {
       content,
@@ -406,6 +432,10 @@ async function doInject() {
     }
   } catch (err) {
     showToast(err.message)
+  } finally {
+    injectInput.disabled = false
+    btn.disabled = false
+    btn.textContent = originalText
   }
 }
 
@@ -470,6 +500,12 @@ document.getElementById('modal-form').addEventListener('submit', async e => {
     approveMode: fd.get('approveMode') === 'on',
     cwd: fd.get('cwd') || undefined,
   }
+
+  const submitBtn = e.target.querySelector('.modal-submit')
+  const originalText = submitBtn.textContent
+  submitBtn.disabled = true
+  submitBtn.textContent = 'Creating...'
+
   closeModal()
   e.target.reset()
 
@@ -480,6 +516,9 @@ document.getElementById('modal-form').addEventListener('submit', async e => {
     await selectSession(session.id)
   } catch (err) {
     showToast(err.message)
+  } finally {
+    submitBtn.disabled = false
+    submitBtn.textContent = originalText
   }
 })
 
