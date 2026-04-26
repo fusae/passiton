@@ -822,6 +822,11 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
   wss.on('connection', (ws, req) => {
     let authUser
     try {
+      const wsUrl = new URL(req.url ?? '/ws', `http://localhost:${port}`)
+      const token = wsUrl.searchParams.get('token')
+      if (token) {
+        req.headers.authorization = `Bearer ${token}`
+      }
       authUser = authenticateRequest(req)
     } catch {
       ws.close(1008, 'Authentication required')

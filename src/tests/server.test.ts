@@ -133,3 +133,24 @@ test('WebSocket init only returns sessions for the authenticated user', async ()
     assert.deepEqual(message.payload.map((session) => session.id), ['ws-session-a'])
   })
 })
+
+test('WebSocket accepts browser token query authentication', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'ws-query@example.com')
+    state.createSession({
+      id: 'ws-query-session',
+      userId: auth.userId,
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+    })
+
+    const wsUrl = `${baseUrl.replace('http:', 'ws:')}/ws?token=${encodeURIComponent(auth.token)}`
+    const ws = new WebSocket(wsUrl)
+    const [raw] = await once(ws, 'message') as [Buffer]
+    ws.close()
+
+    const message = JSON.parse(raw.toString()) as { type: string; payload: Array<{ id: string }> }
+    assert.equal(message.type, 'init')
+    assert.deepEqual(message.payload.map((session) => session.id), ['ws-query-session'])
+  })
+})

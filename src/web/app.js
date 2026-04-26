@@ -1265,7 +1265,9 @@ function connectWs() {
   }
 
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const socket = new WebSocket(`${proto}://${location.host}/ws`)
+  const token = getAuthToken()
+  const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : ''
+  const socket = new WebSocket(`${proto}://${location.host}/ws${tokenQuery}`)
   ws = socket
 
   socket.addEventListener('open', () => {
