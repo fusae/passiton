@@ -1,0 +1,11 @@
+services:
+  turing-cloud:
+    build: .
+    environment:
+      TURING_JWT_SECRET: ${TURING_JWT_SECRET:-change-me-to-random-string}
+      TURING_ENCRYPTION_KEY: ${TURING_ENCRYPTION_KEY:-change-me-to-random-string}
+      PORT: 4590
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "${PORT:-4590}:4590"

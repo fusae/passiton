@@ -1,0 +1,27 @@
+app = "turing-cloud"
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "4590"
+
+[http_service]
+  internal_port = 4590
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/agents"
+
+[[mounts]]
+  source = "turing_data"
+  destination = "/app/data"
