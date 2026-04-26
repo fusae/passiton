@@ -69,6 +69,14 @@
         </div>
         <div class="agents-list"></div>
       </div>
+
+      <div id="sidebar-footer">
+        <div class="sidebar-user">
+          <span class="sidebar-user-label">Signed in</span>
+          <span id="sidebar-user-email"></span>
+        </div>
+        <button id="logout-btn" type="button">Logout</button>
+      </div>
     </aside>
 
     <!-- Main content -->
@@ -306,6 +314,33 @@
           <div id="agents-config-list"></div>
           <div id="agent-config-form-slot"></div>
           <button id="add-agent-btn" class="settings-btn">+ Add Agent</button>
+        </section>
+
+        <!-- Key Management Section -->
+        <section class="settings-section">
+          <h3>Key Management</h3>
+          <div id="api-keys-list"></div>
+          <form id="api-key-form" class="api-key-form">
+            <div class="form-row-inline">
+              <div class="form-row half">
+                <label>Provider</label>
+                <select name="provider" required>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="zhipu">Zhipu</option>
+                </select>
+              </div>
+              <div class="form-row half">
+                <label>Name</label>
+                <input name="name" type="text" required placeholder="Production key" />
+              </div>
+            </div>
+            <div class="form-row">
+              <label>API Key</label>
+              <input name="key" type="password" required placeholder="Paste provider key" />
+            </div>
+            <button type="submit" class="settings-btn primary">Add Key</button>
+          </form>
         </section>
 
         <!-- Global Settings Section -->

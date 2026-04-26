@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Turing Cloud Login</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <section class="auth-card">
+      <div class="auth-brand">
+        <div class="auth-logo">
+          <span class="dot green"></span>
+          <h1>Turing Cloud</h1>
+        </div>
+        <p>Agent-to-agent orchestration for production teams</p>
+      </div>
+
+      <div class="auth-tabs" role="tablist">
+        <button class="auth-tab active" type="button" data-auth-tab="login">Login</button>
+        <button class="auth-tab" type="button" data-auth-tab="register">Register</button>
+      </div>
+
+      <form id="login-form" class="auth-form" data-auth-form="login">
+        <div class="form-row">
+          <label>Email</label>
+          <input name="email" type="email" autocomplete="email" required />
+        </div>
+        <div class="form-row">
+          <label>Password</label>
+          <input name="password" type="password" autocomplete="current-password" minlength="8" required />
+        </div>
+        <button class="modal-submit auth-submit" type="submit">Login</button>
+        <a id="forgot-password-link" class="auth-link" href="#">Forgot password?</a>
+      </form>
+
+      <form id="register-form" class="auth-form hidden" data-auth-form="register">
+        <div class="form-row">
+          <label>Email</label>
+          <input name="email" type="email" autocomplete="email" required />
+        </div>
+        <div class="form-row">
+          <label>Password</label>
+          <input name="password" type="password" autocomplete="new-password" minlength="8" required />
+        </div>
+        <div class="form-row">
+          <label>Confirm Password</label>
+          <input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
+        </div>
+        <button class="modal-submit auth-submit" type="submit">Create Account</button>
+      </form>
+    </section>
+  </main>
+
+  <div id="toast-container"></div>
+
+  <script>
+    const TOKEN_KEY = 'turing-jwt'
+    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+    function showToast(message, type = 'error') {
+      const container = document.getElementById('toast-container')
+      const toast = document.createElement('div')
+      toast.className = `toast toast-${type}`
+      toast.textContent = message
+      container.appendChild(toast)
+      setTimeout(() => toast.classList.add('show'), 10)
+      setTimeout(() => {
+        toast.classList.remove('show')
+        setTimeout(() => toast.remove(), 300)
+      }, 3000)
+    }
+
+    function validateAuthForm(form, mode) {
+      const fd = new FormData(form)
+      const email = String(fd.get('email') || '').trim()
+      const password = String(fd.get('password') || '')
+      const confirmPassword = String(fd.get('confirmPassword') || '')
+      if (!emailRe.test(email)) throw new Error('Enter a valid email address')
+      if (password.length < 8) throw new Error('Password must be at least 8 characters')
+      if (mode === 'register' && password !== confirmPassword) throw new Error('Passwords do not match')
+      return { email, password }
+    }
+
+    async function submitAuth(event) {
+      event.preventDefault()
+      const form = event.target
+      const mode = form.dataset.authForm
+      const btn = form.querySelector('button[type="submit"]')
+      const originalText = btn.textContent
+      try {
+        const body = validateAuthForm(form, mode)
+        btn.disabled = true
+        btn.textContent = mode === 'login' ? 'Logging in...' : 'Creating...'
+        const res = await fetch(`/api/auth/${mode}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        const data = await res.json().catch(() => null)
+        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+        localStorage.setItem(TOKEN_KEY, data.token)
+        window.location.href = 'index.html'
+      } catch (err) {
+        showToast(err.message || 'Authentication failed', 'error')
+      } finally {
+        btn.disabled = false
+        btn.textContent = originalText
+      }
+    }
+
+    document.querySelectorAll('.auth-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const target = tab.dataset.authTab
+        document.querySelectorAll('.auth-tab').forEach((item) => item.classList.toggle('active', item === tab))
+        document.querySelectorAll('.auth-form').forEach((form) => {
+          form.classList.toggle('hidden', form.dataset.authForm !== target)
+        })
+      })
+    })
+
+    document.querySelectorAll('.auth-form').forEach((form) => form.addEventListener('submit', submitAuth))
+    document.getElementById('forgot-password-link').addEventListener('click', (event) => {
+      event.preventDefault()
+      showToast('Password reset is not configured yet', 'info')
+    })
+  </script>
+</body>
+</html>

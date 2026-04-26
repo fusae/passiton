@@ -1,11 +1,13 @@
 // Turing Web UI — vanilla JS
 
 const API = ''  // same origin
+const AUTH_TOKEN_KEY = 'turing-jwt'
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let sessions = []
 let pipelines = []
 let agents = []
+let apiKeys = []
 let templates = []
 let stats = null
 let activeSessionId = null
@@ -24,6 +26,7 @@ const AGENT_COMMAND_DEFAULTS = {
   codex: 'codex',
   opencode: 'opencode',
 }
+const UI_PREFS_KEY = 'turing-ui-prefs'
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const sessionList      = document.getElementById('session-list')
@@ -73,9 +76,16 @@ const agentsConfigList = document.getElementById('agents-config-list')
 const agentFormSlot    = document.getElementById('agent-config-form-slot')
 const addAgentBtn      = document.getElementById('add-agent-btn')
 const saveGlobalBtn    = document.getElementById('save-global-settings-btn')
+const sidebarUserEmail = document.getElementById('sidebar-user-email')
+const logoutBtn        = document.getElementById('logout-btn')
+const apiKeysList      = document.getElementById('api-keys-list')
+const apiKeyForm       = document.getElementById('api-key-form')
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
+  if (!requireAuth()) return
+  renderAuthenticatedUser()
+  setupLogout()
   await loadAppConfig()
   await loadAgents()
   await loadTemplates()
@@ -113,6 +123,8 @@ function setupMarked() {
 // ── API helpers ───────────────────────────────────────────────────────────────
 async function api(path, method = 'GET', body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } }
+  const token = getAuthToken()
+  if (token) opts.headers.Authorization = `Bearer ${token}`
   if (body !== undefined) opts.body = JSON.stringify(body)
   let r
   try {
@@ -132,10 +144,58 @@ async function api(path, method = 'GET', body) {
   }
 
   if (!r.ok) {
+    if (r.status === 401) {
+      clearAuthAndRedirect()
+      throw new Error('Session expired')
+    }
     const errorMsg = data?.error || text || `HTTP ${r.status}`
     throw new Error(errorMsg)
   }
   return data
+}
+
+function getAuthToken() {
+  return localStorage.getItem(AUTH_TOKEN_KEY)
+}
+
+function decodeJwtPayload(token) {
+  try {
+    const payload = token.split('.')[1]
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64.padEnd(base64.length + ((4 - base64.length % 4) % 4), '=')
+    return JSON.parse(atob(padded))
+  } catch {
+    return null
+  }
+}
+
+function isJwtExpired(token) {
+  const payload = decodeJwtPayload(token)
+  return !payload?.exp || payload.exp * 1000 <= Date.now()
+}
+
+function requireAuth() {
+  const token = getAuthToken()
+  if (!token || isJwtExpired(token)) {
+    clearAuthAndRedirect()
+    return false
+  }
+  return true
+}
+
+function clearAuthAndRedirect() {
+  localStorage.removeItem(AUTH_TOKEN_KEY)
+  window.location.href = 'login.html'
+}
+
+function renderAuthenticatedUser() {
+  const payload = decodeJwtPayload(getAuthToken() || '')
+  if (sidebarUserEmail) sidebarUserEmail.textContent = payload?.email || payload?.sub || 'unknown'
+}
+
+function setupLogout() {
+  if (!logoutBtn) return
+  logoutBtn.addEventListener('click', clearAuthAndRedirect)
 }
 
 async function loadAppConfig() {
@@ -254,10 +314,17 @@ function renderStats() {
 
 function setupStatsToggle() {
   if (!statsToggle || !statsPanel) return
+  const prefs = loadUiPrefs()
+  if (prefs.statsCollapsed !== false) {
+    statsPanel.classList.add('collapsed')
+    statsToggle.setAttribute('aria-expanded', 'false')
+    if (statsToggleIcon) statsToggleIcon.textContent = '▸'
+  }
   statsToggle.addEventListener('click', () => {
     const collapsed = statsPanel.classList.toggle('collapsed')
     statsToggle.setAttribute('aria-expanded', String(!collapsed))
     if (statsToggleIcon) statsToggleIcon.textContent = collapsed ? '▸' : '▾'
+    saveUiPrefs({ statsCollapsed: collapsed })
   })
 }
 
@@ -1150,11 +1217,37 @@ async function submitPipelineForm(event) {
 
 function setupPipelineToggle() {
   if (!pipelineToggle || !pipelineSidebarSection) return
+  const prefs = loadUiPrefs()
+  if (prefs.pipelinesCollapsed !== false) {
+    pipelineSidebarSection.classList.add('collapsed')
+    pipelineToggle.setAttribute('aria-expanded', 'false')
+    if (pipelineToggleIcon) pipelineToggleIcon.textContent = '▸'
+  }
   pipelineToggle.addEventListener('click', () => {
     const collapsed = pipelineSidebarSection.classList.toggle('collapsed')
     pipelineToggle.setAttribute('aria-expanded', String(!collapsed))
     if (pipelineToggleIcon) pipelineToggleIcon.textContent = collapsed ? '▸' : '▾'
+    saveUiPrefs({ pipelinesCollapsed: collapsed })
   })
+}
+
+function loadUiPrefs() {
+  try {
+    return JSON.parse(localStorage.getItem(UI_PREFS_KEY) || '{}')
+  } catch {
+    return {}
+  }
+}
+
+function saveUiPrefs(partial) {
+  try {
+    localStorage.setItem(UI_PREFS_KEY, JSON.stringify({
+      ...loadUiPrefs(),
+      ...partial,
+    }))
+  } catch {
+    // Ignore storage failures.
+  }
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
@@ -1651,6 +1744,7 @@ function setupSettingsPanel() {
   settingsPanel.querySelector('.settings-overlay').addEventListener('click', closeSettingsPanel)
   addAgentBtn.addEventListener('click', () => showAgentForm())
   saveGlobalBtn.addEventListener('click', saveGlobalSettings)
+  apiKeyForm.addEventListener('submit', saveApiKey)
 
   agentsConfigList.addEventListener('click', async (event) => {
     const editBtn = event.target.closest('[data-agent-edit]')
@@ -1663,10 +1757,16 @@ function setupSettingsPanel() {
       await deleteAgent(deleteBtn.dataset.agentDelete)
     }
   })
+
+  apiKeysList.addEventListener('click', async (event) => {
+    const deleteBtn = event.target.closest('[data-key-delete]')
+    if (deleteBtn) await deleteApiKey(deleteBtn.dataset.keyDelete)
+  })
 }
 
 async function openSettingsPanel() {
   await loadAppConfig()
+  await loadApiKeys()
   renderSettingsPanel()
   settingsPanel.classList.remove('hidden')
   settingsToggle.classList.add('active')
@@ -1686,6 +1786,7 @@ function renderSettingsPanel() {
   document.getElementById('global-port').value = appConfig.server?.port ?? 4590
   document.getElementById('global-mode').value = appConfig.defaults?.mode ?? 'collaborate'
   renderAgentConfigList()
+  renderApiKeys()
 }
 
 function renderAgentConfigList() {
@@ -1846,6 +1947,82 @@ async function saveGlobalSettings() {
     applyConfigDefaultsToNewSession()
     renderSettingsPanel()
     showToast('Settings saved. Restart required for port changes.', 'success')
+  } catch (err) {
+    showToast(err.message, 'error')
+  }
+}
+
+async function loadApiKeys() {
+  try {
+    apiKeys = await api('/api/keys')
+  } catch (err) {
+    apiKeys = []
+    showToast(err.message, 'error')
+  }
+}
+
+function renderApiKeys() {
+  if (!apiKeysList) return
+  if (!apiKeys.length) {
+    apiKeysList.innerHTML = '<div class="settings-empty">No API keys stored</div>'
+    return
+  }
+  apiKeysList.innerHTML = apiKeys.map((key) => `
+    <div class="api-key-item">
+      <div class="api-key-provider">${providerIcon(key.provider)}</div>
+      <div class="api-key-meta">
+        <div class="api-key-name">${escHtml(key.name)}</div>
+        <div class="api-key-detail">${escHtml(providerLabel(key.provider))} · ${escHtml(key.maskedKey)}</div>
+      </div>
+      <button type="button" class="agent-config-btn danger" data-key-delete="${escHtml(key.id)}">Delete</button>
+    </div>
+  `).join('')
+}
+
+function providerIcon(provider) {
+  const icons = {
+    anthropic: 'A',
+    openai: 'O',
+    zhipu: 'Z',
+  }
+  return icons[provider] || '?'
+}
+
+function providerLabel(provider) {
+  const labels = {
+    anthropic: 'Anthropic',
+    openai: 'OpenAI',
+    zhipu: 'Zhipu',
+  }
+  return labels[provider] || provider
+}
+
+async function saveApiKey(event) {
+  event.preventDefault()
+  const fd = new FormData(event.target)
+  const body = {
+    provider: fd.get('provider'),
+    name: String(fd.get('name') || '').trim(),
+    key: String(fd.get('key') || '').trim(),
+  }
+  try {
+    const saved = await api('/api/keys', 'POST', body)
+    apiKeys.unshift(saved)
+    event.target.reset()
+    renderApiKeys()
+    showToast('API key saved', 'success')
+  } catch (err) {
+    showToast(err.message, 'error')
+  }
+}
+
+async function deleteApiKey(id) {
+  if (!id || !confirm('Delete this API key?')) return
+  try {
+    await api(`/api/keys/${encodeURIComponent(id)}`, 'DELETE')
+    apiKeys = apiKeys.filter((key) => key.id !== id)
+    renderApiKeys()
+    showToast('API key deleted', 'success')
   } catch (err) {
     showToast(err.message, 'error')
   }

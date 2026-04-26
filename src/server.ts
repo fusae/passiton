@@ -1,6 +1,7 @@
 // Server module — HTTP + WebSocket
 
 import http from 'http'
+import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -18,6 +19,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(__dirname, 'web')
 const MAX_BODY_SIZE = 1024 * 1024
 const WS_HEARTBEAT_MS = 30_000
+const JWT_SECRET = process.env.TURING_JWT_SECRET ?? 'turing-dev-secret'
+const TOKEN_TTL_SECONDS = 24 * 60 * 60
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const MIME: Record<string, string> = {
   '.html': 'text/html',
@@ -34,6 +38,16 @@ class HttpError extends Error {
     super(message)
   }
 }
+
+type ApiKeyRecord = {
+  id: string
+  provider: 'anthropic' | 'openai' | 'zhipu'
+  name: string
+  key: string
+  createdAt: number
+}
+
+const apiKeys: ApiKeyRecord[] = []
 
 function json(res: http.ServerResponse, status: number, data: unknown): void {
   const body = JSON.stringify(data)
@@ -57,6 +71,71 @@ function parseBody(req: http.IncomingMessage): Promise<unknown> {
     })
     req.on('error', reject)
   })
+}
+
+function base64UrlJson(data: unknown): string {
+  return Buffer.from(JSON.stringify(data)).toString('base64url')
+}
+
+function signJwt(payload: Record<string, unknown>): string {
+  const header = base64UrlJson({ alg: 'HS256', typ: 'JWT' })
+  const body = base64UrlJson(payload)
+  const signature = crypto
+    .createHmac('sha256', JWT_SECRET)
+    .update(`${header}.${body}`)
+    .digest('base64url')
+  return `${header}.${body}.${signature}`
+}
+
+function createMockJwt(email: string): string {
+  const now = Math.floor(Date.now() / 1000)
+  return signJwt({
+    sub: email,
+    email,
+    iat: now,
+    exp: now + TOKEN_TTL_SECONDS,
+  })
+}
+
+function parseAuthBody(body: unknown): { email: string; password: string } {
+  const data = requireRecord(body, 'body')
+  const email = requireNonEmptyString(data.email, 'email').toLowerCase()
+  const password = requireNonEmptyString(data.password, 'password')
+  if (!EMAIL_RE.test(email)) {
+    throw new HttpError(400, 'Invalid email')
+  }
+  if (password.length < 8) {
+    throw new HttpError(400, 'Password must be at least 8 characters')
+  }
+  return { email, password }
+}
+
+function parseApiKeyBody(body: unknown): Omit<ApiKeyRecord, 'id' | 'createdAt'> {
+  const data = requireRecord(body, 'body')
+  const provider = requireNonEmptyString(data.provider, 'provider').toLowerCase()
+  if (provider !== 'anthropic' && provider !== 'openai' && provider !== 'zhipu') {
+    throw new HttpError(400, '"provider" must be one of anthropic, openai, zhipu')
+  }
+  return {
+    provider,
+    name: requireNonEmptyString(data.name, 'name'),
+    key: requireNonEmptyString(data.key, 'key'),
+  }
+}
+
+function maskApiKey(value: string): string {
+  if (value.length <= 8) return '••••'
+  return `${value.slice(0, 4)}••••${value.slice(-4)}`
+}
+
+function publicApiKey(record: ApiKeyRecord) {
+  return {
+    id: record.id,
+    provider: record.provider,
+    name: record.name,
+    maskedKey: maskApiKey(record.key),
+    createdAt: record.createdAt,
+  }
 }
 
 function serveStatic(res: http.ServerResponse, filePath: string): void {
@@ -402,11 +481,49 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
     // CORS for local dev
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
     if (method === 'OPTIONS') { res.writeHead(204); res.end(); return }
 
     try {
       // ── API routes ─────────────────────────────────────────────────────────
+
+      // POST /api/auth/login
+      if (pathname === '/api/auth/login' && method === 'POST') {
+        const { email } = parseAuthBody(await parseBody(req))
+        return json(res, 200, { token: createMockJwt(email), user: { email } })
+      }
+
+      // POST /api/auth/register
+      if (pathname === '/api/auth/register' && method === 'POST') {
+        const { email } = parseAuthBody(await parseBody(req))
+        return json(res, 201, { token: createMockJwt(email), user: { email } })
+      }
+
+      // GET /api/keys
+      if (pathname === '/api/keys' && method === 'GET') {
+        return json(res, 200, apiKeys.map(publicApiKey))
+      }
+
+      // POST /api/keys
+      if (pathname === '/api/keys' && method === 'POST') {
+        const key = parseApiKeyBody(await parseBody(req))
+        const record: ApiKeyRecord = {
+          ...key,
+          id: crypto.randomUUID(),
+          createdAt: Date.now(),
+        }
+        apiKeys.unshift(record)
+        return json(res, 201, publicApiKey(record))
+      }
+
+      // DELETE /api/keys/:id
+      const apiKeyMatch = pathname.match(/^\/api\/keys\/([^/]+)$/)
+      if (apiKeyMatch && method === 'DELETE') {
+        const index = apiKeys.findIndex((key) => key.id === apiKeyMatch[1])
+        if (index < 0) return json(res, 404, { error: 'Not found' })
+        apiKeys.splice(index, 1)
+        return json(res, 200, { success: true })
+      }
 
       // GET /api/agents
       if (pathname === '/api/agents' && method === 'GET') {
