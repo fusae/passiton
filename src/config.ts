@@ -14,6 +14,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   server: {
     port: 4590,
   },
+  auth: {},
   defaults: {
     maxRounds: 20,
     mode: 'collaborate',

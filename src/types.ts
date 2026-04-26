@@ -47,6 +47,7 @@ export interface SessionContext {
 
 export interface Session {
   id: string
+  userId?: string
   from: AgentRef
   to: AgentRef
   status: SessionStatus
@@ -76,6 +77,7 @@ export interface SessionWithMessages extends Session {
 
 export interface Pipeline {
   id: string
+  userId?: string
   name: string
   status: 'active' | 'done' | 'error' | 'paused'
   sessions: PipelineStep[]
@@ -208,6 +210,10 @@ export interface DefaultsConfig {
 export interface AppConfig {
   server: {
     port: number
+  }
+  auth?: {
+    jwtSecret?: string
+    encryptionKey?: string
   }
   agents: Record<string, AgentConfig>
   defaults: DefaultsConfig

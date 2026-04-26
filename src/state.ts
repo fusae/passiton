@@ -29,6 +29,36 @@ const MESSAGE_GC_INTERVAL_MS = 60 * 60 * 1000
 let db: Database.Database
 let messageRetentionMs = DEFAULT_MESSAGE_RETENTION_MS
 let lastMessageGcAt = 0
+export const DEFAULT_USER_ID = 'local'
+
+export interface UserRecord {
+  id: string
+  email: string
+  passwordHash: string
+  salt: string
+  createdAt: number
+}
+
+export interface ApiTokenRecord {
+  id: string
+  userId: string
+  tokenHash: string
+  tokenLast4: string
+  name: string
+  createdAt: number
+  lastUsedAt?: number
+}
+
+export interface StoredApiKeyRecord {
+  id: string
+  userId: string
+  provider: 'anthropic' | 'openai' | 'zhipu'
+  encryptedKey: string
+  iv: string
+  authTag: string
+  name: string
+  createdAt: number
+}
 
 export function initDb(
   dbPath = DB_PATH,
@@ -52,8 +82,38 @@ export function closeDb(): void {
 
 function createTables(): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id            TEXT PRIMARY KEY,
+      email         TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      salt          TEXT NOT NULL,
+      created_at    INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS api_tokens (
+      id           TEXT PRIMARY KEY,
+      user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash   TEXT NOT NULL UNIQUE,
+      token_last4  TEXT NOT NULL DEFAULT '',
+      name         TEXT NOT NULL,
+      created_at   INTEGER NOT NULL,
+      last_used_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id            TEXT PRIMARY KEY,
+      user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider      TEXT NOT NULL,
+      encrypted_key TEXT NOT NULL,
+      iv            TEXT NOT NULL,
+      auth_tag      TEXT NOT NULL,
+      name          TEXT NOT NULL,
+      created_at    INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS sessions (
       id          TEXT PRIMARY KEY,
+      user_id     TEXT NOT NULL DEFAULT 'local',
       from_adapter TEXT NOT NULL,
       from_label   TEXT,
       to_adapter   TEXT NOT NULL,
@@ -105,6 +165,7 @@ function createTables(): void {
 
     CREATE TABLE IF NOT EXISTS pipelines (
       id          TEXT PRIMARY KEY,
+      user_id     TEXT NOT NULL DEFAULT 'local',
       name        TEXT NOT NULL,
       status      TEXT NOT NULL DEFAULT 'active',
       created_at  INTEGER NOT NULL,
@@ -157,8 +218,135 @@ function createTables(): void {
     db.exec(`ALTER TABLE sessions ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0`)
   } catch { /* column already exists */ }
   try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE pipelines ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'`)
+  } catch { /* column already exists */ }
+  try {
     db.exec(`ALTER TABLE messages ADD COLUMN metadata TEXT`)
   } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE api_tokens ADD COLUMN token_last4 TEXT NOT NULL DEFAULT ''`)
+  } catch { /* column already exists */ }
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_pipelines_user ON pipelines(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
+    CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
+  `)
+}
+
+// ── Users / Tokens / Keys ────────────────────────────────────────────────────
+
+function rowToUser(row: Record<string, unknown>): UserRecord {
+  return {
+    id: row.id as string,
+    email: row.email as string,
+    passwordHash: row.password_hash as string,
+    salt: row.salt as string,
+    createdAt: row.created_at as number,
+  }
+}
+
+function rowToApiToken(row: Record<string, unknown>): ApiTokenRecord {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    tokenHash: row.token_hash as string,
+    tokenLast4: row.token_last4 as string,
+    name: row.name as string,
+    createdAt: row.created_at as number,
+    lastUsedAt: row.last_used_at as number | undefined,
+  }
+}
+
+function rowToStoredApiKey(row: Record<string, unknown>): StoredApiKeyRecord {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    provider: row.provider as StoredApiKeyRecord['provider'],
+    encryptedKey: row.encrypted_key as string,
+    iv: row.iv as string,
+    authTag: row.auth_tag as string,
+    name: row.name as string,
+    createdAt: row.created_at as number,
+  }
+}
+
+export function createUser(params: { id: string; email: string; passwordHash: string; salt: string }): UserRecord {
+  const now = Date.now()
+  db.prepare(`
+    INSERT INTO users (id, email, password_hash, salt, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(params.id, params.email, params.passwordHash, params.salt, now)
+  return getUserById(params.id)!
+}
+
+export function getUserById(id: string): UserRecord | undefined {
+  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined
+  return row ? rowToUser(row) : undefined
+}
+
+export function getUserByEmail(email: string): UserRecord | undefined {
+  const row = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as Record<string, unknown> | undefined
+  return row ? rowToUser(row) : undefined
+}
+
+export function createApiToken(params: { id: string; userId: string; tokenHash: string; tokenLast4: string; name: string }): ApiTokenRecord {
+  const now = Date.now()
+  db.prepare(`
+    INSERT INTO api_tokens (id, user_id, token_hash, token_last4, name, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(params.id, params.userId, params.tokenHash, params.tokenLast4, params.name, now)
+  return getApiToken(params.id, params.userId)!
+}
+
+export function getApiToken(id: string, userId: string): ApiTokenRecord | undefined {
+  const row = db.prepare('SELECT * FROM api_tokens WHERE id = ? AND user_id = ?').get(id, userId) as Record<string, unknown> | undefined
+  return row ? rowToApiToken(row) : undefined
+}
+
+export function getApiTokenByHash(tokenHash: string): ApiTokenRecord | undefined {
+  const row = db.prepare('SELECT * FROM api_tokens WHERE token_hash = ?').get(tokenHash) as Record<string, unknown> | undefined
+  return row ? rowToApiToken(row) : undefined
+}
+
+export function touchApiToken(id: string): void {
+  db.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').run(Date.now(), id)
+}
+
+export function listApiTokens(userId: string): ApiTokenRecord[] {
+  const rows = db.prepare('SELECT * FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC').all(userId) as Record<string, unknown>[]
+  return rows.map(rowToApiToken)
+}
+
+export function deleteApiToken(id: string, userId: string): boolean {
+  return db.prepare('DELETE FROM api_tokens WHERE id = ? AND user_id = ?').run(id, userId).changes > 0
+}
+
+export function createStoredApiKey(params: Omit<StoredApiKeyRecord, 'createdAt'>): StoredApiKeyRecord {
+  const now = Date.now()
+  db.prepare(`
+    INSERT INTO api_keys (id, user_id, provider, encrypted_key, iv, auth_tag, name, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(params.id, params.userId, params.provider, params.encryptedKey, params.iv, params.authTag, params.name, now)
+  return getStoredApiKey(params.id, params.userId)!
+}
+
+export function getStoredApiKey(id: string, userId: string): StoredApiKeyRecord | undefined {
+  const row = db.prepare('SELECT * FROM api_keys WHERE id = ? AND user_id = ?').get(id, userId) as Record<string, unknown> | undefined
+  return row ? rowToStoredApiKey(row) : undefined
+}
+
+export function listStoredApiKeys(userId: string): StoredApiKeyRecord[] {
+  const rows = db.prepare('SELECT * FROM api_keys WHERE user_id = ? ORDER BY created_at DESC').all(userId) as Record<string, unknown>[]
+  return rows.map(rowToStoredApiKey)
+}
+
+export function deleteStoredApiKey(id: string, userId: string): boolean {
+  return db.prepare('DELETE FROM api_keys WHERE id = ? AND user_id = ?').run(id, userId).changes > 0
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
@@ -174,6 +362,7 @@ function rowToSession(row: Record<string, unknown>): Session {
   }
   return {
     id: row.id as string,
+    userId: row.user_id as string | undefined,
     from: { adapter: row.from_adapter as string, label: row.from_label as string | undefined },
     to: { adapter: row.to_adapter as string, label: row.to_label as string | undefined },
     status: row.status as SessionStatus,
@@ -197,6 +386,7 @@ function rowToSession(row: Record<string, unknown>): Session {
 
 export function createSession(params: {
   id: string
+  userId?: string
   from: AgentRef
   to: AgentRef
   mode?: SessionMode
@@ -209,13 +399,14 @@ export function createSession(params: {
 }): Session {
   const now = Date.now()
   const stmt = db.prepare(`
-    INSERT INTO sessions (id, from_adapter, from_label, to_adapter, to_label,
+    INSERT INTO sessions (id, user_id, from_adapter, from_label, to_adapter, to_label,
       status, mode, next_turn, max_rounds, current_round, approve_mode, cwd, context, system_prompts,
       created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
   `)
   stmt.run(
     params.id,
+    params.userId ?? DEFAULT_USER_ID,
     params.from.adapter,
     params.from.label ?? null,
     params.to.adapter,
@@ -230,15 +421,17 @@ export function createSession(params: {
     now,
     now
   )
-  return getSession(params.id)!
+  return getSession(params.id, params.userId)!
 }
 
-export function getSession(id: string): Session | undefined {
-  const row = db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as Record<string, unknown> | undefined
+export function getSession(id: string, userId?: string): Session | undefined {
+  const row = userId
+    ? db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?').get(id, userId) as Record<string, unknown> | undefined
+    : db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as Record<string, unknown> | undefined
   return row ? rowToSession(row) : undefined
 }
 
-export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'nextTurn' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount' | 'context' | 'systemPrompts'>>): Session {
+export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'nextTurn' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount' | 'context' | 'systemPrompts'>>, userId?: string): Session {
   const fields: string[] = ['updated_at = ?']
   const values: unknown[] = [Date.now()]
 
@@ -256,12 +449,30 @@ export function updateSession(id: string, updates: Partial<Pick<Session, 'status
   if (updates.systemPrompts !== undefined) { fields.push('system_prompts = ?'); values.push(JSON.stringify(updates.systemPrompts)) }
 
   values.push(id)
-  db.prepare(`UPDATE sessions SET ${fields.join(', ')} WHERE id = ?`).run(...values)
-  return getSession(id)!
+  if (userId) {
+    values.push(userId)
+    db.prepare(`UPDATE sessions SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...values)
+  } else {
+    db.prepare(`UPDATE sessions SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+  }
+  return getSession(id, userId)!
 }
 
-export function reopenSession(id: string): Session {
+export function reopenSession(id: string, userId?: string): Session {
   const now = Date.now()
+  if (userId) {
+    db.prepare(`
+      UPDATE sessions
+      SET status = 'active',
+          error_type = NULL,
+          error_round = NULL,
+          error_message = NULL,
+          last_agent_output = NULL,
+          updated_at = ?
+      WHERE id = ? AND user_id = ?
+    `).run(now, id, userId)
+    return getSession(id, userId)!
+  }
   db.prepare(`
     UPDATE sessions
     SET status = 'active',
@@ -275,17 +486,26 @@ export function reopenSession(id: string): Session {
   return getSession(id)!
 }
 
-export function listSessions(filter?: { status?: SessionStatus }): Session[] {
+export function listSessions(filter?: { status?: SessionStatus; userId?: string }): Session[] {
+  if (filter?.status && filter.userId) {
+    const rows = db.prepare('SELECT * FROM sessions WHERE status = ? AND user_id = ? ORDER BY created_at DESC').all(filter.status, filter.userId) as Record<string, unknown>[]
+    return rows.map(rowToSession)
+  }
   if (filter?.status) {
     const rows = db.prepare('SELECT * FROM sessions WHERE status = ? ORDER BY created_at DESC').all(filter.status) as Record<string, unknown>[]
+    return rows.map(rowToSession)
+  }
+  if (filter?.userId) {
+    const rows = db.prepare('SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC').all(filter.userId) as Record<string, unknown>[]
     return rows.map(rowToSession)
   }
   const rows = db.prepare('SELECT * FROM sessions ORDER BY created_at DESC').all() as Record<string, unknown>[]
   return rows.map(rowToSession)
 }
 
-export function deleteSession(id: string): void {
+export function deleteSession(id: string, userId?: string): void {
   const tx = db.transaction((sessionId: string) => {
+    if (userId && !getSession(sessionId, userId)) return
     db.prepare('DELETE FROM session_logs WHERE session_id = ?').run(sessionId)
     db.prepare('DELETE FROM snapshots WHERE session_id = ?').run(sessionId)
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId)
@@ -299,6 +519,7 @@ export function deleteSession(id: string): void {
 function rowToPipeline(row: Record<string, unknown>): Pipeline {
   return {
     id: row.id as string,
+    userId: row.user_id as string | undefined,
     name: row.name as string,
     status: row.status as Pipeline['status'],
     sessions: getPipelineSteps(row.id as string),
@@ -344,6 +565,7 @@ function insertPipelineSteps(pipelineId: string, steps: PipelineStep[]): void {
 
 export function createPipeline(params: {
   id: string
+  userId?: string
   name: string
   status?: Pipeline['status']
   sessions: PipelineStep[]
@@ -351,26 +573,30 @@ export function createPipeline(params: {
   const now = Date.now()
   const tx = db.transaction(() => {
     db.prepare(`
-      INSERT INTO pipelines (id, name, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(params.id, params.name, params.status ?? 'active', now, now)
+      INSERT INTO pipelines (id, user_id, name, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(params.id, params.userId ?? DEFAULT_USER_ID, params.name, params.status ?? 'active', now, now)
     insertPipelineSteps(params.id, params.sessions)
   })
   tx()
-  return getPipeline(params.id)!
+  return getPipeline(params.id, params.userId)!
 }
 
-export function getPipeline(id: string): Pipeline | undefined {
-  const row = db.prepare('SELECT * FROM pipelines WHERE id = ?').get(id) as Record<string, unknown> | undefined
+export function getPipeline(id: string, userId?: string): Pipeline | undefined {
+  const row = userId
+    ? db.prepare('SELECT * FROM pipelines WHERE id = ? AND user_id = ?').get(id, userId) as Record<string, unknown> | undefined
+    : db.prepare('SELECT * FROM pipelines WHERE id = ?').get(id) as Record<string, unknown> | undefined
   return row ? rowToPipeline(row) : undefined
 }
 
-export function listPipelines(): Pipeline[] {
-  const rows = db.prepare('SELECT * FROM pipelines ORDER BY created_at DESC').all() as Record<string, unknown>[]
+export function listPipelines(userId?: string): Pipeline[] {
+  const rows = userId
+    ? db.prepare('SELECT * FROM pipelines WHERE user_id = ? ORDER BY created_at DESC').all(userId) as Record<string, unknown>[]
+    : db.prepare('SELECT * FROM pipelines ORDER BY created_at DESC').all() as Record<string, unknown>[]
   return rows.map(rowToPipeline)
 }
 
-export function updatePipeline(id: string, updates: Partial<Pick<Pipeline, 'name' | 'status' | 'sessions'>>): Pipeline {
+export function updatePipeline(id: string, updates: Partial<Pick<Pipeline, 'name' | 'status' | 'sessions'>>, userId?: string): Pipeline {
   const tx = db.transaction(() => {
     const fields: string[] = ['updated_at = ?']
     const values: unknown[] = [Date.now()]
@@ -379,7 +605,12 @@ export function updatePipeline(id: string, updates: Partial<Pick<Pipeline, 'name
     if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status) }
 
     values.push(id)
-    db.prepare(`UPDATE pipelines SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+    if (userId) {
+      values.push(userId)
+      db.prepare(`UPDATE pipelines SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...values)
+    } else {
+      db.prepare(`UPDATE pipelines SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+    }
 
     if (updates.sessions !== undefined) {
       db.prepare('DELETE FROM pipeline_steps WHERE pipeline_id = ?').run(id)
@@ -387,24 +618,36 @@ export function updatePipeline(id: string, updates: Partial<Pick<Pipeline, 'name
     }
   })
   tx()
-  return getPipeline(id)!
+  return getPipeline(id, userId)!
 }
 
-export function deletePipeline(id: string): void {
-  db.prepare('DELETE FROM pipelines WHERE id = ?').run(id)
+export function deletePipeline(id: string, userId?: string): void {
+  if (userId) {
+    db.prepare('DELETE FROM pipelines WHERE id = ? AND user_id = ?').run(id, userId)
+  } else {
+    db.prepare('DELETE FROM pipelines WHERE id = ?').run(id)
+  }
 }
 
-export function getPipelineWithSessions(id: string): PipelineWithSessions | undefined {
-  const pipeline = getPipeline(id)
+export function getPipelineWithSessions(id: string, userId?: string): PipelineWithSessions | undefined {
+  const pipeline = getPipeline(id, userId)
   if (!pipeline) return undefined
   const sessionDetails = pipeline.sessions
-    .map((step) => getSession(step.sessionId))
+    .map((step) => getSession(step.sessionId, userId))
     .filter((session): session is Session => Boolean(session))
   return { ...pipeline, sessionDetails }
 }
 
-export function getPipelineBySession(sessionId: string): Pipeline | undefined {
-  const row = db.prepare(`
+export function getPipelineBySession(sessionId: string, userId?: string): Pipeline | undefined {
+  const row = userId
+    ? db.prepare(`
+    SELECT p.*
+    FROM pipelines p
+    JOIN pipeline_steps ps ON ps.pipeline_id = p.id
+    WHERE ps.session_id = ? AND p.user_id = ?
+    LIMIT 1
+  `).get(sessionId, userId) as Record<string, unknown> | undefined
+    : db.prepare(`
     SELECT p.*
     FROM pipelines p
     JOIN pipeline_steps ps ON ps.pipeline_id = p.id
@@ -515,9 +758,9 @@ export function getSnapshots(sessionId: string): DiffSnapshot[] {
   return rows.map(rowToSnapshot)
 }
 
-export function getStats(): TuringStats {
-  const sessions = listSessions()
-  const pipelines = listPipelines()
+export function getStats(userId?: string): TuringStats {
+  const sessions = listSessions(userId ? { userId } : undefined)
+  const pipelines = listPipelines(userId)
   const counts = {
     active: 0,
     paused: 0,
