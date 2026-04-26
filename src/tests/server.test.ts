@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
+import WebSocket from 'ws'
 import { Router } from '../router.js'
 import { createServer } from '../server.js'
 import * as state from '../state.js'
@@ -101,5 +102,34 @@ test('GET /api/pipelines/:id returns pipeline with session details', async () =>
     assert.equal(payload.id, 'server-pipeline')
     assert.equal(payload.sessionDetails.length, 1)
     assert.equal(payload.sessionDetails[0].id, 'server-pipeline-session')
+  })
+})
+
+test('WebSocket init only returns sessions for the authenticated user', async () => {
+  await withServer(async (baseUrl) => {
+    const userA = await register(baseUrl, 'ws-a@example.com')
+    const userB = await register(baseUrl, 'ws-b@example.com')
+    state.createSession({
+      id: 'ws-session-a',
+      userId: userA.userId,
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+    })
+    state.createSession({
+      id: 'ws-session-b',
+      userId: userB.userId,
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+    })
+
+    const ws = new WebSocket(baseUrl.replace('http:', 'ws:') + '/ws', {
+      headers: authHeaders(userA.token),
+    })
+    const [raw] = await once(ws, 'message') as [Buffer]
+    ws.close()
+
+    const message = JSON.parse(raw.toString()) as { type: string; payload: Array<{ id: string }> }
+    assert.equal(message.type, 'init')
+    assert.deepEqual(message.payload.map((session) => session.id), ['ws-session-a'])
   })
 })

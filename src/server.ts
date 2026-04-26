@@ -428,13 +428,16 @@ function parseNudgeBody(body: unknown): { content: string } {
 }
 
 export function createServer(router: Router, port: number, agentCatalog: AgentCatalog): http.Server {
-  const clients = new Set<WebSocket>()
+  const clients = new Map<WebSocket, string>()
 
-  // Forward router events to all WebSocket clients
+  // Forward router events only to the owner. Some events only carry a sessionId,
+  // so ownership is resolved from SQLite before sending.
   router.on('event', (event: WsEvent) => {
+    const userId = eventUserId(event)
     const payload = JSON.stringify(event)
-    for (const ws of clients) {
+    for (const [ws, clientUserId] of clients) {
       if (ws.readyState === 1 /* OPEN */) {
+        if (userId && userId !== clientUserId) continue
         ws.send(payload)
       }
     }
@@ -736,7 +739,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         if (!session) return json(res, 404, { error: 'Not found' })
 
         state.deleteSession(sessionId, authUser!.userId)
-        router.emit('event', { type: 'session:deleted', payload: { id: sessionId } })
+        router.emit('event', { type: 'session:deleted', payload: { id: sessionId, userId: authUser!.userId } })
 
         return json(res, 200, { success: true })
       }
@@ -803,7 +806,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
   const wss = new WebSocketServer({ server, path: '/ws' })
   const heartbeat = setInterval(() => {
-    for (const ws of clients) {
+    for (const ws of clients.keys()) {
       const live = ws as WebSocket & { isAlive?: boolean }
       if (live.isAlive === false) {
         clients.delete(ws)
@@ -816,20 +819,28 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
   }, WS_HEARTBEAT_MS)
   heartbeat.unref()
 
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
+    let authUser
+    try {
+      authUser = authenticateRequest(req)
+    } catch {
+      ws.close(1008, 'Authentication required')
+      return
+    }
+
     const live = ws as WebSocket & { isAlive?: boolean }
     live.isAlive = true
-    clients.add(ws)
+    clients.set(ws, authUser.userId)
     ws.on('pong', () => { live.isAlive = true })
     ws.on('close', () => clients.delete(ws))
     ws.on('error', () => clients.delete(ws))
     // Send current sessions on connect
-    ws.send(JSON.stringify({ type: 'init', payload: state.listSessions() }))
+    ws.send(JSON.stringify({ type: 'init', payload: state.listSessions({ userId: authUser.userId }) }))
   })
 
   server.on('close', () => {
     clearInterval(heartbeat)
-    for (const ws of clients) {
+    for (const ws of clients.keys()) {
       ws.terminate()
     }
     clients.clear()
@@ -841,4 +852,33 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
   })
 
   return server
+}
+
+function eventUserId(event: WsEvent): string | undefined {
+  if (event.type === 'heartbeat' && 'sessionId' in event && typeof event.sessionId === 'string') {
+    return state.getSession(event.sessionId)?.userId
+  }
+
+  if (!('payload' in event)) {
+    return undefined
+  }
+  const payload = event.payload
+  if (!payload || typeof payload !== 'object') {
+    return undefined
+  }
+
+  const record = payload as Record<string, unknown>
+  if (typeof record.userId === 'string') {
+    return record.userId
+  }
+  if (typeof record.sessionId === 'string') {
+    return state.getSession(record.sessionId)?.userId
+  }
+  if (typeof record.id === 'string' && event.type.startsWith('session:')) {
+    return state.getSession(record.id)?.userId
+  }
+  if (typeof record.id === 'string' && event.type.startsWith('pipeline:')) {
+    return state.getPipeline(record.id)?.userId
+  }
+  return undefined
 }
