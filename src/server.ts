@@ -319,6 +319,47 @@ function parseSessionBody(body: unknown) {
   }
 }
 
+function parsePipelineBody(body: unknown) {
+  const data = requireRecord(body, 'body')
+  const stepsValue = data.steps
+  if (!Array.isArray(stepsValue) || stepsValue.length === 0) {
+    throw new HttpError(400, '"steps" must be a non-empty array')
+  }
+
+  const steps = stepsValue.map((value, index) => {
+    const step = requireRecord(value, `steps[${index}]`)
+    let dependsOn: number[] | undefined
+    if (step.dependsOn !== undefined) {
+      if (!Array.isArray(step.dependsOn)) {
+        throw new HttpError(400, `"steps[${index}].dependsOn" must be an array`)
+      }
+      dependsOn = step.dependsOn.map((dep, depIndex) => {
+        if (typeof dep !== 'number' || !Number.isInteger(dep) || dep < 0 || dep >= stepsValue.length || dep === index) {
+          throw new HttpError(400, `"steps[${index}].dependsOn[${depIndex}]" must be a valid step index`)
+        }
+        return dep
+      })
+    }
+
+    return {
+      from: parseAgentRef(step.from, `steps[${index}].from`),
+      to: parseAgentRef(step.to, `steps[${index}].to`),
+      initialPrompt: requireNonEmptyString(step.initialPrompt, `steps[${index}].initialPrompt`),
+      mode: parseSessionMode(step.mode),
+      context: parseSessionContext(step.context, `steps[${index}].context`),
+      maxRounds: optionalPositiveInt(step.maxRounds, `steps[${index}].maxRounds`),
+      approveMode: optionalBoolean(step.approveMode, `steps[${index}].approveMode`),
+      cwd: optionalString(step.cwd, `steps[${index}].cwd`),
+      dependsOn,
+    }
+  })
+
+  return {
+    name: requireNonEmptyString(data.name, 'name'),
+    steps,
+  }
+}
+
 function parseResumeBody(body: unknown): { extraRounds?: number } {
   const data = requireRecord(body, 'body')
   return {
@@ -446,6 +487,59 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const saved = loadConfig()
         await reloadAgents(router, agentCatalog, saved)
         return json(res, 200, saved)
+      }
+
+      // GET /api/pipelines
+      if (pathname === '/api/pipelines' && method === 'GET') {
+        return json(res, 200, state.listPipelines())
+      }
+
+      // POST /api/pipelines
+      if (pathname === '/api/pipelines' && method === 'POST') {
+        const defaults = loadConfig().defaults
+        const params = parsePipelineBody(await parseBody(req))
+        const pipeline = router.startPipeline({
+          name: params.name,
+          steps: params.steps.map((step) => ({
+            ...step,
+            context: resolveSessionContext(step.context, step.cwd),
+            mode: step.mode ?? defaults.mode,
+            maxRounds: step.maxRounds ?? defaults.maxRounds,
+          })),
+        })
+        return json(res, 201, pipeline)
+      }
+
+      // GET /api/pipelines/:id
+      const pipelineMatch = pathname.match(/^\/api\/pipelines\/([^/]+)$/)
+      if (pipelineMatch && method === 'GET') {
+        const pipeline = state.getPipelineWithSessions(pipelineMatch[1])
+        if (!pipeline) return json(res, 404, { error: 'Not found' })
+        return json(res, 200, pipeline)
+      }
+
+      // DELETE /api/pipelines/:id
+      if (pipelineMatch && method === 'DELETE') {
+        const pipeline = state.getPipeline(pipelineMatch[1])
+        if (!pipeline) return json(res, 404, { error: 'Not found' })
+        await router.deletePipeline(pipelineMatch[1])
+        return json(res, 200, { success: true })
+      }
+
+      // POST /api/pipelines/:id/pause
+      const pipelinePauseMatch = pathname.match(/^\/api\/pipelines\/([^/]+)\/pause$/)
+      if (pipelinePauseMatch && method === 'POST') {
+        const pipeline = state.getPipeline(pipelinePauseMatch[1])
+        if (!pipeline) return json(res, 404, { error: 'Not found' })
+        return json(res, 200, await router.pausePipeline(pipelinePauseMatch[1]))
+      }
+
+      // POST /api/pipelines/:id/resume
+      const pipelineResumeMatch = pathname.match(/^\/api\/pipelines\/([^/]+)\/resume$/)
+      if (pipelineResumeMatch && method === 'POST') {
+        const pipeline = state.getPipeline(pipelineResumeMatch[1])
+        if (!pipeline) return json(res, 404, { error: 'Not found' })
+        return json(res, 200, await router.resumePipeline(pipelineResumeMatch[1]))
       }
 
       // GET /api/sessions

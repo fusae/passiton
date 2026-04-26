@@ -74,6 +74,25 @@ export interface SessionWithMessages extends Session {
   messages: Message[]
 }
 
+export interface Pipeline {
+  id: string
+  name: string
+  status: 'active' | 'done' | 'error' | 'paused'
+  sessions: PipelineStep[]
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PipelineStep {
+  sessionId: string
+  dependsOn?: string[]
+  status: 'pending' | 'active' | 'done' | 'error'
+}
+
+export interface PipelineWithSessions extends Pipeline {
+  sessionDetails: Session[]
+}
+
 export type SessionErrorType =
   | 'adapter_timeout'
   | 'adapter_crash'
@@ -168,6 +187,10 @@ export type WsEventType =
   | 'session:error'
   | 'session:paused'
   | 'session:deleted'
+  | 'pipeline:created'
+  | 'pipeline:updated'
+  | 'pipeline:done'
+  | 'pipeline:error'
   | 'message:new'
   | 'snapshot:new'
   | 'agent:status'

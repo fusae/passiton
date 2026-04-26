@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { homedir } from 'os'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
-import type { Session, Message, SessionLog, AgentRef, SessionStatus, SessionMode, SessionContext, RoundMetadata, DiffSnapshot } from './types.js'
+import type { Session, Message, SessionLog, AgentRef, SessionStatus, SessionMode, SessionContext, RoundMetadata, DiffSnapshot, Pipeline, PipelineStep, PipelineWithSessions } from './types.js'
 
 const DB_DIR = join(homedir(), '.turing')
 const DB_PATH = join(DB_DIR, 'turing.db')
@@ -88,10 +88,29 @@ function createTables(): void {
       diff_full   TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS pipelines (
+      id          TEXT PRIMARY KEY,
+      name        TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'active',
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS pipeline_steps (
+      pipeline_id TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
+      session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      position    INTEGER NOT NULL,
+      depends_on  TEXT,
+      status      TEXT NOT NULL DEFAULT 'pending',
+      PRIMARY KEY (pipeline_id, session_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_session_logs_session ON session_logs(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots(session_id, round, timestamp);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+    CREATE INDEX IF NOT EXISTS idx_pipeline_steps_session ON pipeline_steps(session_id);
+    CREATE INDEX IF NOT EXISTS idx_pipeline_steps_pipeline ON pipeline_steps(pipeline_id, position);
   `)
 
   // Migrate: add new columns if they don't exist (for existing DBs)
@@ -256,6 +275,126 @@ export function deleteSession(id: string): void {
     db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId)
   })
   tx(id)
+}
+
+// ── Pipelines ────────────────────────────────────────────────────────────────
+
+function rowToPipeline(row: Record<string, unknown>): Pipeline {
+  return {
+    id: row.id as string,
+    name: row.name as string,
+    status: row.status as Pipeline['status'],
+    sessions: getPipelineSteps(row.id as string),
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+  }
+}
+
+function rowToPipelineStep(row: Record<string, unknown>): PipelineStep {
+  let dependsOn: string[] | undefined
+  if (row.depends_on) {
+    try { dependsOn = JSON.parse(row.depends_on as string) } catch { /* ignore */ }
+  }
+  return {
+    sessionId: row.session_id as string,
+    ...(dependsOn && dependsOn.length > 0 ? { dependsOn } : {}),
+    status: row.status as PipelineStep['status'],
+  }
+}
+
+function getPipelineSteps(pipelineId: string): PipelineStep[] {
+  const rows = db.prepare(
+    'SELECT * FROM pipeline_steps WHERE pipeline_id = ? ORDER BY position ASC'
+  ).all(pipelineId) as Record<string, unknown>[]
+  return rows.map(rowToPipelineStep)
+}
+
+function insertPipelineSteps(pipelineId: string, steps: PipelineStep[]): void {
+  const stmt = db.prepare(`
+    INSERT INTO pipeline_steps (pipeline_id, session_id, position, depends_on, status)
+    VALUES (?, ?, ?, ?, ?)
+  `)
+  steps.forEach((step, index) => {
+    stmt.run(
+      pipelineId,
+      step.sessionId,
+      index,
+      step.dependsOn && step.dependsOn.length > 0 ? JSON.stringify(step.dependsOn) : null,
+      step.status
+    )
+  })
+}
+
+export function createPipeline(params: {
+  id: string
+  name: string
+  status?: Pipeline['status']
+  sessions: PipelineStep[]
+}): Pipeline {
+  const now = Date.now()
+  const tx = db.transaction(() => {
+    db.prepare(`
+      INSERT INTO pipelines (id, name, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(params.id, params.name, params.status ?? 'active', now, now)
+    insertPipelineSteps(params.id, params.sessions)
+  })
+  tx()
+  return getPipeline(params.id)!
+}
+
+export function getPipeline(id: string): Pipeline | undefined {
+  const row = db.prepare('SELECT * FROM pipelines WHERE id = ?').get(id) as Record<string, unknown> | undefined
+  return row ? rowToPipeline(row) : undefined
+}
+
+export function listPipelines(): Pipeline[] {
+  const rows = db.prepare('SELECT * FROM pipelines ORDER BY created_at DESC').all() as Record<string, unknown>[]
+  return rows.map(rowToPipeline)
+}
+
+export function updatePipeline(id: string, updates: Partial<Pick<Pipeline, 'name' | 'status' | 'sessions'>>): Pipeline {
+  const tx = db.transaction(() => {
+    const fields: string[] = ['updated_at = ?']
+    const values: unknown[] = [Date.now()]
+
+    if (updates.name !== undefined) { fields.push('name = ?'); values.push(updates.name) }
+    if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status) }
+
+    values.push(id)
+    db.prepare(`UPDATE pipelines SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+
+    if (updates.sessions !== undefined) {
+      db.prepare('DELETE FROM pipeline_steps WHERE pipeline_id = ?').run(id)
+      insertPipelineSteps(id, updates.sessions)
+    }
+  })
+  tx()
+  return getPipeline(id)!
+}
+
+export function deletePipeline(id: string): void {
+  db.prepare('DELETE FROM pipelines WHERE id = ?').run(id)
+}
+
+export function getPipelineWithSessions(id: string): PipelineWithSessions | undefined {
+  const pipeline = getPipeline(id)
+  if (!pipeline) return undefined
+  const sessionDetails = pipeline.sessions
+    .map((step) => getSession(step.sessionId))
+    .filter((session): session is Session => Boolean(session))
+  return { ...pipeline, sessionDetails }
+}
+
+export function getPipelineBySession(sessionId: string): Pipeline | undefined {
+  const row = db.prepare(`
+    SELECT p.*
+    FROM pipelines p
+    JOIN pipeline_steps ps ON ps.pipeline_id = p.id
+    WHERE ps.session_id = ?
+    LIMIT 1
+  `).get(sessionId) as Record<string, unknown> | undefined
+  return row ? rowToPipeline(row) : undefined
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────

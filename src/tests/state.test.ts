@@ -118,3 +118,60 @@ test('reopen keeps the existing round count', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('pipeline CRUD persists ordered steps and dependencies', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
+
+  try {
+    state.initDb(join(dir, 'turing.db'))
+    state.createSession({
+      id: 'pipeline-session-1',
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+    })
+    state.createSession({
+      id: 'pipeline-session-2',
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+    })
+
+    const pipeline = state.createPipeline({
+      id: 'pipeline-1',
+      name: 'Pipeline Test',
+      sessions: [
+        { sessionId: 'pipeline-session-1', status: 'active' },
+        { sessionId: 'pipeline-session-2', dependsOn: ['pipeline-session-1'], status: 'pending' },
+      ],
+    })
+
+    assert.equal(pipeline.name, 'Pipeline Test')
+    assert.equal(pipeline.status, 'active')
+    assert.deepEqual(pipeline.sessions, [
+      { sessionId: 'pipeline-session-1', status: 'active' },
+      { sessionId: 'pipeline-session-2', dependsOn: ['pipeline-session-1'], status: 'pending' },
+    ])
+
+    const updated = state.updatePipeline('pipeline-1', {
+      status: 'paused',
+      sessions: [
+        { sessionId: 'pipeline-session-1', status: 'done' },
+        { sessionId: 'pipeline-session-2', dependsOn: ['pipeline-session-1'], status: 'active' },
+      ],
+    })
+
+    assert.equal(updated.status, 'paused')
+    assert.deepEqual(state.listPipelines().map((item) => item.id), ['pipeline-1'])
+    assert.deepEqual(updated.sessions.map((step) => step.status), ['done', 'active'])
+    assert.equal(state.getPipelineBySession('pipeline-session-2')?.id, 'pipeline-1')
+    assert.deepEqual(state.getPipelineWithSessions('pipeline-1')?.sessionDetails.map((session) => session.id), [
+      'pipeline-session-1',
+      'pipeline-session-2',
+    ])
+
+    state.deletePipeline('pipeline-1')
+    assert.equal(state.getPipeline('pipeline-1'), undefined)
+  } finally {
+    state.closeDb()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

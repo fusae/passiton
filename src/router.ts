@@ -3,7 +3,7 @@
 import { EventEmitter } from 'events'
 import { execFile } from 'child_process'
 import { v4 as uuidv4 } from 'uuid'
-import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType } from './types.js'
+import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline } from './types.js'
 import * as state from './state.js'
 import {
   checkPreRound,
@@ -60,50 +60,59 @@ export class Router extends EventEmitter {
     approveMode?: boolean
     cwd?: string
   }): Session {
-    const mode = params.mode ?? 'freeform'
+    const session = this.createSessionRecord(params, 'active')
 
-    // Generate system prompts based on mode + context
-    const systemPrompts = generateSystemPrompts(
-      mode,
-      params.from,
-      params.to,
-      params.initialPrompt,
-      params.context
-    )
-
-    const session = state.createSession({
-      id: uuidv4(),
-      from: params.from,
-      to: params.to,
-      mode,
-      context: params.context,
-      systemPrompts,
-      nextTurn: 'to',
-      maxRounds: params.maxRounds ?? this.policy.maxRounds,
-      approveMode: params.approveMode ?? false,
-      cwd: params.cwd,
-    })
-
-    // Record the initial human prompt as round 0
-    this.recordMessage(session.id, 'human', params.initialPrompt, 0)
-
-    this.emit('event', {
-      type: 'session:created',
-      payload: session,
-    } satisfies WsEvent)
-
-    this.emitLog('info', `Session started: ${agentLabel(params.from)} → ${agentLabel(params.to)} [${session.id.slice(0, 8)}] mode=${mode}`, session.id)
+    this.emitLog('info', `Session started: ${agentLabel(params.from)} → ${agentLabel(params.to)} [${session.id.slice(0, 8)}] mode=${session.mode}`, session.id)
 
     // Kick off the run loop (non-blocking)
-    setImmediate(() => {
-      this.runSession(session.id, params.initialPrompt, this.nextRunEpoch(session.id)).catch((err) => {
-        console.error(`[router] runSession error for ${session.id}:`, err)
-        this.emitLog('error', `Session run error [${session.id.slice(0, 8)}]: ${String(err)}`, session.id)
-        this.markError(session.id, err)
-      })
-    })
+    this.startRunLoop(session.id, params.initialPrompt)
 
     return session
+  }
+
+  startPipeline(params: {
+    name: string
+    steps: Array<{
+      from: AgentRef
+      to: AgentRef
+      initialPrompt: string
+      mode?: SessionMode
+      context?: SessionContext
+      maxRounds?: number
+      approveMode?: boolean
+      cwd?: string
+      dependsOn?: number[]
+    }>
+  }): Pipeline {
+    if (params.steps.length === 0) {
+      throw new Error('Pipeline requires at least one step')
+    }
+
+    const created = params.steps.map((step) => {
+      const hasDependencies = (step.dependsOn?.length ?? 0) > 0
+      return this.createSessionRecord(step, hasDependencies ? 'paused' : 'active')
+    })
+
+    const pipeline = state.createPipeline({
+      id: uuidv4(),
+      name: params.name,
+      status: 'active',
+      sessions: params.steps.map((step, index) => ({
+        sessionId: created[index].id,
+        dependsOn: step.dependsOn?.map((depIndex) => created[depIndex].id),
+        status: step.dependsOn?.length ? 'pending' : 'active',
+      })),
+    })
+
+    this.emit('event', { type: 'pipeline:created', payload: pipeline } satisfies WsEvent)
+
+    params.steps.forEach((step, index) => {
+      if (!step.dependsOn?.length) {
+        this.startRunLoop(created[index].id, step.initialPrompt)
+      }
+    })
+
+    return pipeline
   }
 
   async pauseSession(id: string): Promise<Session> {
@@ -133,13 +142,7 @@ export class Router extends EventEmitter {
     this.emitLog('info', `Session resumed [${id.slice(0, 8)}]${extraRounds !== undefined ? ` (+${extraRounds} rounds)` : ''}`, id)
     const epoch = this.nextRunEpoch(id)
 
-    setImmediate(() => {
-      this.runSession(id, lastMessage.content, epoch).catch((err) => {
-        console.error(`[router] resumeSession error for ${id}:`, err)
-        this.emitLog('error', `Session resume error [${id.slice(0, 8)}]: ${String(err)}`, id)
-        this.markError(id, err)
-      })
-    })
+    this.startRunLoop(id, lastMessage.content, epoch)
 
     return updated
   }
@@ -180,7 +183,47 @@ export class Router extends EventEmitter {
     const session = state.updateSession(id, { status: 'done' })
     this.emit('event', { type: 'session:done', payload: session } satisfies WsEvent)
     this.emitLog('info', `Session stopped [${id.slice(0, 8)}]`, id)
+    this.handlePipelineSessionFinished(id, 'done')
     return session
+  }
+
+  async pausePipeline(id: string): Promise<Pipeline> {
+    const pipeline = state.getPipeline(id)
+    if (!pipeline) throw new Error(`Pipeline ${id} not found`)
+    for (const step of pipeline.sessions) {
+      const session = state.getSession(step.sessionId)
+      if (session?.status === 'active') {
+        await this.pauseSession(step.sessionId)
+      }
+    }
+    const updated = state.updatePipeline(id, { status: 'paused' })
+    this.emit('event', { type: 'pipeline:updated', payload: updated } satisfies WsEvent)
+    return updated
+  }
+
+  async resumePipeline(id: string): Promise<Pipeline> {
+    const pipeline = state.getPipeline(id)
+    if (!pipeline) throw new Error(`Pipeline ${id} not found`)
+    const updated = state.updatePipeline(id, { status: 'active' })
+    this.emit('event', { type: 'pipeline:updated', payload: updated } satisfies WsEvent)
+    await this.resumePipelineReadySteps(updated)
+    return state.getPipeline(id)!
+  }
+
+  async deletePipeline(id: string): Promise<void> {
+    const pipeline = state.getPipeline(id)
+    if (!pipeline) throw new Error(`Pipeline ${id} not found`)
+    for (const step of pipeline.sessions) {
+      const session = state.getSession(step.sessionId)
+      if (session?.status === 'active') {
+        this.runningLoops.delete(step.sessionId)
+        this.nextRunEpoch(step.sessionId)
+        const stopped = state.updateSession(step.sessionId, { status: 'done' })
+        this.emit('event', { type: 'session:done', payload: stopped } satisfies WsEvent)
+      }
+    }
+    state.deletePipeline(id)
+    this.emit('event', { type: 'pipeline:updated', payload: { id, deleted: true } } satisfies WsEvent)
   }
 
   // ── Human message injection ─────────────────────────────────────────────────
@@ -305,6 +348,7 @@ export class Router extends EventEmitter {
           const updated = state.updateSession(sessionId, { status: 'done' })
           this.emit('event', { type: 'session:done', payload: updated } satisfies WsEvent)
           this.emitLog('info', `Session completed [${sessionId.slice(0, 8)}] after ${updated.currentRound} rounds`, sessionId)
+          this.handlePipelineSessionFinished(sessionId, 'done')
           break
         }
         nextMessage = result.nextMessage
@@ -472,7 +516,114 @@ export class Router extends EventEmitter {
         lastAgentOutput: lastAgentOutputFromError(err),
       })
       this.emit('event', { type: 'session:error', payload: updated } satisfies WsEvent)
+      this.handlePipelineSessionFinished(sessionId, 'error')
     } catch (_) { /* best-effort */ }
+  }
+
+  private createSessionRecord(params: {
+    from: AgentRef
+    to: AgentRef
+    initialPrompt: string
+    mode?: SessionMode
+    context?: SessionContext
+    maxRounds?: number
+    approveMode?: boolean
+    cwd?: string
+  }, initialStatus: 'active' | 'paused'): Session {
+    const mode = params.mode ?? 'freeform'
+    const systemPrompts = generateSystemPrompts(
+      mode,
+      params.from,
+      params.to,
+      params.initialPrompt,
+      params.context
+    )
+
+    const created = state.createSession({
+      id: uuidv4(),
+      from: params.from,
+      to: params.to,
+      mode,
+      context: params.context,
+      systemPrompts,
+      nextTurn: 'to',
+      maxRounds: params.maxRounds ?? this.policy.maxRounds,
+      approveMode: params.approveMode ?? false,
+      cwd: params.cwd,
+    })
+    this.recordMessage(created.id, 'human', params.initialPrompt, 0)
+
+    const session = initialStatus === 'paused'
+      ? state.updateSession(created.id, { status: 'paused' })
+      : created
+
+    this.emit('event', { type: 'session:created', payload: session } satisfies WsEvent)
+    return session
+  }
+
+  private startRunLoop(sessionId: string, firstMessage: string, epoch = this.nextRunEpoch(sessionId)): void {
+    setImmediate(() => {
+      this.runSession(sessionId, firstMessage, epoch).catch((err) => {
+        console.error(`[router] runSession error for ${sessionId}:`, err)
+        this.emitLog('error', `Session run error [${sessionId.slice(0, 8)}]: ${String(err)}`, sessionId)
+        this.markError(sessionId, err)
+      })
+    })
+  }
+
+  private handlePipelineSessionFinished(sessionId: string, status: 'done' | 'error'): void {
+    const pipeline = state.getPipelineBySession(sessionId)
+    if (!pipeline) return
+
+    const sessions = pipeline.sessions.map((step) => (
+      step.sessionId === sessionId ? { ...step, status } : step
+    ))
+
+    const hasError = sessions.some((step) => step.status === 'error')
+    const allDone = sessions.every((step) => step.status === 'done')
+    const nextStatus: Pipeline['status'] = hasError ? 'error' : allDone ? 'done' : 'active'
+    const updated = state.updatePipeline(pipeline.id, { status: nextStatus, sessions })
+
+    if (status === 'error') {
+      this.emit('event', { type: 'pipeline:error', payload: updated } satisfies WsEvent)
+    } else if (nextStatus === 'done') {
+      this.emit('event', { type: 'pipeline:done', payload: updated } satisfies WsEvent)
+    } else {
+      this.emit('event', { type: 'pipeline:updated', payload: updated } satisfies WsEvent)
+    }
+
+    if (nextStatus !== 'done') {
+      this.resumePipelineReadySteps(updated).catch((err) => {
+        console.error(`[router] pipeline resume error for ${pipeline.id}:`, err)
+      })
+    }
+  }
+
+  private async resumePipelineReadySteps(pipeline: Pipeline): Promise<void> {
+    if (pipeline.status === 'paused') return
+
+    let changed = false
+    const done = new Set(pipeline.sessions.filter((step) => step.status === 'done').map((step) => step.sessionId))
+    const sessions = pipeline.sessions.map((step) => {
+      if (step.status !== 'pending') return step
+      if (!(step.dependsOn ?? []).every((dep) => done.has(dep))) return step
+      const session = state.getSession(step.sessionId)
+      if (session?.status === 'paused') {
+        const initialMessage = state.getMessages(step.sessionId).find((msg) => msg.from === 'human' && msg.round === 0)
+        const resumed = state.updateSession(step.sessionId, { status: 'active' })
+        this.emit('event', { type: 'session:updated', payload: resumed } satisfies WsEvent)
+        if (initialMessage) {
+          this.startRunLoop(step.sessionId, initialMessage.content)
+        }
+      }
+      changed = true
+      return { ...step, status: 'active' as const }
+    })
+
+    if (changed) {
+      const updated = state.updatePipeline(pipeline.id, { sessions, status: pipeline.status === 'error' ? 'error' : 'active' })
+      this.emit('event', { type: 'pipeline:updated', payload: updated } satisfies WsEvent)
+    }
   }
 
   private async captureGitSnapshot(sessionId: string, round: number): Promise<void> {
