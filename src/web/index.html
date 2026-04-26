@@ -30,8 +30,11 @@
     <!-- Sidebar -->
     <aside id="sidebar">
       <div id="pipeline-sidebar-section">
-        <div class="sidebar-section-header">
-          <span>Pipelines</span>
+        <div class="sidebar-section-header pipeline-sidebar-header">
+          <button id="pipeline-toggle" class="stats-panel-header stats-toggle-btn" type="button" aria-expanded="true">
+            <span>Pipelines</span>
+            <span id="pipeline-toggle-icon">▾</span>
+          </button>
           <button id="new-pipeline-btn">+ New</button>
         </div>
         <div id="pipeline-list"></div>
@@ -50,7 +53,10 @@
       </div>
 
       <div id="stats-panel">
-        <div class="stats-panel-header">Overview</div>
+        <button id="stats-toggle" class="stats-panel-header stats-toggle-btn" type="button" aria-expanded="true">
+          <span>Overview</span>
+          <span id="stats-toggle-icon">▾</span>
+        </button>
         <div id="stats-grid"></div>
       </div>
 

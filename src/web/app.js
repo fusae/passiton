@@ -28,8 +28,14 @@ const AGENT_COMMAND_DEFAULTS = {
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const sessionList      = document.getElementById('session-list')
 const pipelineList     = document.getElementById('pipeline-list')
+const pipelineSidebarSection = document.getElementById('pipeline-sidebar-section')
+const pipelineToggle   = document.getElementById('pipeline-toggle')
+const pipelineToggleIcon = document.getElementById('pipeline-toggle-icon')
 const agentsList       = document.querySelector('.agents-list')
 const statsGrid        = document.getElementById('stats-grid')
+const statsPanel       = document.getElementById('stats-panel')
+const statsToggle      = document.getElementById('stats-toggle')
+const statsToggleIcon  = document.getElementById('stats-toggle-icon')
 const emptyState       = document.getElementById('empty-state')
 const sessionView      = document.getElementById('session-view')
 const pipelineView     = document.getElementById('pipeline-view')
@@ -89,6 +95,8 @@ async function init() {
   setupScrollToBottom()
   setupSettingsPanel()
   setupPipelineUi()
+  setupStatsToggle()
+  setupPipelineToggle()
   setInterval(tickProgressIndicators, 1000)
 }
 
@@ -242,6 +250,15 @@ function renderStats() {
       <div class="stats-subvalue">${escHtml(card.sub)}</div>
     </div>
   `).join('')
+}
+
+function setupStatsToggle() {
+  if (!statsToggle || !statsPanel) return
+  statsToggle.addEventListener('click', () => {
+    const collapsed = statsPanel.classList.toggle('collapsed')
+    statsToggle.setAttribute('aria-expanded', String(!collapsed))
+    if (statsToggleIcon) statsToggleIcon.textContent = collapsed ? '▸' : '▾'
+  })
 }
 
 // ── Templates ─────────────────────────────────────────────────────────────────
@@ -1129,6 +1146,15 @@ async function submitPipelineForm(event) {
     submitBtn.disabled = false
     submitBtn.textContent = originalText
   }
+}
+
+function setupPipelineToggle() {
+  if (!pipelineToggle || !pipelineSidebarSection) return
+  pipelineToggle.addEventListener('click', () => {
+    const collapsed = pipelineSidebarSection.classList.toggle('collapsed')
+    pipelineToggle.setAttribute('aria-expanded', String(!collapsed))
+    if (pipelineToggleIcon) pipelineToggleIcon.textContent = collapsed ? '▸' : '▾'
+  })
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
