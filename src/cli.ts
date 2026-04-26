@@ -64,29 +64,61 @@ async function post(path: string, body?: unknown) {
   return request('POST', path, body ?? {})
 }
 
+async function put(path: string, body?: unknown) {
+  return request('PUT', path, body ?? {})
+}
+
+async function del(path: string, body?: unknown) {
+  return request('DELETE', path, body)
+}
+
 // ── Arg parsing helpers ───────────────────────────────────────────────────────
 
 interface Flags {
   from?: string
   to?: string
+  fromLabel?: string
+  toLabel?: string
   cwd?: string
   approve?: boolean
   rounds?: number
+  mode?: string
   side?: string
+  status?: string
+  contextRules?: string
+  contextText?: string
+  contextFiles?: string
+  env: string[]
+  adapter?: string
+  command?: string
+  name?: string
+  port?: number
   _: string[]  // positional args
 }
 
 function parseArgs(argv: string[]): Flags {
-  const flags: Flags = { _: [] }
+  const flags: Flags = { _: [], env: [] }
   let i = 0
   while (i < argv.length) {
     const a = argv[i]
     if (a === '--from' && argv[i + 1]) { flags.from = argv[++i] }
     else if (a === '--to' && argv[i + 1]) { flags.to = argv[++i] }
+    else if (a === '--from-label' && argv[i + 1]) { flags.fromLabel = argv[++i] }
+    else if (a === '--to-label' && argv[i + 1]) { flags.toLabel = argv[++i] }
     else if (a === '--cwd' && argv[i + 1]) { flags.cwd = argv[++i] }
     else if (a === '--approve' || a === '-A') { flags.approve = true }
     else if ((a === '--rounds' || a === '-r') && argv[i + 1]) { flags.rounds = parseInt(argv[++i]) }
+    else if (a === '--mode' && argv[i + 1]) { flags.mode = argv[++i] }
     else if (a === '--side' && argv[i + 1]) { flags.side = argv[++i] }
+    else if (a === '--status' && argv[i + 1]) { flags.status = argv[++i] }
+    else if (a === '--context-rules' && argv[i + 1]) { flags.contextRules = argv[++i] }
+    else if (a === '--context-text' && argv[i + 1]) { flags.contextText = argv[++i] }
+    else if (a === '--context-files' && argv[i + 1]) { flags.contextFiles = argv[++i] }
+    else if (a === '--env' && argv[i + 1]) { flags.env.push(argv[++i]) }
+    else if (a === '--adapter' && argv[i + 1]) { flags.adapter = argv[++i] }
+    else if (a === '--command' && argv[i + 1]) { flags.command = argv[++i] }
+    else if (a === '--name' && argv[i + 1]) { flags.name = argv[++i] }
+    else if (a === '--port' && argv[i + 1]) { flags.port = parseInt(argv[++i]) }
     else { flags._.push(a) }
     i++
   }
@@ -119,6 +151,36 @@ function timeAgo(ts: number): string {
   if (diff < 3_600_000)    return `${Math.floor(diff / 60_000)}m ago`
   if (diff < 86_400_000)   return `${Math.floor(diff / 3_600_000)}h ago`
   return new Date(ts).toLocaleDateString()
+}
+
+function parseEnvFlags(values: string[]): Record<string, string> | undefined {
+  if (!values.length) return undefined
+  const env: Record<string, string> = {}
+  for (const item of values) {
+    const eqIndex = item.indexOf('=')
+    if (eqIndex <= 0) {
+      die(`Invalid --env value "${item}". Expected KEY=VALUE`)
+    }
+    const key = item.slice(0, eqIndex).trim()
+    const value = item.slice(eqIndex + 1)
+    if (!key || !value) {
+      die(`Invalid --env value "${item}". Expected KEY=VALUE`)
+    }
+    env[key] = value
+  }
+  return env
+}
+
+function buildContext(flags: Flags) {
+  const files = flags.contextFiles
+    ? flags.contextFiles.split(/[\n,]/).map((item) => item.trim()).filter(Boolean)
+    : []
+
+  const context: Record<string, unknown> = {}
+  if (flags.contextRules) context.rules = flags.contextRules
+  if (flags.contextText) context.text = flags.contextText
+  if (files.length > 0) context.files = files
+  return Object.keys(context).length > 0 ? context : undefined
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -200,9 +262,11 @@ async function chat(flags: Flags) {
   if (!prompt)     { die('prompt text is required') }
 
   const body = {
-    from: { adapter: flags.from },
-    to:   { adapter: flags.to },
+    from: { adapter: flags.from, ...(flags.fromLabel ? { label: flags.fromLabel } : {}) },
+    to:   { adapter: flags.to, ...(flags.toLabel ? { label: flags.toLabel } : {}) },
     initialPrompt: prompt,
+    mode: flags.mode,
+    context: buildContext(flags),
     maxRounds: flags.rounds ?? 20,
     approveMode: flags.approve ?? false,
     cwd: flags.cwd,
@@ -233,7 +297,8 @@ async function chat(flags: Flags) {
 async function listSessions() {
   let r: { status: number; data: unknown }
   try {
-    r = await get('/api/sessions')
+    const query = flags.status ? `?status=${encodeURIComponent(flags.status)}` : ''
+    r = await get(`/api/sessions${query}`)
   } catch {
     die(`Cannot reach server at ${BASE}`)
   }
@@ -243,8 +308,11 @@ async function listSessions() {
     from: { adapter: string; label?: string }
     to: { adapter: string; label?: string }
     status: string
+    mode: string
     currentRound: number
     maxRounds: number
+    errorType?: string
+    resumeCount?: number
     updatedAt: number
   }>
 
@@ -260,8 +328,11 @@ async function listSessions() {
     const id   = s.id.slice(0, 8)
     console.log(
       `  ${id}  ${statusColor(s.status).padEnd(20)}  ` +
+      `${s.mode.padEnd(12)} ` +
       `R${s.currentRound}/${s.maxRounds}  ` +
       `${from} → ${to}  ` +
+      `${s.errorType ? `err=${s.errorType}  ` : ''}` +
+      `${(s.resumeCount ?? 0) > 0 ? `resume=${s.resumeCount}  ` : ''}` +
       `${timeAgo(s.updatedAt)}`
     )
   }
@@ -272,28 +343,61 @@ async function listSessions() {
 async function logSession(sessionId: string) {
   let r: { status: number; data: unknown }
   try {
-    r = await get(`/api/sessions/${sessionId}`)
+    const [sessionRes, logsRes, snapshotsRes] = await Promise.all([
+      get(`/api/sessions/${sessionId}`),
+      get(`/api/sessions/${sessionId}/logs`),
+      get(`/api/sessions/${sessionId}/snapshots`),
+    ])
+    r = {
+      status: sessionRes.status,
+      data: {
+        session: sessionRes.data,
+        logs: logsRes.data,
+        snapshots: snapshotsRes.data,
+      },
+    }
   } catch {
     die(`Cannot reach server at ${BASE}`)
   }
 
   if (r!.status === 404) { die(`Session ${sessionId} not found`) }
 
-  const data = r!.data as {
-    id: string
-    from: { adapter: string; label?: string }
-    to: { adapter: string; label?: string }
-    status: string
-    currentRound: number
-    maxRounds: number
-    messages: Array<{ from: string; content: string; timestamp: number; round: number }>
+  const payload = r!.data as {
+    session: {
+      id: string
+      from: { adapter: string; label?: string }
+      to: { adapter: string; label?: string }
+      status: string
+      mode: string
+      currentRound: number
+      maxRounds: number
+      errorType?: string
+      errorMessage?: string
+      lastAgentOutput?: string
+      errorRound?: number
+      resumeCount?: number
+      context?: { rules?: string; text?: string; files?: Array<{ path: string; content: string }> }
+      messages: Array<{ from: string; content: string; timestamp: number; round: number; metadata?: { duration?: number; filesModified?: string[]; commandsRun?: string[]; tokenEstimate?: number } }>
+    }
+    logs: Array<{ timestamp: number; level: string; message: string }>
+    snapshots: Array<{ round: number; timestamp: number; diffStat: string; diffFull: string }>
   }
+  const data = payload.session
 
   console.log(`\n  Session  ${data.id}`)
   console.log(`  From     ${agentLabel(data.from)}`)
   console.log(`  To       ${agentLabel(data.to)}`)
   console.log(`  Status   ${statusColor(data.status)}`)
+  fmt('Mode', data.mode)
   console.log(`  Rounds   ${data.currentRound}/${data.maxRounds}`)
+  if (data.resumeCount) fmt('Resumes', data.resumeCount)
+  if (data.errorType) fmt('ErrorType', data.errorType)
+  if (data.errorRound !== undefined) fmt('ErrorRound', data.errorRound)
+  if (data.errorMessage) fmt('Error', data.errorMessage)
+  if (data.lastAgentOutput) fmt('LastOutput', data.lastAgentOutput.slice(0, 120))
+  if (data.context?.rules) fmt('Rules', data.context.rules)
+  if (data.context?.text) fmt('Context', data.context.text.slice(0, 120))
+  if (data.context?.files?.length) fmt('Files', data.context.files.map((file) => file.path).join(', '))
   console.log()
 
   let lastRound = -1
@@ -311,6 +415,40 @@ async function logSession(sessionId: string) {
     const lines = msg.content.split('\n')
     for (const line of lines) {
       console.log(`    ${line}`)
+    }
+    if (msg.metadata) {
+      const parts = [
+        msg.metadata.duration !== undefined ? `duration=${msg.metadata.duration}ms` : '',
+        msg.metadata.tokenEstimate !== undefined ? `tokens≈${msg.metadata.tokenEstimate}` : '',
+        msg.metadata.filesModified?.length ? `files=${msg.metadata.filesModified.join(',')}` : '',
+        msg.metadata.commandsRun?.length ? `cmds=${msg.metadata.commandsRun.join(' | ')}` : '',
+      ].filter(Boolean)
+      if (parts.length) {
+        console.log(`    [meta] ${parts.join('  ')}`)
+      }
+    }
+  }
+
+  if (payload.logs.length) {
+    console.log('\n  ── Logs ──────────────────────────────')
+    for (const entry of payload.logs) {
+      const ts = new Date(entry.timestamp).toLocaleTimeString()
+      console.log(`  [${ts}] ${entry.level.padEnd(5)} ${entry.message}`)
+    }
+  }
+
+  if (payload.snapshots.length) {
+    console.log('\n  ── Snapshots ─────────────────────────')
+    for (const snapshot of payload.snapshots) {
+      const ts = new Date(snapshot.timestamp).toLocaleTimeString()
+      console.log(`\n  Round ${snapshot.round} @ ${ts}`)
+      if (snapshot.diffStat.trim()) {
+        for (const line of snapshot.diffStat.split('\n')) {
+          console.log(`    ${line}`)
+        }
+      } else {
+        console.log('    (no diff)')
+      }
     }
   }
   console.log()
@@ -339,27 +477,36 @@ async function stopSession(sessionId: string) {
   else { console.error('Error:', s.data) }
 }
 
-// ── takeover / release ────────────────────────────────────────────────────────
-async function takeover(sessionId: string, side: string) {
-  if (side !== 'from' && side !== 'to') { die('--side must be "from" or "to"') }
+async function deleteSession(sessionId: string) {
+  const r = await del(`/api/sessions/${sessionId}`).catch(() => die('Cannot reach server'))
+  const s = (r as { status: number; data: unknown })
+  if (s.status === 200) { console.log(`Deleted session ${sessionId.slice(0, 8)}`) }
+  else { console.error('Error:', s.data) }
+}
 
+async function nudgeSession(sessionId: string, content: string) {
+  const r = await post(`/api/sessions/${sessionId}/nudge`, { content }).catch(() => die('Cannot reach server'))
+  const s = (r as { status: number; data: unknown })
+  if (s.status === 200) { console.log(`Nudged session ${sessionId.slice(0, 8)}`) }
+  else { console.error('Error:', s.data) }
+}
+
+// ── takeover / release ────────────────────────────────────────────────────────
+async function takeover(sessionId: string) {
   // Pause the session first
   await post(`/api/sessions/${sessionId}/takeover`).catch(() => die('Cannot reach server'))
-  console.log(`\nTaken over session ${sessionId.slice(0, 8)} as ${side} side.`)
+  console.log(`\nTaken over session ${sessionId.slice(0, 8)} as human.`)
   console.log('Type messages and press Enter. Type /release to hand back.\n')
 
   const rl = createInterface({ input: process.stdin, output: process.stdout })
-  const prompt = () => rl.question(`[you as ${side}] `, async (input) => {
+  const prompt = () => rl.question('[you] ', async (input) => {
     if (input.trim() === '/release') {
       rl.close()
       await releaseSession(sessionId)
       return
     }
     if (input.trim()) {
-      await post(`/api/sessions/${sessionId}/message`, {
-        content: input.trim(),
-        side,
-      }).catch((e) => console.error('Error:', e))
+      await post(`/api/sessions/${sessionId}/message`, { content: input.trim() }).catch((e) => console.error('Error:', e))
     }
     prompt()
   })
@@ -373,6 +520,120 @@ async function releaseSession(sessionId: string) {
   else { console.error('Error:', s.data) }
 }
 
+async function listTemplates() {
+  const r = await get('/api/templates').catch(() => die(`Cannot reach server at ${BASE}`))
+  const templates = (r as { status: number; data: unknown }).data as Array<{
+    id: string
+    name: string
+    mode: string
+    description: string
+  }>
+  if (!templates.length) {
+    console.log('No templates.')
+    return
+  }
+  console.log()
+  for (const template of templates) {
+    console.log(`  ${template.id.padEnd(20)} ${template.mode.padEnd(12)} ${template.name}`)
+    console.log(`      ${template.description}`)
+  }
+  console.log()
+}
+
+async function configCommand(subcommand: string | undefined, flags: Flags, argv: string[]) {
+  switch (subcommand) {
+    case undefined:
+    case 'show': {
+      const r = await get('/api/config').catch(() => die(`Cannot reach server at ${BASE}`))
+      const cfg = (r as { status: number; data: unknown }).data as {
+        server: { port: number }
+        defaults: { mode: string; maxRounds: number }
+        agents: Record<string, { adapter: string; command: string; env?: Record<string, string> }>
+      }
+      console.log(`\n  Server port     ${cfg.server.port}`)
+      console.log(`  Default mode    ${cfg.defaults.mode}`)
+      console.log(`  Default rounds  ${cfg.defaults.maxRounds}`)
+      console.log('\n  Agents')
+      for (const [name, agent] of Object.entries(cfg.agents)) {
+        console.log(`    ${name}: ${agent.adapter} -> ${agent.command}`)
+        if (agent.env && Object.keys(agent.env).length) {
+          console.log(`      env: ${Object.keys(agent.env).join(', ')}`)
+        }
+      }
+      console.log()
+      break
+    }
+
+    case 'set-defaults': {
+      const body: Record<string, unknown> = { defaults: {} }
+      if (flags.mode) (body.defaults as Record<string, unknown>).mode = flags.mode
+      if (flags.rounds) (body.defaults as Record<string, unknown>).maxRounds = flags.rounds
+      if (Object.keys(body.defaults as Record<string, unknown>).length === 0) {
+        die('Usage: turing config set-defaults [--mode <mode>] [--rounds <n>]')
+      }
+      const r = await put('/api/config', body).catch(() => die(`Cannot reach server at ${BASE}`))
+      if ((r as { status: number }).status === 200) console.log('Updated defaults.')
+      else console.error('Error:', (r as { data: unknown }).data)
+      break
+    }
+
+    case 'set-port': {
+      if (!flags.port) die('Usage: turing config set-port --port <n>')
+      const r = await put('/api/config', { server: { port: flags.port } }).catch(() => die(`Cannot reach server at ${BASE}`))
+      if ((r as { status: number }).status === 200) console.log('Updated server port. Restart required.')
+      else console.error('Error:', (r as { data: unknown }).data)
+      break
+    }
+
+    case 'add-agent': {
+      if (!flags.name || !flags.adapter || !flags.command) {
+        die('Usage: turing config add-agent --name <name> --adapter <adapter> --command <path> [--env KEY=VALUE]')
+      }
+      const r = await post('/api/config/agents', {
+        name: flags.name,
+        adapter: flags.adapter,
+        command: flags.command,
+        env: parseEnvFlags(flags.env),
+      }).catch(() => die(`Cannot reach server at ${BASE}`))
+      if ((r as { status: number }).status === 200) console.log(`Added agent ${flags.name}.`)
+      else console.error('Error:', (r as { data: unknown }).data)
+      break
+    }
+
+    case 'update-agent': {
+      const name = argv[2]
+      if (!name) die('Usage: turing config update-agent <name> [--adapter <adapter>] [--command <path>] [--env KEY=VALUE]')
+      const currentRes = await get('/api/config').catch(() => die(`Cannot reach server at ${BASE}`))
+      const current = (currentRes as { data: unknown }).data as {
+        agents: Record<string, { adapter: string; command: string; env?: Record<string, string> }>
+      }
+      const existing = current.agents[name]
+      if (!existing) die(`Agent ${name} not found`)
+      const r = await put(`/api/config/agents/${encodeURIComponent(name)}`, {
+        name,
+        adapter: flags.adapter ?? existing.adapter,
+        command: flags.command ?? existing.command,
+        env: flags.env.length > 0 ? parseEnvFlags(flags.env) : existing.env,
+      }).catch(() => die(`Cannot reach server at ${BASE}`))
+      if ((r as { status: number }).status === 200) console.log(`Updated agent ${name}.`)
+      else console.error('Error:', (r as { data: unknown }).data)
+      break
+    }
+
+    case 'delete-agent': {
+      const name = argv[2]
+      if (!name) die('Usage: turing config delete-agent <name>')
+      const r = await del(`/api/config/agents/${encodeURIComponent(name)}`).catch(() => die(`Cannot reach server at ${BASE}`))
+      if ((r as { status: number }).status === 200) console.log(`Deleted agent ${name}.`)
+      else console.error('Error:', (r as { data: unknown }).data)
+      break
+    }
+
+    default:
+      die(`Unknown config command "${subcommand}"`)
+  }
+}
+
 // ── agents ────────────────────────────────────────────────────────────────────
 async function listAgents() {
   let r: { status: number; data: unknown }
@@ -382,14 +643,25 @@ async function listAgents() {
     die(`Cannot reach server at ${BASE}`)
   }
 
-  const agents = r!.data as Array<{ name: string; healthy: boolean }>
+  const agents = r!.data as Array<{
+    name: string
+    healthy: boolean
+    adapter: string
+    source: string
+    version?: string
+    availableForSessions: boolean
+  }>
   if (!agents.length) { console.log('No agents registered.'); return }
 
   console.log()
   for (const a of agents) {
     const dot = a.healthy ? '\x1b[32m●\x1b[0m' : '\x1b[31m●\x1b[0m'
     const status = a.healthy ? '\x1b[32monline\x1b[0m' : '\x1b[31moffline\x1b[0m'
-    console.log(`  ${dot}  ${a.name.padEnd(20)} ${status}`)
+    const availability = a.availableForSessions ? 'session' : 'discover-only'
+    console.log(`  ${dot}  ${a.name.padEnd(18)} ${status}  ${a.adapter.padEnd(12)} ${a.source.padEnd(10)} ${availability}`)
+    if (a.version) {
+      console.log(`      version: ${a.version}`)
+    }
   }
   console.log()
 }
@@ -448,12 +720,54 @@ async function followSession(sessionId: string): Promise<void> {
         }
       }
 
+      if (evt.type === 'log') {
+        const entry = evt.payload as { sessionId: string; level: string; message: string; timestamp: number }
+        if (entry.sessionId === sessionId) {
+          const ts = new Date(entry.timestamp).toLocaleTimeString()
+          console.log(`\n  [${ts}] log/${entry.level}: ${entry.message}`)
+        }
+      }
+
+      if (evt.type === 'heartbeat') {
+        const hb = evt as unknown as {
+          type: 'heartbeat'
+          sessionId: string
+          round: number
+          agent: string
+          elapsed: number
+          lastOutput: string
+        }
+        if (hb.sessionId === sessionId) {
+          console.log(`\n  [heartbeat] round=${hb.round} agent=${hb.agent} elapsed=${Math.floor(hb.elapsed / 1000)}s ${hb.lastOutput}`)
+        }
+      }
+
+      if (evt.type === 'snapshot:new') {
+        const snapshot = evt.payload as { sessionId: string; round: number; diffStat: string }
+        if (snapshot.sessionId === sessionId) {
+          console.log(`\n  [snapshot] round ${snapshot.round}`)
+          if (snapshot.diffStat?.trim()) {
+            for (const line of snapshot.diffStat.split('\n')) {
+              console.log(`    ${line}`)
+            }
+          }
+        }
+      }
+
       if (
         (evt.type === 'session:done' || evt.type === 'session:error') &&
         (evt.payload as { id?: string; session?: { id: string } })?.id === sessionId
       ) {
+        const payload = evt.payload as { id?: string; errorType?: string; errorMessage?: string; lastAgentOutput?: string; errorRound?: number }
         const status = evt.type === 'session:done' ? 'done' : 'error'
         console.log(`\n  [session ${statusColor(status)}]\n`)
+        if (evt.type === 'session:error') {
+          if (payload.errorType) console.log(`  errorType: ${payload.errorType}`)
+          if (payload.errorRound !== undefined) console.log(`  errorRound: ${payload.errorRound}`)
+          if (payload.errorMessage) console.log(`  error: ${payload.errorMessage}`)
+          if (payload.lastAgentOutput) console.log(`  lastOutput: ${payload.lastAgentOutput}`)
+          console.log()
+        }
         ws.close()
         resolve()
       }
@@ -516,19 +830,31 @@ function usage() {
     turing server stop
     turing server status
 
-    turing chat --from <agent> --to <agent> [--cwd <path>] [--approve] [--rounds <n>] "<prompt>"
+    turing chat --from <agent> --to <agent> [--from-label <label>] [--to-label <label>]
+                [--mode <mode>] [--cwd <path>] [--approve] [--rounds <n>]
+                [--context-rules <text>] [--context-text <text>] [--context-files <paths>]
+                "<prompt>"
 
-    turing sessions
+    turing sessions [--status <active|paused|done|error>]
     turing log <session-id>
+    turing delete <session-id>
 
     turing pause  <session-id>
     turing resume <session-id> [--rounds <n>]
     turing stop   <session-id>
+    turing nudge  <session-id> "<message>"
 
-    turing takeover <session-id> --side <from|to>
+    turing takeover <session-id>
     turing release  <session-id>
 
     turing agents
+    turing templates
+    turing config show
+    turing config set-defaults [--mode <mode>] [--rounds <n>]
+    turing config set-port --port <n>
+    turing config add-agent --name <name> --adapter <adapter> --command <path> [--env KEY=VALUE]
+    turing config update-agent <name> [--adapter <adapter>] [--command <path>] [--env KEY=VALUE]
+    turing config delete-agent <name>
     turing health
   `)
 }
@@ -556,6 +882,14 @@ async function main() {
 
     case 'sessions':
       await listSessions()
+      break
+
+    case 'templates':
+      await listTemplates()
+      break
+
+    case 'config':
+      await configCommand(sub, flags, argv)
       break
 
     case 'log': {
@@ -586,11 +920,25 @@ async function main() {
       break
     }
 
+    case 'delete': {
+      const id = argv[1]
+      if (!id) die('Usage: turing delete <session-id>')
+      await deleteSession(id)
+      break
+    }
+
+    case 'nudge': {
+      const id = argv[1]
+      const message = argv.slice(2).join(' ')
+      if (!id || !message) die('Usage: turing nudge <session-id> "<message>"')
+      await nudgeSession(id, message)
+      break
+    }
+
     case 'takeover': {
       const id = argv[1]
-      if (!id) die('Usage: turing takeover <session-id> --side <from|to>')
-      if (!flags.side) die('--side <from|to> is required')
-      await takeover(id, flags.side)
+      if (!id) die('Usage: turing takeover <session-id>')
+      await takeover(id)
       break
     }
 
