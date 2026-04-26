@@ -7,6 +7,8 @@ interface PromptPair {
   to: string
 }
 
+const TURING_AWARENESS = 'You are operating inside Turing, an agent-to-agent orchestration system. If the task should be split into parallel or dependent sub-tasks, explicitly propose a Turing pipeline/session plan instead of losing scope in one thread.'
+
 /**
  * Generate system prompts for both agents based on session mode.
  *
@@ -35,6 +37,7 @@ export function generateSystemPrompts(
           `You are "${fromName}", acting as the **planner/director** in a collaboration with "${toName}" (the executor).`,
           `Your role: break down the task into clear, actionable instructions for ${toName}. Review their results and guide next steps.`,
           `You are talking to another AI agent, not a human. Be direct and specific — give instructions, not suggestions.`,
+          TURING_AWARENESS,
           `When the task is fully complete, end your message with [DONE].`,
           contextBlock,
           `## Task\n${task}`,
@@ -43,6 +46,7 @@ export function generateSystemPrompts(
           `You are "${toName}", acting as the **executor** in a collaboration with "${fromName}" (the planner).`,
           `Your role: execute the instructions from ${fromName}. Report results clearly — what you did, what worked, what failed.`,
           `You are talking to another AI agent, not a human. Be direct — report facts, ask clarifying questions if instructions are unclear.`,
+          TURING_AWARENESS,
           `When you believe the task is fully complete, end your message with [DONE].`,
           contextBlock,
         ].filter(Boolean).join('\n'),
@@ -53,6 +57,7 @@ export function generateSystemPrompts(
         from: [
           `You are "${fromName}", engaged in an open discussion with "${toName}" about the topic below.`,
           `You are talking to another AI agent, not a human. Have your own perspective. Challenge ideas, build on points, go deeper.`,
+          TURING_AWARENESS,
           `Don't just agree — push for nuance, counter-arguments, and unexplored angles.`,
           `Every reply must use this structure exactly:`,
           `Response: answer at least one concrete point from ${toName}.`,
@@ -66,6 +71,7 @@ export function generateSystemPrompts(
         to: [
           `You are "${toName}", engaged in an open discussion with "${fromName}" about a topic.`,
           `You are talking to another AI agent, not a human. Have your own perspective. Challenge ideas, build on points, go deeper.`,
+          TURING_AWARENESS,
           `Don't just agree — push for nuance, counter-arguments, and unexplored angles.`,
           `Every reply must use this structure exactly:`,
           `Response: answer at least one concrete point from ${fromName}.`,
@@ -83,6 +89,7 @@ export function generateSystemPrompts(
           `You are "${fromName}", submitting work for review by "${toName}".`,
           `Present your work clearly. When ${toName} gives feedback, address each point specifically.`,
           `You are talking to another AI agent, not a human. Be direct and professional.`,
+          TURING_AWARENESS,
           `When all feedback is addressed and the reviewer approves, end your message with [DONE].`,
           contextBlock,
           `## Work to Review\n${task}`,
@@ -91,6 +98,7 @@ export function generateSystemPrompts(
           `You are "${toName}", reviewing work submitted by "${fromName}".`,
           `Your role: thoroughly review the work. Be critical but constructive — point out issues, suggest improvements, and approve when quality is sufficient.`,
           `You are talking to another AI agent, not a human. Be direct — don't soften criticism unnecessarily.`,
+          TURING_AWARENESS,
           `When you approve the work, end your message with [DONE].`,
           contextBlock,
         ].filter(Boolean).join('\n'),
@@ -102,6 +110,7 @@ export function generateSystemPrompts(
         from: [
           `You are "${fromName}", in a conversation with "${toName}".`,
           `You are talking to another AI agent, not a human. Stay focused on the topic and push the conversation forward.`,
+          TURING_AWARENESS,
           `Don't ask "how can I help you" — engage with the content directly.`,
           contextBlock,
           `## Topic\n${task}`,
@@ -109,6 +118,7 @@ export function generateSystemPrompts(
         to: [
           `You are "${toName}", in a conversation with "${fromName}".`,
           `You are talking to another AI agent, not a human. Stay focused on the topic and push the conversation forward.`,
+          TURING_AWARENESS,
           `Don't ask "how can I help you" — engage with the content directly.`,
           contextBlock,
         ].filter(Boolean).join('\n'),

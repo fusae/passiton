@@ -93,6 +93,41 @@ export interface PipelineWithSessions extends Pipeline {
   sessionDetails: Session[]
 }
 
+export interface SessionStats {
+  total: number
+  active: number
+  paused: number
+  done: number
+  error: number
+  successRate: number
+  avgRounds: number
+  avgDurationMs: number
+  tokenEstimate: number
+}
+
+export interface PipelineStats {
+  total: number
+  active: number
+  paused: number
+  done: number
+  error: number
+}
+
+export interface AgentUsageStats {
+  name: string
+  sessions: number
+  active: number
+  done: number
+  error: number
+  avgRounds: number
+}
+
+export interface TuringStats {
+  sessions: SessionStats
+  pipelines: PipelineStats
+  agents: AgentUsageStats[]
+}
+
 export type SessionErrorType =
   | 'adapter_timeout'
   | 'adapter_crash'

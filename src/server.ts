@@ -419,6 +419,11 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return json(res, 200, templates)
       }
 
+      // GET /api/stats
+      if (pathname === '/api/stats' && method === 'GET') {
+        return json(res, 200, state.getStats())
+      }
+
       // GET /api/config
       if (pathname === '/api/config' && method === 'GET') {
         return json(res, 200, loadConfig())

@@ -175,3 +175,47 @@ test('pipeline CRUD persists ordered steps and dependencies', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('stats aggregate sessions, pipelines, and agent usage', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
+
+  try {
+    state.initDb(join(dir, 'turing.db'))
+    state.createSession({
+      id: 'stats-session-1',
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      maxRounds: 6,
+    })
+    state.createSession({
+      id: 'stats-session-2',
+      from: { adapter: 'codex' },
+      to: { adapter: 'opencode' },
+      maxRounds: 6,
+    })
+    state.updateSession('stats-session-1', { status: 'done', currentRound: 3 })
+    state.updateSession('stats-session-2', { status: 'error', currentRound: 2 })
+    state.createPipeline({
+      id: 'stats-pipeline',
+      name: 'Stats Pipeline',
+      status: 'error',
+      sessions: [
+        { sessionId: 'stats-session-1', status: 'done' },
+        { sessionId: 'stats-session-2', status: 'error' },
+      ],
+    })
+
+    const stats = state.getStats()
+
+    assert.equal(stats.sessions.total, 2)
+    assert.equal(stats.sessions.done, 1)
+    assert.equal(stats.sessions.error, 1)
+    assert.equal(stats.pipelines.total, 1)
+    assert.equal(stats.pipelines.error, 1)
+    assert.equal(stats.agents[0].name, 'codex')
+    assert.equal(stats.agents[0].sessions, 2)
+  } finally {
+    state.closeDb()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Router } from '../router.js'
@@ -237,3 +238,67 @@ function discussReply(newPoints: string[], done = false): string {
     done ? '[DONE]' : '',
   ].filter(Boolean).join('\n')
 }
+
+test('pipeline dependencies inject upstream output and file contents', async () => {
+  await withTempDb(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turing-pipeline-'))
+    try {
+      execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.name', 'Turing Test'], { cwd: dir, stdio: 'ignore' })
+      const filePath = join(dir, 'artifact.txt')
+      writeFileSync(filePath, 'base', 'utf-8')
+      execFileSync('git', ['add', 'artifact.txt'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' })
+
+      let firstSessionId = ''
+      let secondSessionId = ''
+      let dependencyPrompt = ''
+      const router = new Router()
+
+      router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+      router.registerAdapter(new StubAdapter('claude-code', async (session, _message, opts) => {
+        if (session.id === firstSessionId) {
+          writeFileSync(filePath, 'dependency artifact', 'utf-8')
+          return 'Updated artifact.txt with dependency artifact'
+        }
+        if (session.id === secondSessionId) {
+          dependencyPrompt = opts?.systemPrompt ?? ''
+          return 'Consumed dependency context'
+        }
+        return 'noop'
+      }))
+
+      const pipeline = router.startPipeline({
+        name: 'Dependency handoff',
+        steps: [
+          {
+            from: { adapter: 'codex' },
+            to: { adapter: 'claude-code' },
+            initialPrompt: 'Prepare the artifact',
+            cwd: dir,
+          },
+          {
+            from: { adapter: 'codex' },
+            to: { adapter: 'claude-code' },
+            initialPrompt: 'Use the previous artifact',
+            cwd: dir,
+            dependsOn: [0],
+          },
+        ],
+      })
+
+      firstSessionId = pipeline.sessions[0].sessionId
+      secondSessionId = pipeline.sessions[1].sessionId
+
+      await waitFor(() => state.getSession(secondSessionId)?.status === 'done', 5_000)
+
+      assert.match(dependencyPrompt, /\[\[Pipeline Dependency Context\]\]/)
+      assert.match(dependencyPrompt, /Updated artifact\.txt with dependency artifact/)
+      assert.match(dependencyPrompt, /\[dependency /)
+      assert.match(dependencyPrompt, /dependency artifact/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

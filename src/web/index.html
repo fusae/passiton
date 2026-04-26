@@ -29,6 +29,14 @@
     <div id="mobile-overlay"></div>
     <!-- Sidebar -->
     <aside id="sidebar">
+      <div id="pipeline-sidebar-section">
+        <div class="sidebar-section-header">
+          <span>Pipelines</span>
+          <button id="new-pipeline-btn">+ New</button>
+        </div>
+        <div id="pipeline-list"></div>
+      </div>
+
       <div id="sidebar-header">
         <span>Sessions</span>
         <button id="new-btn">+ New</button>
@@ -39,6 +47,11 @@
         <button class="filter-btn" data-filter="active">Active</button>
         <button class="filter-btn" data-filter="paused">Paused</button>
         <button class="filter-btn" data-filter="done">Done</button>
+      </div>
+
+      <div id="stats-panel">
+        <div class="stats-panel-header">Overview</div>
+        <div id="stats-grid"></div>
       </div>
 
       <div id="session-list"></div>
@@ -121,9 +134,24 @@
           </div>
           <div id="inject-input-row">
             <textarea id="inject-input" rows="2" placeholder="Inject a message… (⌘+Enter to send)"></textarea>
-            <button id="inject-btn">Send</button>
+          <button id="inject-btn">Send</button>
           </div>
         </div>
+      </div>
+      <div id="pipeline-view" class="hidden">
+        <div id="pipeline-toolbar">
+          <div class="toolbar-left">
+            <span id="pipeline-title" class="title"></span>
+            <span id="pipeline-badge" class="badge"></span>
+            <span id="pipeline-progress-label" class="rounds-label"></span>
+          </div>
+          <div class="toolbar-right">
+            <button id="btn-pipeline-pause" class="toolbar-btn">⏸ Pause</button>
+            <button id="btn-pipeline-resume" class="toolbar-btn hidden">▶ Resume</button>
+            <button id="btn-pipeline-delete" class="toolbar-btn danger">Delete</button>
+          </div>
+        </div>
+        <div id="pipeline-detail"></div>
       </div>
     </main>
   </div>
@@ -198,6 +226,28 @@
         <div class="modal-actions">
           <button type="button" class="modal-cancel" id="modal-cancel">Cancel</button>
           <button type="submit" class="modal-submit">Create Session</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- New Pipeline Modal -->
+  <div id="pipeline-modal-overlay" class="hidden">
+    <div id="pipeline-modal">
+      <div class="modal-header">
+        <h2>New Pipeline</h2>
+        <button id="pipeline-modal-close" class="modal-close-btn">✕</button>
+      </div>
+      <form id="pipeline-form">
+        <div class="form-row">
+          <label>Pipeline name</label>
+          <input name="name" id="pipeline-name-input" type="text" required placeholder="Web UI Overhaul" />
+        </div>
+        <div id="pipeline-step-list"></div>
+        <button type="button" id="pipeline-add-step" class="settings-btn">+ Add Step</button>
+        <div class="modal-actions">
+          <button type="button" class="modal-cancel" id="pipeline-modal-cancel">Cancel</button>
+          <button type="submit" class="modal-submit">Create Pipeline</button>
         </div>
       </form>
     </div>

@@ -4,13 +4,17 @@ const API = ''  // same origin
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let sessions = []
+let pipelines = []
 let agents = []
 let templates = []
+let stats = null
 let activeSessionId = null
+let activePipelineId = null
 let ws = null
 let currentMessages = []
 let currentSnapshots = []
 let activeSession = null
+let activePipeline = null
 let sessionFilter = 'all'
 let appConfig = null
 let editingAgentName = null
@@ -23,15 +27,24 @@ const AGENT_COMMAND_DEFAULTS = {
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const sessionList      = document.getElementById('session-list')
+const pipelineList     = document.getElementById('pipeline-list')
 const agentsList       = document.querySelector('.agents-list')
+const statsGrid        = document.getElementById('stats-grid')
 const emptyState       = document.getElementById('empty-state')
 const sessionView      = document.getElementById('session-view')
+const pipelineView     = document.getElementById('pipeline-view')
 const messagesEl       = document.getElementById('messages')
 const sessionTitle     = document.getElementById('session-title')
 const sessionBadge     = document.getElementById('session-badge')
 const sessionRounds    = document.getElementById('session-rounds')
+const pipelineTitle    = document.getElementById('pipeline-title')
+const pipelineBadge    = document.getElementById('pipeline-badge')
+const pipelineProgress = document.getElementById('pipeline-progress-label')
+const pipelineDetail   = document.getElementById('pipeline-detail')
 const injectInput      = document.getElementById('inject-input')
 const modalOverlay     = document.getElementById('modal-overlay')
+const pipelineModalOverlay = document.getElementById('pipeline-modal-overlay')
+const pipelineStepList = document.getElementById('pipeline-step-list')
 const roundsBanner     = document.getElementById('rounds-banner')
 const roundsBannerMsg  = document.getElementById('rounds-banner-msg')
 const errorBanner      = document.getElementById('error-banner')
@@ -60,15 +73,22 @@ async function init() {
   await loadAppConfig()
   await loadAgents()
   await loadTemplates()
+  await loadStats()
+  await loadPipelines()
   await loadSessions()
   connectWs()
-  setInterval(loadAgents, 30_000)
+  setInterval(() => {
+    loadAgents()
+    loadStats()
+    loadPipelines()
+  }, 30_000)
   setupFilterBtns()
   setupMobileMenu()
   setupMarked()
   setupMessageActions()
   setupScrollToBottom()
   setupSettingsPanel()
+  setupPipelineUi()
   setInterval(tickProgressIndicators, 1000)
 }
 
@@ -117,6 +137,26 @@ async function loadAppConfig() {
   } catch {
     appConfig = null
   }
+}
+
+async function loadStats() {
+  try {
+    stats = await api('/api/stats')
+    renderStats()
+  } catch { /* server might be down */ }
+}
+
+async function loadPipelines() {
+  try {
+    pipelines = await api('/api/pipelines')
+    renderPipelineList()
+    if (activePipelineId) {
+      const pipeline = pipelines.find((item) => item.id === activePipelineId)
+      if (pipeline) {
+        await selectPipeline(activePipelineId, false)
+      }
+    }
+  } catch { /* server might be down */ }
 }
 
 // ── Toast notifications ───────────────────────────────────────────────────────
@@ -170,6 +210,39 @@ function renderAgents() {
 }
 
 document.getElementById('refresh-agents-btn').addEventListener('click', loadAgents)
+
+function renderStats() {
+  if (!statsGrid || !stats) return
+  const cards = [
+    {
+      label: 'Sessions',
+      value: stats.sessions.total,
+      sub: `${stats.sessions.active} active · ${stats.sessions.error} error`,
+    },
+    {
+      label: 'Success',
+      value: `${Math.round((stats.sessions.successRate || 0) * 100)}%`,
+      sub: `${stats.sessions.done} done`,
+    },
+    {
+      label: 'Avg rounds',
+      value: stats.sessions.avgRounds.toFixed(1),
+      sub: formatDuration(stats.sessions.avgDurationMs || 0),
+    },
+    {
+      label: 'Pipelines',
+      value: stats.pipelines.total,
+      sub: `${stats.pipelines.active} active · ${stats.pipelines.done} done`,
+    },
+  ]
+  statsGrid.innerHTML = cards.map(card => `
+    <div class="stats-card">
+      <span class="stats-label">${escHtml(card.label)}</span>
+      <div class="stats-value">${escHtml(card.value)}</div>
+      <div class="stats-subvalue">${escHtml(card.sub)}</div>
+    </div>
+  `).join('')
+}
 
 // ── Templates ─────────────────────────────────────────────────────────────────
 async function loadTemplates() {
@@ -227,6 +300,34 @@ function applyTemplate(templateId) {
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
+function renderPipelineList() {
+  if (!pipelineList) return
+  if (!pipelines.length) {
+    pipelineList.innerHTML = '<div class="session-empty">No pipelines</div>'
+    return
+  }
+
+  pipelineList.innerHTML = pipelines.map((pipeline) => {
+    const doneCount = pipeline.sessions.filter((step) => step.status === 'done').length
+    return `
+      <div class="pipeline-item ${pipeline.id === activePipelineId ? 'active' : ''}" data-id="${pipeline.id}">
+        <div class="pipeline-item-header">
+          <span class="pipeline-item-name">${escHtml(pipeline.name)}</span>
+          <span class="badge ${pipeline.status}">${escHtml(pipeline.status)}</span>
+        </div>
+        <div class="pipeline-item-sub">${doneCount}/${pipeline.sessions.length} steps · ${timeAgo(pipeline.updatedAt)}</div>
+      </div>
+    `
+  }).join('')
+
+  pipelineList.querySelectorAll('.pipeline-item').forEach((el) => {
+    el.addEventListener('click', () => {
+      selectPipeline(el.dataset.id)
+      closeMobileMenu()
+    })
+  })
+}
+
 async function loadSessions() {
   try {
     sessions = await api('/api/sessions')
@@ -297,7 +398,7 @@ function renderSessionList() {
     })
   })
 
-  if (!activeSessionId) {
+  if (!activeSessionId && !activePipelineId) {
     renderSessionView(null)
   }
 }
@@ -308,7 +409,10 @@ function agentLabel(ref) {
 
 async function selectSession(id) {
   activeSessionId = id
+  activePipelineId = null
+  activePipeline = null
   renderSessionList()
+  renderPipelineList()
   try {
     const [data, logs, snapshots] = await Promise.all([
       api(`/api/sessions/${id}`),
@@ -326,8 +430,30 @@ async function selectSession(id) {
   }
 }
 
+async function selectPipeline(id, renderList = true) {
+  activePipelineId = id
+  activeSessionId = null
+  activeSession = null
+  currentMessages = []
+  currentSnapshots = []
+  replaceLogEntries([])
+  if (renderList) {
+    renderPipelineList()
+    renderSessionList()
+  }
+  try {
+    const pipeline = await api(`/api/pipelines/${id}`)
+    if (activePipelineId !== id) return
+    activePipeline = pipeline
+    renderPipelineView(pipeline)
+  } catch (e) {
+    console.error('Failed to load pipeline', e)
+  }
+}
+
 function renderSessionView(session) {
   if (!session) {
+    if (pipelineView) pipelineView.classList.add('hidden')
     if (emptyState) emptyState.classList.remove('hidden')
     if (sessionView) sessionView.classList.add('hidden')
     if (sessionProgress) sessionProgress.classList.add('hidden')
@@ -340,6 +466,9 @@ function renderSessionView(session) {
 
   if (emptyState) {
     emptyState.classList.add('hidden')
+  }
+  if (pipelineView) {
+    pipelineView.classList.add('hidden')
   }
   if (sessionView) {
     sessionView.classList.remove('hidden')
@@ -354,6 +483,86 @@ function renderSessionView(session) {
   updateProgressIndicator()
   renderMessages(currentMessages, session)
   renderChanges(currentSnapshots)
+}
+
+function renderPipelineView(pipeline) {
+  if (!pipeline) {
+    if (pipelineView) pipelineView.classList.add('hidden')
+    if (emptyState) emptyState.classList.remove('hidden')
+    return
+  }
+
+  if (emptyState) emptyState.classList.add('hidden')
+  if (sessionView) sessionView.classList.add('hidden')
+  if (pipelineView) pipelineView.classList.remove('hidden')
+
+  const doneCount = pipeline.sessions.filter((step) => step.status === 'done').length
+  pipelineTitle.textContent = pipeline.name
+  pipelineBadge.className = `badge ${pipeline.status}`
+  pipelineBadge.textContent = pipeline.status
+  pipelineProgress.textContent = `${doneCount}/${pipeline.sessions.length} steps`
+
+  document.getElementById('btn-pipeline-pause').classList.toggle('hidden', pipeline.status !== 'active')
+  document.getElementById('btn-pipeline-resume').classList.toggle('hidden', pipeline.status !== 'paused' && pipeline.status !== 'error')
+
+  const sessionMap = new Map((pipeline.sessionDetails || []).map((session) => [session.id, session]))
+  pipelineDetail.innerHTML = `
+    <div class="pipeline-detail-header">
+      <div class="pipeline-detail-grid">
+        <div class="pipeline-detail-card">
+          <span>Status</span>
+          <strong>${escHtml(pipeline.status)}</strong>
+        </div>
+        <div class="pipeline-detail-card">
+          <span>Steps</span>
+          <strong>${escHtml(String(pipeline.sessions.length))}</strong>
+        </div>
+        <div class="pipeline-detail-card">
+          <span>Finished</span>
+          <strong>${escHtml(String(doneCount))}</strong>
+        </div>
+        <div class="pipeline-detail-card">
+          <span>Updated</span>
+          <strong>${escHtml(timeAgo(pipeline.updatedAt))}</strong>
+        </div>
+      </div>
+    </div>
+    <div class="pipeline-steps">
+      ${pipeline.sessions.map((step, index) => {
+        const session = sessionMap.get(step.sessionId)
+        const prompt = session?.messages?.[0]?.content || ''
+        const dependsOn = (step.dependsOn || [])
+          .map((id) => pipeline.sessions.findIndex((item) => item.sessionId === id) + 1)
+          .filter((n) => n > 0)
+        return `
+          <div class="pipeline-step-card">
+            <div class="pipeline-step-head">
+              <div>
+                <div class="pipeline-step-index">Step ${index + 1}</div>
+                <div class="pipeline-step-title">${escHtml(agentLabel(session?.from))} → ${escHtml(agentLabel(session?.to))}</div>
+              </div>
+              <span class="badge ${step.status === 'pending' ? 'paused' : step.status === 'active' ? 'active' : step.status === 'done' ? 'done' : 'error'}">${escHtml(step.status)}</span>
+            </div>
+            <div class="pipeline-step-body">
+              <div class="pipeline-step-meta">
+                <span>${escHtml(session?.mode || 'freeform')}</span>
+                <span>R${escHtml(String(session?.currentRound || 0))}/${escHtml(String(session?.maxRounds || 0))}</span>
+              </div>
+              ${dependsOn.length ? `<div class="pipeline-step-meta"><span>Depends on</span><span>Step ${dependsOn.join(', Step ')}</span></div>` : ''}
+              ${prompt ? `<div style="margin-top:8px;">${escHtml(prompt.slice(0, 220))}${prompt.length > 220 ? '…' : ''}</div>` : ''}
+            </div>
+            <div class="pipeline-step-actions">
+              <button type="button" class="pipeline-open-btn" data-session-id="${step.sessionId}">Open session</button>
+            </div>
+          </div>
+        `
+      }).join('')}
+    </div>
+  `
+
+  pipelineDetail.querySelectorAll('[data-session-id]').forEach((btn) => {
+    btn.addEventListener('click', () => selectSession(btn.dataset.sessionId))
+  })
 }
 
 function updateToolbar(session) {
@@ -762,6 +971,166 @@ function applyConfigDefaultsToNewSession() {
   if (maxRoundsInput) maxRoundsInput.value = appConfig.defaults.maxRounds
 }
 
+function setupPipelineUi() {
+  document.getElementById('new-pipeline-btn').addEventListener('click', openPipelineModal)
+  document.getElementById('pipeline-modal-cancel').addEventListener('click', closePipelineModal)
+  document.getElementById('pipeline-modal-close').addEventListener('click', closePipelineModal)
+  document.getElementById('pipeline-add-step').addEventListener('click', () => addPipelineStepEditor())
+  pipelineModalOverlay.addEventListener('click', (event) => {
+    if (event.target === pipelineModalOverlay) closePipelineModal()
+  })
+  document.getElementById('pipeline-form').addEventListener('submit', submitPipelineForm)
+
+  document.getElementById('btn-pipeline-pause').addEventListener('click', async () => {
+    if (!activePipelineId) return
+    try {
+      await api(`/api/pipelines/${activePipelineId}/pause`, 'POST')
+    } catch (err) {
+      showToast(err.message, 'error')
+    }
+  })
+  document.getElementById('btn-pipeline-resume').addEventListener('click', async () => {
+    if (!activePipelineId) return
+    try {
+      await api(`/api/pipelines/${activePipelineId}/resume`, 'POST')
+    } catch (err) {
+      showToast(err.message, 'error')
+    }
+  })
+  document.getElementById('btn-pipeline-delete').addEventListener('click', async () => {
+    if (!activePipelineId || !confirm('Delete this pipeline?')) return
+    try {
+      await api(`/api/pipelines/${activePipelineId}`, 'DELETE')
+      pipelines = pipelines.filter((item) => item.id !== activePipelineId)
+      activePipelineId = null
+      activePipeline = null
+      renderPipelineList()
+      renderSessionView(null)
+    } catch (err) {
+      showToast(err.message, 'error')
+    }
+  })
+}
+
+function openPipelineModal() {
+  document.getElementById('pipeline-form').reset()
+  pipelineStepList.innerHTML = ''
+  addPipelineStepEditor()
+  addPipelineStepEditor()
+  pipelineModalOverlay.classList.remove('hidden')
+}
+
+function closePipelineModal() {
+  pipelineModalOverlay.classList.add('hidden')
+}
+
+function addPipelineStepEditor() {
+  const stepIndex = pipelineStepList.children.length
+  const names = agents.filter(a => a.availableForSessions).map(a => a.name)
+  const defaultFrom = names[0] || ''
+  const defaultTo = names[1] || names[0] || ''
+  const defaultMode = appConfig?.defaults?.mode || 'collaborate'
+  const wrap = document.createElement('div')
+  wrap.className = 'pipeline-step-editor'
+  wrap.innerHTML = `
+    <div class="pipeline-step-head">
+      <div>
+        <div class="pipeline-step-index">Step ${stepIndex + 1}</div>
+      </div>
+      <button type="button" class="pipeline-open-btn" data-step-remove>Remove</button>
+    </div>
+    <div class="form-row-inline">
+      <div class="form-row half">
+        <label>From</label>
+        <select name="from">${names.map(name => `<option value="${name}" ${name === defaultFrom ? 'selected' : ''}>${name}</option>`).join('')}</select>
+      </div>
+      <div class="form-row half">
+        <label>To</label>
+        <select name="to">${names.map(name => `<option value="${name}" ${name === defaultTo ? 'selected' : ''}>${name}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="form-row-inline">
+      <div class="form-row half">
+        <label>Mode</label>
+        <select name="mode">
+          <option value="collaborate" ${defaultMode === 'collaborate' ? 'selected' : ''}>collaborate</option>
+          <option value="discuss" ${defaultMode === 'discuss' ? 'selected' : ''}>discuss</option>
+          <option value="review" ${defaultMode === 'review' ? 'selected' : ''}>review</option>
+          <option value="freeform" ${defaultMode === 'freeform' ? 'selected' : ''}>freeform</option>
+        </select>
+      </div>
+      <div class="form-row half">
+        <label>Depends on</label>
+        <input name="dependsOn" type="text" placeholder="e.g. 1,2" />
+      </div>
+    </div>
+    <div class="form-row">
+      <label>Initial prompt</label>
+      <textarea name="initialPrompt" required placeholder="Describe this step..."></textarea>
+    </div>
+    <div class="form-row">
+      <label>Working directory</label>
+      <input name="cwd" type="text" placeholder="/abs/path or leave blank" />
+    </div>
+  `
+  wrap.querySelector('[data-step-remove]').addEventListener('click', () => {
+    wrap.remove()
+    refreshPipelineStepLabels()
+  })
+  pipelineStepList.appendChild(wrap)
+  refreshPipelineStepLabels()
+}
+
+function refreshPipelineStepLabels() {
+  Array.from(pipelineStepList.children).forEach((child, index) => {
+    const label = child.querySelector('.pipeline-step-index')
+    if (label) label.textContent = `Step ${index + 1}`
+  })
+}
+
+async function submitPipelineForm(event) {
+  event.preventDefault()
+  const rows = Array.from(pipelineStepList.querySelectorAll('.pipeline-step-editor'))
+  if (!rows.length) return
+
+  const steps = rows.map((row, index) => {
+    const dependsRaw = row.querySelector('[name="dependsOn"]').value.trim()
+    const dependsOn = dependsRaw
+      ? dependsRaw.split(',').map(item => Number(item.trim()) - 1).filter(Number.isInteger).filter(n => n >= 0 && n < rows.length && n !== index)
+      : undefined
+    return {
+      from: { adapter: row.querySelector('[name="from"]').value },
+      to: { adapter: row.querySelector('[name="to"]').value },
+      mode: row.querySelector('[name="mode"]').value,
+      initialPrompt: row.querySelector('[name="initialPrompt"]').value.trim(),
+      cwd: row.querySelector('[name="cwd"]').value.trim() || undefined,
+      ...(dependsOn && dependsOn.length ? { dependsOn } : {}),
+    }
+  })
+
+  const body = {
+    name: document.getElementById('pipeline-name-input').value.trim(),
+    steps,
+  }
+
+  const submitBtn = event.target.querySelector('.modal-submit')
+  const originalText = submitBtn.textContent
+  submitBtn.disabled = true
+  submitBtn.textContent = 'Creating...'
+  try {
+    const pipeline = await api('/api/pipelines', 'POST', body)
+    pipelines.unshift(pipeline)
+    renderPipelineList()
+    closePipelineModal()
+    await selectPipeline(pipeline.id)
+  } catch (err) {
+    showToast(err.message, 'error')
+  } finally {
+    submitBtn.disabled = false
+    submitBtn.textContent = originalText
+  }
+}
+
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 let wsRetryTimer = null
 let wsRetryDelay = 1000
@@ -829,6 +1198,7 @@ function handleWsEvent(evt) {
         sessions.unshift(evt.payload)
       }
       renderSessionList()
+      loadStats()
       break
     }
 
@@ -848,6 +1218,7 @@ function handleWsEvent(evt) {
         updateToolbar(s)
         updateProgressIndicator()
       }
+      loadStats()
       break
     }
 
@@ -895,6 +1266,32 @@ function handleWsEvent(evt) {
         if (emptyState) emptyState.classList.remove('hidden')
       }
       renderSessionList()
+      loadStats()
+      break
+    }
+
+    case 'pipeline:created':
+    case 'pipeline:updated':
+    case 'pipeline:done':
+    case 'pipeline:error': {
+      const pipeline = evt.payload
+      if (pipeline?.deleted) {
+        pipelines = pipelines.filter((item) => item.id !== pipeline.id)
+        if (activePipelineId === pipeline.id) {
+          activePipelineId = null
+          activePipeline = null
+          renderSessionView(null)
+        }
+      } else {
+        const index = pipelines.findIndex((item) => item.id === pipeline.id)
+        if (index >= 0) pipelines[index] = { ...pipelines[index], ...pipeline }
+        else pipelines.unshift(pipeline)
+        if (activePipelineId === pipeline.id) {
+          selectPipeline(pipeline.id, false)
+        }
+      }
+      renderPipelineList()
+      loadStats()
       break
     }
 

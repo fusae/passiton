@@ -4,7 +4,22 @@ import Database from 'better-sqlite3'
 import { homedir } from 'os'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
-import type { Session, Message, SessionLog, AgentRef, SessionStatus, SessionMode, SessionContext, RoundMetadata, DiffSnapshot, Pipeline, PipelineStep, PipelineWithSessions } from './types.js'
+import type {
+  Session,
+  Message,
+  SessionLog,
+  AgentRef,
+  SessionStatus,
+  SessionMode,
+  SessionContext,
+  RoundMetadata,
+  DiffSnapshot,
+  Pipeline,
+  PipelineStep,
+  PipelineWithSessions,
+  TuringStats,
+  AgentUsageStats,
+} from './types.js'
 
 const DB_DIR = join(homedir(), '.turing')
 const DB_PATH = join(DB_DIR, 'turing.db')
@@ -223,7 +238,7 @@ export function getSession(id: string): Session | undefined {
   return row ? rowToSession(row) : undefined
 }
 
-export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'nextTurn' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount'>>): Session {
+export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'nextTurn' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount' | 'context' | 'systemPrompts'>>): Session {
   const fields: string[] = ['updated_at = ?']
   const values: unknown[] = [Date.now()]
 
@@ -237,6 +252,8 @@ export function updateSession(id: string, updates: Partial<Pick<Session, 'status
   if (updates.errorMessage !== undefined) { fields.push('error_message = ?'); values.push(updates.errorMessage) }
   if (updates.lastAgentOutput !== undefined) { fields.push('last_agent_output = ?'); values.push(updates.lastAgentOutput) }
   if (updates.resumeCount !== undefined) { fields.push('resume_count = ?'); values.push(updates.resumeCount) }
+  if (updates.context !== undefined) { fields.push('context = ?'); values.push(JSON.stringify(updates.context)) }
+  if (updates.systemPrompts !== undefined) { fields.push('system_prompts = ?'); values.push(JSON.stringify(updates.systemPrompts)) }
 
   values.push(id)
   db.prepare(`UPDATE sessions SET ${fields.join(', ')} WHERE id = ?`).run(...values)
@@ -496,6 +513,77 @@ export function getSnapshots(sessionId: string): DiffSnapshot[] {
     'SELECT * FROM snapshots WHERE session_id = ? ORDER BY round ASC, timestamp ASC'
   ).all(sessionId) as Record<string, unknown>[]
   return rows.map(rowToSnapshot)
+}
+
+export function getStats(): TuringStats {
+  const sessions = listSessions()
+  const pipelines = listPipelines()
+  const counts = {
+    active: 0,
+    paused: 0,
+    done: 0,
+    error: 0,
+  }
+  let totalRounds = 0
+  let totalDuration = 0
+  let tokenEstimate = 0
+  const agentUsage = new Map<string, AgentUsageStats>()
+
+  for (const session of sessions) {
+    counts[session.status] += 1
+    totalRounds += session.currentRound
+    totalDuration += Math.max(0, session.updatedAt - session.createdAt)
+
+    for (const message of getMessages(session.id)) {
+      tokenEstimate += message.metadata?.tokenEstimate ?? 0
+    }
+
+    for (const agentName of [session.from.adapter, session.to.adapter]) {
+      const current = agentUsage.get(agentName) ?? {
+        name: agentName,
+        sessions: 0,
+        active: 0,
+        done: 0,
+        error: 0,
+        avgRounds: 0,
+      }
+      current.sessions += 1
+      if (session.status === 'active') current.active += 1
+      if (session.status === 'done') current.done += 1
+      if (session.status === 'error') current.error += 1
+      current.avgRounds += session.currentRound
+      agentUsage.set(agentName, current)
+    }
+  }
+
+  const agentRows = Array.from(agentUsage.values())
+    .map((entry) => ({
+      ...entry,
+      avgRounds: entry.sessions > 0 ? entry.avgRounds / entry.sessions : 0,
+    }))
+    .sort((a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name))
+
+  return {
+    sessions: {
+      total: sessions.length,
+      active: counts.active,
+      paused: counts.paused,
+      done: counts.done,
+      error: counts.error,
+      successRate: sessions.length > 0 ? counts.done / sessions.length : 0,
+      avgRounds: sessions.length > 0 ? totalRounds / sessions.length : 0,
+      avgDurationMs: sessions.length > 0 ? totalDuration / sessions.length : 0,
+      tokenEstimate,
+    },
+    pipelines: {
+      total: pipelines.length,
+      active: pipelines.filter((item) => item.status === 'active').length,
+      paused: pipelines.filter((item) => item.status === 'paused').length,
+      done: pipelines.filter((item) => item.status === 'done').length,
+      error: pipelines.filter((item) => item.status === 'error').length,
+    },
+    agents: agentRows,
+  }
 }
 
 export function pruneExpiredMessages(now = Date.now()): number {

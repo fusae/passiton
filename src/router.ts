@@ -2,6 +2,8 @@
 
 import { EventEmitter } from 'events'
 import { execFile } from 'child_process'
+import fs from 'fs'
+import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline } from './types.js'
 import * as state from './state.js'
@@ -17,6 +19,9 @@ const DISCUSS_MIN_ROUNDS = 3
 const DISCUSS_CONVERGENCE_ROUNDS = 2
 const DISCUSS_MESSAGES_PER_ROUND = 2
 const GIT_DIFF_TIMEOUT_MS = 10_000
+const PIPELINE_DEP_MAX_FILES = 8
+const PIPELINE_DEP_FILE_CHARS = 12_000
+const PIPELINE_DEP_TEXT_CHARS = 4_000
 
 export class Router extends EventEmitter {
   private adapters = new Map<string, Adapter>()
@@ -609,6 +614,7 @@ export class Router extends EventEmitter {
       if (!(step.dependsOn ?? []).every((dep) => done.has(dep))) return step
       const session = state.getSession(step.sessionId)
       if (session?.status === 'paused') {
+        this.hydratePipelineDependencyContext(step.sessionId, step.dependsOn ?? [])
         const initialMessage = state.getMessages(step.sessionId).find((msg) => msg.from === 'human' && msg.round === 0)
         const resumed = state.updateSession(step.sessionId, { status: 'active' })
         this.emit('event', { type: 'session:updated', payload: resumed } satisfies WsEvent)
@@ -749,6 +755,84 @@ export class Router extends EventEmitter {
     return collected.join('\n').trim()
   }
 
+  private hydratePipelineDependencyContext(sessionId: string, dependencyIds: string[]): void {
+    const session = state.getSession(sessionId)
+    if (!session || dependencyIds.length === 0) return
+
+    const mergedContext = mergeSessionContexts(
+      stripPipelineDependencyContext(session.context),
+      this.buildPipelineDependencyContext(dependencyIds)
+    )
+
+    const task = state.getMessages(sessionId).find((msg) => msg.from === 'human' && msg.round === 0)?.content ?? ''
+    const systemPrompts = generateSystemPrompts(
+      session.mode,
+      session.from,
+      session.to,
+      task,
+      mergedContext
+    )
+
+    state.updateSession(sessionId, { context: mergedContext, systemPrompts })
+    this.emitLog('info', `Injected pipeline dependency context into [${sessionId.slice(0, 8)}] from ${dependencyIds.length} upstream session(s)`, sessionId)
+  }
+
+  private buildPipelineDependencyContext(dependencyIds: string[]): SessionContext | undefined {
+    const files: NonNullable<SessionContext['files']> = []
+    const summaries: string[] = []
+
+    for (const dependencyId of dependencyIds) {
+      const session = state.getSession(dependencyId)
+      if (!session) continue
+
+      const messages = state.getMessages(dependencyId).filter((msg) => msg.from !== 'human')
+      const snapshots = state.getSnapshots(dependencyId)
+      const latestSnapshot = snapshots.at(-1)
+      const lastMeaningfulMessage = [...messages].reverse().find((msg) => normalizeAgentSummary(msg.content))
+      const summary = [
+        `Dependency Session: ${agentLabel(session.from)} → ${agentLabel(session.to)}`,
+        `Status: ${session.status}`,
+        `Rounds: ${session.currentRound}/${session.maxRounds}`,
+      ]
+      const output = lastMeaningfulMessage ? normalizeAgentSummary(lastMeaningfulMessage.content) : ''
+      if (output) {
+        summary.push('Latest Output:')
+        summary.push(output)
+      }
+      if (latestSnapshot?.diffStat) {
+        summary.push('Latest Diff Stat:')
+        summary.push(truncateText(latestSnapshot.diffStat, PIPELINE_DEP_TEXT_CHARS))
+      }
+      summaries.push(summary.join('\n'))
+
+      if (!session.cwd || !latestSnapshot || files.length >= PIPELINE_DEP_MAX_FILES) continue
+      for (const relativePath of extractChangedFiles(latestSnapshot.diffFull)) {
+        if (files.length >= PIPELINE_DEP_MAX_FILES) break
+        const absolutePath = path.resolve(session.cwd, relativePath)
+        try {
+          if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) continue
+          const content = fs.readFileSync(absolutePath, 'utf-8')
+          files.push({
+            path: `[dependency ${dependencyId.slice(0, 8)}] ${relativePath}`,
+            content: truncateText(content, PIPELINE_DEP_FILE_CHARS),
+          })
+        } catch {
+          // Best effort only.
+        }
+      }
+    }
+
+    if (!summaries.length && !files.length) return undefined
+    return {
+      ...(files.length > 0 ? { files } : {}),
+      text: [
+        '[[Pipeline Dependency Context]]',
+        ...summaries,
+        '[[End Pipeline Dependency Context]]',
+      ].join('\n\n'),
+    }
+  }
+
 }
 
 function sleep(ms: number): Promise<void> {
@@ -757,6 +841,58 @@ function sleep(ms: number): Promise<void> {
 
 function agentLabel(ref: AgentRef): string {
   return ref.label ?? ref.adapter
+}
+
+function normalizeAgentSummary(content: string): string {
+  const trimmed = content.trim()
+  if (!trimmed) return ''
+  if (trimmed === '[DONE]') return ''
+  return truncateText(trimmed, PIPELINE_DEP_TEXT_CHARS)
+}
+
+function extractChangedFiles(diff: string): string[] {
+  const seen = new Set<string>()
+  for (const line of diff.split('\n')) {
+    const match = line.match(/^\+\+\+ b\/(.+)$/) ?? line.match(/^diff --git a\/.+ b\/(.+)$/)
+    const filePath = match?.[1]
+    if (!filePath || filePath === '/dev/null') continue
+    seen.add(filePath)
+  }
+  return Array.from(seen)
+}
+
+function truncateText(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit - 3)}...` : text
+}
+
+function stripPipelineDependencyContext(context?: SessionContext): SessionContext | undefined {
+  if (!context) return undefined
+  const next: SessionContext = {}
+  if (context.rules) next.rules = context.rules
+  if (context.files?.length) {
+    next.files = context.files.filter((file) => !file.path.startsWith('[dependency '))
+  }
+  if (context.text) {
+    const stripped = context.text.replace(/\n?\[\[Pipeline Dependency Context\]\][\s\S]*?\[\[End Pipeline Dependency Context\]\]\n?/g, '').trim()
+    if (stripped) next.text = stripped
+  }
+  return Object.keys(next).length > 0 ? next : undefined
+}
+
+function mergeSessionContexts(base?: SessionContext, extra?: SessionContext): SessionContext | undefined {
+  if (!base && !extra) return undefined
+  const files = new Map<string, string>()
+  for (const file of base?.files ?? []) files.set(file.path, file.content)
+  for (const file of extra?.files ?? []) files.set(file.path, file.content)
+
+  const textParts = [base?.text, extra?.text].filter(Boolean)
+  const merged: SessionContext = {}
+  if (base?.rules || extra?.rules) merged.rules = [base?.rules, extra?.rules].filter(Boolean).join('\n')
+  if (files.size > 0) {
+    merged.files = Array.from(files.entries()).map(([filePath, content]) => ({ path: filePath, content }))
+  }
+  if (textParts.length > 0) merged.text = textParts.join('\n\n')
+  return Object.keys(merged).length > 0 ? merged : undefined
 }
 
 function normalizeAdapterResponse(result: string | AdapterResponse): AdapterResponse {

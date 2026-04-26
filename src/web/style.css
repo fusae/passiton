@@ -147,6 +147,99 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
 .filter-btn:hover { color: var(--text); background: rgba(255,255,255,.02); }
 .filter-btn.active { color: var(--text); background: rgba(255,255,255,.05); border-color: var(--border); font-weight: 500; }
 
+/* ── Sidebar stats / pipelines ─────────────────────────────────────────── */
+#pipeline-sidebar-section,
+#stats-panel {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sidebar-section-header,
+.stats-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: .06em;
+}
+#new-pipeline-btn {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 10px;
+  font-size: 11px;
+  cursor: pointer;
+}
+#new-pipeline-btn:hover { border-color: var(--accent); color: var(--accent); }
+#pipeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pipeline-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,.02);
+  cursor: pointer;
+}
+.pipeline-item.active {
+  border-color: rgba(91, 141, 239, 0.35);
+  background: rgba(91, 141, 239, 0.08);
+}
+.pipeline-item-header,
+.pipeline-step-meta,
+.pipeline-step-head,
+.pipeline-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pipeline-item-name {
+  font-size: 12px;
+  font-weight: 600;
+}
+.pipeline-item-sub {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+#stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.stats-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: rgba(255,255,255,.02);
+}
+.stats-label {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-bottom: 4px;
+}
+.stats-value {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -.03em;
+}
+.stats-subvalue {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
 /* ── Session list ───────────────────────────────────────────────────────── */
 #session-list { flex: 1; overflow-y: auto; }
 
@@ -356,6 +449,112 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
   position: relative;
 }
 #session-view.hidden { display: none; }
+#pipeline-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+#pipeline-view.hidden { display: none; }
+#pipeline-toolbar {
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+#pipeline-detail {
+  flex: 1;
+  overflow: auto;
+  padding: 24px;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.pipeline-detail-header {
+  margin-bottom: 16px;
+}
+.pipeline-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.pipeline-detail-card,
+.pipeline-step-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255,255,255,.02);
+}
+.pipeline-detail-card { padding: 12px; }
+.pipeline-detail-card span,
+.pipeline-step-label {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-bottom: 4px;
+}
+.pipeline-detail-card strong { font-size: 15px; }
+.pipeline-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.pipeline-step-card { padding: 14px; }
+.pipeline-step-head { margin-bottom: 8px; }
+.pipeline-step-index {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.pipeline-step-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.pipeline-step-body {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.pipeline-step-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.pipeline-open-btn {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pipeline-open-btn:hover { border-color: var(--accent); color: var(--accent); }
+.pipeline-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.pipeline-step-editor {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: rgba(255,255,255,.02);
+}
+.pipeline-step-editor textarea,
+.pipeline-step-editor input,
+.pipeline-step-editor select {
+  width: 100%;
+}
+.pipeline-step-editor textarea { min-height: 88px; }
+.pipeline-step-editor .form-row { margin-bottom: 10px; }
+.pipeline-step-editor .form-row:last-child { margin-bottom: 0; }
 
 /* ── Toolbar ────────────────────────────────────────────────────────────── */
 #session-toolbar {
@@ -934,7 +1133,8 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
 
 /* ── Modal ──────────────────────────────────────────────────────────────── */
 #modal-overlay,
-#resume-modal-overlay {
+#resume-modal-overlay,
+#pipeline-modal-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,.7);
@@ -945,10 +1145,12 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
   backdrop-filter: blur(4px);
 }
 #modal-overlay.hidden,
-#resume-modal-overlay.hidden { display: none; }
+#resume-modal-overlay.hidden,
+#pipeline-modal-overlay.hidden { display: none; }
 
 #modal,
-#resume-modal {
+#resume-modal,
+#pipeline-modal {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -1226,11 +1428,29 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
   }
 
   #modal,
-  #resume-modal {
-    width: 90vw;
-    max-height: 90vh;
-    overflow-y: auto;
-    padding: 20px;
+  #resume-modal,
+  #pipeline-modal {
+  width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 20px;
+}
+
+  #pipeline-toolbar {
+    padding: 12px 16px;
+    flex-wrap: wrap;
+  }
+
+  #pipeline-detail {
+    padding: 16px;
+  }
+
+  .pipeline-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  #stats-grid {
+    grid-template-columns: 1fr 1fr;
   }
 }
 
