@@ -24,24 +24,24 @@ export const DEFAULT_CONFIG: AppConfig = {
       adapter: 'codex',
       command: DEFAULT_CODEX_COMMAND,
       args: ['exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
-      timeout: 300_000,
+      timeout: 600_000,
     },
     'claude-code': {
       adapter: 'claude-code',
       command: DEFAULT_CLAUDE_COMMAND,
       args: ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
-      timeout: 300_000,
+      timeout: 600_000,
     },
     opencode: {
       adapter: 'opencode',
       command: DEFAULT_OPENCODE_COMMAND,
       args: ['run', '{prompt}', '--dangerously-skip-permissions'],
-      timeout: 300_000,
+      timeout: 600_000,
     },
   },
   policy: {
     maxRounds: 20,
-    messageTimeout: 300_000,
+    messageTimeout: 600_000,
     messageRetentionMs: 30 * 24 * 60 * 60 * 1000,
     sessionTimeout: 7_200_000,
     retries: 1,
@@ -94,12 +94,33 @@ function validateConfig(config: AppConfig): AppConfig {
 
   for (const [name, agent] of Object.entries(config.agents)) {
     assertNonEmptyString(agent.adapter, `agents.${name}.adapter`)
-    assertNonEmptyString(agent.command, `agents.${name}.command`)
-    assertStringArray(agent.args, `agents.${name}.args`)
-    assertPositiveInt(agent.timeout, `agents.${name}.timeout`)
+    const isApiAgent = isApiAdapter(agent.adapter)
+    if (isApiAgent) {
+      assertNonEmptyString(agent.apiKey, `agents.${name}.apiKey`)
+    } else {
+      assertNonEmptyString(agent.command, `agents.${name}.command`)
+      assertStringArray(agent.args, `agents.${name}.args`)
+      assertPositiveInt(agent.timeout, `agents.${name}.timeout`)
+    }
+
+    if (agent.command !== undefined) {
+      assertNonEmptyString(agent.command, `agents.${name}.command`)
+    }
+    if (agent.args !== undefined) {
+      assertStringArray(agent.args, `agents.${name}.args`)
+    }
+    if (agent.timeout !== undefined) {
+      assertPositiveInt(agent.timeout, `agents.${name}.timeout`)
+    }
 
     if (agent.model !== undefined) {
       assertNonEmptyString(agent.model, `agents.${name}.model`)
+    }
+    if (agent.apiKey !== undefined) {
+      assertNonEmptyString(agent.apiKey, `agents.${name}.apiKey`)
+    }
+    if (agent.baseUrl !== undefined) {
+      assertNonEmptyString(agent.baseUrl, `agents.${name}.baseUrl`)
     }
 
     if (agent.env !== undefined) {
@@ -114,6 +135,10 @@ function validateConfig(config: AppConfig): AppConfig {
   }
 
   return config
+}
+
+function isApiAdapter(adapter: string): boolean {
+  return adapter === 'anthropic-api' || adapter === 'openai-api' || adapter === 'zhipu-api'
 }
 
 function normalizeConfig(config: AppConfig): AppConfig {

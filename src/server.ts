@@ -1,7 +1,6 @@
 // Server module — HTTP + WebSocket
 
 import http from 'http'
-import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -9,7 +8,19 @@ import { WebSocketServer } from 'ws'
 import type { WebSocket } from 'ws'
 import type { AgentCatalog } from './agents.js'
 import { createDiscoveredAgentConfig, registerConfiguredAdapters } from './adapters/factory.js'
+import {
+  AuthError,
+  authCookie,
+  authenticateRequest,
+  createUserToken,
+  listUserTokens,
+  loginUser,
+  registerUser,
+  revokeUserToken,
+  type AuthUser,
+} from './auth.js'
 import { loadConfig, writeConfig } from './config.js'
+import { KeyVaultError, decryptKey, deleteKey, listKeys, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
 import type { AgentConfig, AppConfig, SessionMode, SessionContext, SessionContextInput, WsEvent } from './types.js'
@@ -19,8 +30,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(__dirname, 'web')
 const MAX_BODY_SIZE = 1024 * 1024
 const WS_HEARTBEAT_MS = 30_000
-const JWT_SECRET = process.env.TURING_JWT_SECRET ?? 'turing-dev-secret'
-const TOKEN_TTL_SECONDS = 24 * 60 * 60
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const MIME: Record<string, string> = {
@@ -38,16 +47,6 @@ class HttpError extends Error {
     super(message)
   }
 }
-
-type ApiKeyRecord = {
-  id: string
-  provider: 'anthropic' | 'openai' | 'zhipu'
-  name: string
-  key: string
-  createdAt: number
-}
-
-const apiKeys: ApiKeyRecord[] = []
 
 function json(res: http.ServerResponse, status: number, data: unknown): void {
   const body = JSON.stringify(data)
@@ -73,30 +72,6 @@ function parseBody(req: http.IncomingMessage): Promise<unknown> {
   })
 }
 
-function base64UrlJson(data: unknown): string {
-  return Buffer.from(JSON.stringify(data)).toString('base64url')
-}
-
-function signJwt(payload: Record<string, unknown>): string {
-  const header = base64UrlJson({ alg: 'HS256', typ: 'JWT' })
-  const body = base64UrlJson(payload)
-  const signature = crypto
-    .createHmac('sha256', JWT_SECRET)
-    .update(`${header}.${body}`)
-    .digest('base64url')
-  return `${header}.${body}.${signature}`
-}
-
-function createMockJwt(email: string): string {
-  const now = Math.floor(Date.now() / 1000)
-  return signJwt({
-    sub: email,
-    email,
-    iat: now,
-    exp: now + TOKEN_TTL_SECONDS,
-  })
-}
-
 function parseAuthBody(body: unknown): { email: string; password: string } {
   const data = requireRecord(body, 'body')
   const email = requireNonEmptyString(data.email, 'email').toLowerCase()
@@ -110,7 +85,14 @@ function parseAuthBody(body: unknown): { email: string; password: string } {
   return { email, password }
 }
 
-function parseApiKeyBody(body: unknown): Omit<ApiKeyRecord, 'id' | 'createdAt'> {
+function parseTokenBody(body: unknown): { name?: string } {
+  const data = requireRecord(body, 'body')
+  return {
+    name: optionalString(data.name, 'name'),
+  }
+}
+
+function parseApiKeyBody(body: unknown): { provider: string; key: string; name?: string } {
   const data = requireRecord(body, 'body')
   const provider = requireNonEmptyString(data.provider, 'provider').toLowerCase()
   if (provider !== 'anthropic' && provider !== 'openai' && provider !== 'zhipu') {
@@ -118,23 +100,8 @@ function parseApiKeyBody(body: unknown): Omit<ApiKeyRecord, 'id' | 'createdAt'> 
   }
   return {
     provider,
-    name: requireNonEmptyString(data.name, 'name'),
+    name: optionalString(data.name, 'name'),
     key: requireNonEmptyString(data.key, 'key'),
-  }
-}
-
-function maskApiKey(value: string): string {
-  if (value.length <= 8) return '••••'
-  return `${value.slice(0, 4)}••••${value.slice(-4)}`
-}
-
-function publicApiKey(record: ApiKeyRecord) {
-  return {
-    id: record.id,
-    provider: record.provider,
-    name: record.name,
-    maskedKey: maskApiKey(record.key),
-    createdAt: record.createdAt,
   }
 }
 
@@ -489,39 +456,61 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // POST /api/auth/login
       if (pathname === '/api/auth/login' && method === 'POST') {
-        const { email } = parseAuthBody(await parseBody(req))
-        return json(res, 200, { token: createMockJwt(email), user: { email } })
+        const { email, password } = parseAuthBody(await parseBody(req))
+        const result = loginUser(email, password)
+        res.setHeader('Set-Cookie', authCookie(result.token))
+        return json(res, 200, { token: result.token, user: result.user })
       }
 
       // POST /api/auth/register
       if (pathname === '/api/auth/register' && method === 'POST') {
-        const { email } = parseAuthBody(await parseBody(req))
-        return json(res, 201, { token: createMockJwt(email), user: { email } })
+        const { email, password } = parseAuthBody(await parseBody(req))
+        const result = registerUser(email, password)
+        res.setHeader('Set-Cookie', authCookie(result.token))
+        return json(res, 201, { token: result.token, user: result.user })
+      }
+
+      const authUser = pathname.startsWith('/api/') ? authenticateRequest(req) : undefined
+
+      // GET /api/auth/tokens
+      if (pathname === '/api/auth/tokens' && method === 'GET') {
+        return json(res, 200, listUserTokens(authUser!.userId))
+      }
+
+      // POST /api/auth/tokens
+      if (pathname === '/api/auth/tokens' && method === 'POST') {
+        const { name } = parseTokenBody(await parseBody(req))
+        return json(res, 201, createUserToken(authUser!.userId, name))
+      }
+
+      // DELETE /api/auth/tokens/:id
+      const tokenMatch = pathname.match(/^\/api\/auth\/tokens\/([^/]+)$/)
+      if (tokenMatch && method === 'DELETE') {
+        if (!revokeUserToken(authUser!.userId, tokenMatch[1])) return json(res, 404, { error: 'Not found' })
+        return json(res, 200, { success: true })
       }
 
       // GET /api/keys
       if (pathname === '/api/keys' && method === 'GET') {
-        return json(res, 200, apiKeys.map(publicApiKey))
+        return json(res, 200, listKeys(authUser!.userId))
       }
 
       // POST /api/keys
       if (pathname === '/api/keys' && method === 'POST') {
         const key = parseApiKeyBody(await parseBody(req))
-        const record: ApiKeyRecord = {
-          ...key,
-          id: crypto.randomUUID(),
-          createdAt: Date.now(),
-        }
-        apiKeys.unshift(record)
-        return json(res, 201, publicApiKey(record))
+        return json(res, 201, storeKey({ userId: authUser!.userId, ...key }))
+      }
+
+      // GET /api/keys/:id/decrypt
+      const apiKeyDecryptMatch = pathname.match(/^\/api\/keys\/([^/]+)\/decrypt$/)
+      if (apiKeyDecryptMatch && method === 'GET') {
+        return json(res, 200, decryptKey(authUser!.userId, apiKeyDecryptMatch[1]))
       }
 
       // DELETE /api/keys/:id
       const apiKeyMatch = pathname.match(/^\/api\/keys\/([^/]+)$/)
       if (apiKeyMatch && method === 'DELETE') {
-        const index = apiKeys.findIndex((key) => key.id === apiKeyMatch[1])
-        if (index < 0) return json(res, 404, { error: 'Not found' })
-        apiKeys.splice(index, 1)
+        if (!deleteKey(authUser!.userId, apiKeyMatch[1])) return json(res, 404, { error: 'Not found' })
         return json(res, 200, { success: true })
       }
 
@@ -538,7 +527,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // GET /api/stats
       if (pathname === '/api/stats' && method === 'GET') {
-        return json(res, 200, state.getStats())
+        return json(res, 200, state.getStats(authUser!.userId))
       }
 
       // GET /api/config
@@ -613,7 +602,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // GET /api/pipelines
       if (pathname === '/api/pipelines' && method === 'GET') {
-        return json(res, 200, state.listPipelines())
+        return json(res, 200, state.listPipelines(authUser!.userId))
       }
 
       // POST /api/pipelines
@@ -621,6 +610,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const defaults = loadConfig().defaults
         const params = parsePipelineBody(await parseBody(req))
         const pipeline = router.startPipeline({
+          userId: authUser!.userId,
           name: params.name,
           steps: params.steps.map((step) => ({
             ...step,
@@ -635,14 +625,14 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // GET /api/pipelines/:id
       const pipelineMatch = pathname.match(/^\/api\/pipelines\/([^/]+)$/)
       if (pipelineMatch && method === 'GET') {
-        const pipeline = state.getPipelineWithSessions(pipelineMatch[1])
+        const pipeline = state.getPipelineWithSessions(pipelineMatch[1], authUser!.userId)
         if (!pipeline) return json(res, 404, { error: 'Not found' })
         return json(res, 200, pipeline)
       }
 
       // DELETE /api/pipelines/:id
       if (pipelineMatch && method === 'DELETE') {
-        const pipeline = state.getPipeline(pipelineMatch[1])
+        const pipeline = state.getPipeline(pipelineMatch[1], authUser!.userId)
         if (!pipeline) return json(res, 404, { error: 'Not found' })
         await router.deletePipeline(pipelineMatch[1])
         return json(res, 200, { success: true })
@@ -651,7 +641,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // POST /api/pipelines/:id/pause
       const pipelinePauseMatch = pathname.match(/^\/api\/pipelines\/([^/]+)\/pause$/)
       if (pipelinePauseMatch && method === 'POST') {
-        const pipeline = state.getPipeline(pipelinePauseMatch[1])
+        const pipeline = state.getPipeline(pipelinePauseMatch[1], authUser!.userId)
         if (!pipeline) return json(res, 404, { error: 'Not found' })
         return json(res, 200, await router.pausePipeline(pipelinePauseMatch[1]))
       }
@@ -659,7 +649,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // POST /api/pipelines/:id/resume
       const pipelineResumeMatch = pathname.match(/^\/api\/pipelines\/([^/]+)\/resume$/)
       if (pipelineResumeMatch && method === 'POST') {
-        const pipeline = state.getPipeline(pipelineResumeMatch[1])
+        const pipeline = state.getPipeline(pipelineResumeMatch[1], authUser!.userId)
         if (!pipeline) return json(res, 404, { error: 'Not found' })
         return json(res, 200, await router.resumePipeline(pipelineResumeMatch[1]))
       }
@@ -667,7 +657,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // GET /api/sessions
       if (pathname === '/api/sessions' && method === 'GET') {
         const statusFilter = parseSessionStatus(url.searchParams.get('status'))
-        const sessions = state.listSessions(statusFilter ? { status: statusFilter } : undefined)
+        const sessions = state.listSessions({ ...(statusFilter ? { status: statusFilter } : {}), userId: authUser!.userId })
         return json(res, 200, sessions)
       }
 
@@ -676,6 +666,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const defaults = loadConfig().defaults
         const params = parseSessionBody(await parseBody(req))
         const session = router.startSession({
+          userId: authUser!.userId,
           ...params,
           context: resolveSessionContext(params.context, params.cwd),
           mode: params.mode ?? defaults.mode,
@@ -687,7 +678,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // GET /api/sessions/:id
       const sessionMatch = pathname.match(/^\/api\/sessions\/([^/]+)$/)
       if (sessionMatch && method === 'GET') {
-        const session = state.getSession(sessionMatch[1])
+        const session = state.getSession(sessionMatch[1], authUser!.userId)
         if (!session) return json(res, 404, { error: 'Not found' })
         const messages = state.getMessages(session.id)
         return json(res, 200, { ...session, messages })
@@ -696,7 +687,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // GET /api/sessions/:id/logs
       const sessionLogsMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/logs$/)
       if (sessionLogsMatch && method === 'GET') {
-        const session = state.getSession(sessionLogsMatch[1])
+        const session = state.getSession(sessionLogsMatch[1], authUser!.userId)
         if (!session) return json(res, 404, { error: 'Not found' })
         return json(res, 200, state.getLogs(session.id))
       }
@@ -704,7 +695,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // GET /api/sessions/:id/snapshots
       const sessionSnapshotsMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/snapshots$/)
       if (sessionSnapshotsMatch && method === 'GET') {
-        const session = state.getSession(sessionSnapshotsMatch[1])
+        const session = state.getSession(sessionSnapshotsMatch[1], authUser!.userId)
         if (!session) return json(res, 404, { error: 'Not found' })
         return json(res, 200, state.getSnapshots(session.id))
       }
@@ -712,6 +703,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // POST /api/sessions/:id/pause
       const pauseMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/pause$/)
       if (pauseMatch && method === 'POST') {
+        if (!state.getSession(pauseMatch[1], authUser!.userId)) return json(res, 404, { error: 'Not found' })
         const session = await router.pauseSession(pauseMatch[1])
         return json(res, 200, session)
       }
@@ -720,7 +712,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       const resumeMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/resume$/)
       if (resumeMatch && method === 'POST') {
         const { extraRounds } = parseResumeBody(await parseBody(req))
-        const current = state.getSession(resumeMatch[1])
+        const current = state.getSession(resumeMatch[1], authUser!.userId)
         if (!current) return json(res, 404, { error: 'Not found' })
         const session = current.status === 'error'
           ? await router.resumeErrorSession(resumeMatch[1])
@@ -731,6 +723,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // POST /api/sessions/:id/stop
       const stopMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/stop$/)
       if (stopMatch && method === 'POST') {
+        if (!state.getSession(stopMatch[1], authUser!.userId)) return json(res, 404, { error: 'Not found' })
         const session = await router.stopSession(stopMatch[1])
         return json(res, 200, session)
       }
@@ -739,10 +732,10 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       const deleteMatch = pathname.match(/^\/api\/sessions\/([^/]+)$/)
       if (deleteMatch && method === 'DELETE') {
         const sessionId = deleteMatch[1]
-        const session = state.getSession(sessionId)
+        const session = state.getSession(sessionId, authUser!.userId)
         if (!session) return json(res, 404, { error: 'Not found' })
 
-        state.deleteSession(sessionId)
+        state.deleteSession(sessionId, authUser!.userId)
         router.emit('event', { type: 'session:deleted', payload: { id: sessionId } })
 
         return json(res, 200, { success: true })
@@ -751,6 +744,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // POST /api/sessions/:id/message
       const msgMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/message$/)
       if (msgMatch && method === 'POST') {
+        if (!state.getSession(msgMatch[1], authUser!.userId)) return json(res, 404, { error: 'Not found' })
         const body = parseHumanMessageBody(await parseBody(req))
         const msg = router.injectMessage(msgMatch[1], body.content)
         return json(res, 200, msg)
@@ -759,6 +753,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // POST /api/sessions/:id/nudge — human redirects the conversation mid-flight
       const nudgeMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/nudge$/)
       if (nudgeMatch && method === 'POST') {
+        if (!state.getSession(nudgeMatch[1], authUser!.userId)) return json(res, 404, { error: 'Not found' })
         const body = parseNudgeBody(await parseBody(req))
         const msg = await router.nudge(nudgeMatch[1], body.content)
         return json(res, 200, msg)
@@ -767,6 +762,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // POST /api/sessions/:id/takeover
       const takeoverMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/takeover$/)
       if (takeoverMatch && method === 'POST') {
+        if (!state.getSession(takeoverMatch[1], authUser!.userId)) return json(res, 404, { error: 'Not found' })
         const session = await router.pauseSession(takeoverMatch[1])
         return json(res, 200, { ...session, takenOver: true })
       }
@@ -774,6 +770,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // POST /api/sessions/:id/release
       const releaseMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/release$/)
       if (releaseMatch && method === 'POST') {
+        if (!state.getSession(releaseMatch[1], authUser!.userId)) return json(res, 404, { error: 'Not found' })
         const session = await router.resumeSession(releaseMatch[1])
         return json(res, 200, session)
       }
@@ -794,7 +791,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       json(res, 404, { error: 'Not found' })
     } catch (err) {
-      if (err instanceof HttpError) {
+      if (err instanceof HttpError || err instanceof AuthError || err instanceof KeyVaultError) {
         return json(res, err.status, { error: err.message })
       }
       console.error('[server] error:', err)

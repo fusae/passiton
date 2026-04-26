@@ -20,7 +20,7 @@ interface DiscoveryPreset {
 export interface AgentInfo {
   name: string
   adapter: string
-  command: string
+  command?: string
   source: 'configured' | 'discovered'
   supported: boolean
   availableForSessions: boolean
@@ -31,7 +31,7 @@ export interface AgentInfo {
 interface AgentEntry {
   name: string
   adapter: string
-  command: string
+  command?: string
   source: 'configured' | 'discovered'
   supported: boolean
   availableForSessions: boolean
@@ -92,7 +92,7 @@ export class AgentCatalog {
 
   registerDiscoveredAdapters(router: Router): void {
     for (const entry of this.entries.values()) {
-      if (entry.source !== 'discovered' || !entry.supported) continue
+      if (entry.source !== 'discovered' || !entry.supported || !entry.command) continue
       const config = createDiscoveredAgentConfig(entry.adapter, entry.command)
       if (!config) continue
       const adapter = createAdapter(config)
@@ -111,6 +111,13 @@ export class AgentCatalog {
     })
 
     return Promise.all(entries.map(async (entry) => {
+      if (!entry.command) {
+        return {
+          ...entry,
+          healthy: entry.availableForSessions,
+        }
+      }
+
       const probe = await this.probe(entry.command)
       return {
         ...entry,

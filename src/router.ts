@@ -7,6 +7,7 @@ import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
 import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline } from './types.js'
 import * as state from './state.js'
+import { decryptKey } from './keyvault.js'
 import {
   checkPreRound,
   detectCompletion,
@@ -56,6 +57,7 @@ export class Router extends EventEmitter {
   // ── Session control ─────────────────────────────────────────────────────────
 
   startSession(params: {
+    userId?: string
     from: AgentRef
     to: AgentRef
     initialPrompt: string
@@ -76,6 +78,7 @@ export class Router extends EventEmitter {
   }
 
   startPipeline(params: {
+    userId?: string
     name: string
     steps: Array<{
       from: AgentRef
@@ -95,11 +98,12 @@ export class Router extends EventEmitter {
 
     const created = params.steps.map((step) => {
       const hasDependencies = (step.dependsOn?.length ?? 0) > 0
-      return this.createSessionRecord(step, hasDependencies ? 'paused' : 'active')
+      return this.createSessionRecord({ ...step, userId: params.userId }, hasDependencies ? 'paused' : 'active')
     })
 
     const pipeline = state.createPipeline({
       id: uuidv4(),
+      userId: params.userId,
       name: params.name,
       status: 'active',
       sessions: params.steps.map((step, index) => ({
@@ -404,7 +408,7 @@ export class Router extends EventEmitter {
     heartbeat.unref()
     emitHeartbeat()
 
-    const opts = this.buildSendOpts(session, recipient)
+    const opts = this.buildSendOpts(session, recipient, adapter)
     opts.onOutput = (line) => {
       lastOutput = line
     }
@@ -453,7 +457,7 @@ export class Router extends EventEmitter {
    * Build AdapterSendOpts with system prompt and conversation history.
    * `perspective` determines which agent we're building for.
    */
-  private buildSendOpts(session: Session, perspective: 'from' | 'to'): AdapterSendOpts {
+  private buildSendOpts(session: Session, perspective: 'from' | 'to', adapter: Adapter): AdapterSendOpts {
     const systemPrompt = session.systemPrompts?.[perspective]
     const messages = state.getMessages(session.id).slice(-MAX_HISTORY_MESSAGES)
 
@@ -470,7 +474,12 @@ export class Router extends EventEmitter {
       }
     }
 
-    return { systemPrompt, history }
+    const opts: AdapterSendOpts = { systemPrompt, history }
+    const keyId = typeof adapter.config.keyId === 'string' ? adapter.config.keyId : undefined
+    if (keyId && session.userId) {
+      opts.apiKey = decryptKey(session.userId, keyId).key
+    }
+    return opts
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -526,6 +535,7 @@ export class Router extends EventEmitter {
   }
 
   private createSessionRecord(params: {
+    userId?: string
     from: AgentRef
     to: AgentRef
     initialPrompt: string
@@ -546,6 +556,7 @@ export class Router extends EventEmitter {
 
     const created = state.createSession({
       id: uuidv4(),
+      userId: params.userId,
       from: params.from,
       to: params.to,
       mode,

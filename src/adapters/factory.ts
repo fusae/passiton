@@ -3,22 +3,25 @@ import type { Router } from '../router.js'
 import { ClaudeCodeAdapter } from './claude-code.js'
 import { CodexAdapter } from './codex.js'
 import { OpenCodeAdapter } from './opencode.js'
+import { AnthropicApiAdapter } from './api/anthropic.js'
+import { OpenAIApiAdapter } from './api/openai.js'
+import { ZhipuApiAdapter } from './api/zhipu.js'
 
 const DISCOVERED_DEFAULTS: Record<string, Omit<AgentConfig, 'command'>> = {
   codex: {
     adapter: 'codex',
     args: ['exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
-    timeout: 300_000,
+    timeout: 600_000,
   },
   'claude-code': {
     adapter: 'claude-code',
     args: ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
-    timeout: 300_000,
+    timeout: 600_000,
   },
   opencode: {
     adapter: 'opencode',
     args: ['run', '{prompt}', '--dangerously-skip-permissions'],
-    timeout: 300_000,
+    timeout: 600_000,
   },
 }
 
@@ -46,6 +49,27 @@ export function createAdapter(agentCfg: AgentConfig): Adapter | undefined {
         model: agentCfg.model,
         env: agentCfg.env,
       })
+    case 'anthropic-api':
+      return new AnthropicApiAdapter({
+        apiKey: requireApiKey(agentCfg),
+        model: agentCfg.model,
+        baseUrl: agentCfg.baseUrl,
+        timeout: agentCfg.timeout,
+      })
+    case 'openai-api':
+      return new OpenAIApiAdapter({
+        apiKey: requireApiKey(agentCfg),
+        model: agentCfg.model,
+        baseUrl: agentCfg.baseUrl,
+        timeout: agentCfg.timeout,
+      })
+    case 'zhipu-api':
+      return new ZhipuApiAdapter({
+        apiKey: requireApiKey(agentCfg),
+        model: agentCfg.model,
+        baseUrl: agentCfg.baseUrl,
+        timeout: agentCfg.timeout,
+      })
     default:
       return undefined
   }
@@ -64,6 +88,13 @@ export function registerConfiguredAdapters(
     ;(adapter as { name: string }).name = name
     router.registerAdapter(adapter)
   }
+}
+
+function requireApiKey(agentCfg: AgentConfig): string {
+  if (!agentCfg.apiKey) {
+    throw new Error(`[init] apiKey is required for adapter "${agentCfg.adapter}"`)
+  }
+  return agentCfg.apiKey
 }
 
 export function createDiscoveredAgentConfig(adapter: string, command: string): AgentConfig | undefined {

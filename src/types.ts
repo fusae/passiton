@@ -170,6 +170,8 @@ export interface Adapter {
 export interface AdapterSendOpts {
   systemPrompt?: string
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
+  apiKey?: string
+  env?: Record<string, string>
   onOutput?: (line: string) => void
 }
 
@@ -194,10 +196,12 @@ export interface PolicyConfig {
 // Agent registration config
 export interface AgentConfig {
   adapter: string
-  command: string
-  args: string[]
-  timeout: number
+  command?: string
+  args?: string[]
+  timeout?: number
   model?: string
+  apiKey?: string
+  baseUrl?: string
   env?: Record<string, string>
 }
 

@@ -16,6 +16,7 @@ class StubAgentCatalog {
 
 async function withServer(fn: (baseUrl: string) => Promise<void>): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'turing-server-'))
+  process.env.TURING_JWT_SECRET = 'server-test-jwt-secret'
   state.initDb(join(dir, 'turing.db'))
   const router = new Router()
   const server = createServer(router, 0, new StubAgentCatalog() as never)
@@ -31,19 +32,37 @@ async function withServer(fn: (baseUrl: string) => Promise<void>): Promise<void>
     await new Promise<void>((resolve) => server.close(() => resolve()))
     state.closeDb()
     rmSync(dir, { recursive: true, force: true })
+    delete process.env.TURING_JWT_SECRET
   }
+}
+
+async function register(baseUrl: string, email: string): Promise<{ token: string; userId: string }> {
+  const response = await fetch(`${baseUrl}/api/auth/register`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password: 'password123' }),
+  })
+  assert.equal(response.status, 201)
+  const payload = await response.json() as { token: string; user: { userId: string } }
+  return { token: payload.token, userId: payload.user.userId }
+}
+
+function authHeaders(token: string): Record<string, string> {
+  return { authorization: `Bearer ${token}` }
 }
 
 test('GET /api/stats returns aggregated stats payload', async () => {
   await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'stats@example.com')
     state.createSession({
       id: 'server-stats-1',
+      userId: auth.userId,
       from: { adapter: 'codex' },
       to: { adapter: 'claude-code' },
     })
-    state.updateSession('server-stats-1', { status: 'done', currentRound: 2 })
+    state.updateSession('server-stats-1', { status: 'done', currentRound: 2 }, auth.userId)
 
-    const response = await fetch(`${baseUrl}/api/stats`)
+    const response = await fetch(`${baseUrl}/api/stats`, { headers: authHeaders(auth.token) })
     assert.equal(response.status, 200)
     const payload = await response.json() as {
       sessions: { total: number; done: number }
@@ -57,20 +76,23 @@ test('GET /api/stats returns aggregated stats payload', async () => {
 
 test('GET /api/pipelines/:id returns pipeline with session details', async () => {
   await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'pipelines@example.com')
     state.createSession({
       id: 'server-pipeline-session',
+      userId: auth.userId,
       from: { adapter: 'codex' },
       to: { adapter: 'claude-code' },
     })
     state.createPipeline({
       id: 'server-pipeline',
+      userId: auth.userId,
       name: 'Server Pipeline',
       sessions: [
         { sessionId: 'server-pipeline-session', status: 'active' },
       ],
     })
 
-    const response = await fetch(`${baseUrl}/api/pipelines/server-pipeline`)
+    const response = await fetch(`${baseUrl}/api/pipelines/server-pipeline`, { headers: authHeaders(auth.token) })
     assert.equal(response.status, 200)
     const payload = await response.json() as {
       id: string
