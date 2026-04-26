@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Turing Cloud — Agent Orchestration Platform</title>
+  <link rel="stylesheet" href="cloud.css">
+  <style>
+    /* Floating particles background */
+    .hero-particles {
+      position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+    }
+    .hero-particles span {
+      position: absolute;
+      width: 3px; height: 3px;
+      background: var(--accent);
+      border-radius: 50%;
+      opacity: 0.3;
+      animation: float-particle 12s linear infinite;
+    }
+    @keyframes float-particle {
+      0%   { transform: translateY(100vh) scale(0); opacity: 0; }
+      10%  { opacity: 0.3; }
+      90%  { opacity: 0.3; }
+      100% { transform: translateY(-100px) scale(1); opacity: 0; }
+    }
+    .hero-particles span:nth-child(1)  { left: 10%; animation-delay: 0s; animation-duration: 10s; }
+    .hero-particles span:nth-child(2)  { left: 20%; animation-delay: 2s; animation-duration: 14s; }
+    .hero-particles span:nth-child(3)  { left: 35%; animation-delay: 4s; animation-duration: 11s; }
+    .hero-particles span:nth-child(4)  { left: 50%; animation-delay: 1s; animation-duration: 13s; }
+    .hero-particles span:nth-child(5)  { left: 65%; animation-delay: 3s; animation-duration: 9s; }
+    .hero-particles span:nth-child(6)  { left: 75%; animation-delay: 5s; animation-duration: 15s; }
+    .hero-particles span:nth-child(7)  { left: 85%; animation-delay: 0.5s; animation-duration: 12s; }
+    .hero-particles span:nth-child(8)  { left: 45%; animation-delay: 6s; animation-duration: 10s; width: 2px; height: 2px; background: var(--accent-end); }
+    .hero-particles span:nth-child(9)  { left: 55%; animation-delay: 7s; animation-duration: 11s; width: 4px; height: 4px; }
+    .hero-particles span:nth-child(10) { left: 30%; animation-delay: 3.5s; animation-duration: 16s; width: 2px; height: 2px; background: var(--warm); opacity: 0.2; }
+
+    .arch-section h2 { text-align: center; }
+    .arch-section .section-sub { text-align: center; color: var(--text-secondary); font-size: 1rem; margin-top: 10px; }
+    .features-section h2 { text-align: center; }
+    .features-section .section-sub { text-align: center; color: var(--text-secondary); font-size: 1rem; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+  <!-- ===================== NAV ===================== -->
+  <nav class="landing-nav">
+    <div class="landing-brand">
+      <div class="logo-icon">T</div>
+      <span>Turing Cloud</span>
+    </div>
+    <div class="landing-nav-links">
+      <a href="#features">Features</a>
+      <a href="#architecture">Architecture</a>
+      <a href="/">Dashboard</a>
+      <a href="/" class="btn btn-primary btn-sm">Get Started</a>
+      <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+    </div>
+  </nav>
+
+  <!-- ===================== HERO ===================== -->
+  <section class="hero">
+    <div class="hero-particles">
+      <span></span><span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span><span></span><span></span>
+    </div>
+
+    <div class="hero-badge fade-in-up">
+      <span>✦</span> Agent Orchestration Platform
+    </div>
+
+    <h1 class="fade-in-up delay-1">
+      让你的 AI Agent<br><span class="grad-text">互相对话</span>
+    </h1>
+
+    <p class="hero-sub fade-in-up delay-2">
+      Turing Cloud 是一个 Agent 间通信编排平台。自带 API Key，灵活路由，
+      按 Session 计费 —— 让多个 AI 模型协作完成复杂任务。
+    </p>
+
+    <div class="hero-cta fade-in-up delay-3">
+      <a href="/" class="btn btn-primary pulse-glow">
+        Get Started
+        <span>→</span>
+      </a>
+      <a href="/settings.html" class="btn btn-secondary">
+        Sign In
+      </a>
+    </div>
+  </section>
+
+  <!-- ===================== ARCHITECTURE ===================== -->
+  <section class="arch-section" id="architecture">
+    <h2 class="fade-in-up">工作原理</h2>
+    <p class="section-sub fade-in-up delay-1">Agent ↔ Turing ↔ Agent —— 简洁而强大的通信编排</p>
+
+    <div class="arch-diagram fade-in-up delay-2">
+      <!-- Left Agents -->
+      <div class="arch-col">
+        <div class="arch-node">
+          <div class="arch-icon" style="background: rgba(99,102,241,0.15);">🤖</div>
+          <div class="arch-label">Claude</div>
+          <div class="arch-sub">Anthropic API</div>
+        </div>
+        <div class="arch-node">
+          <div class="arch-icon" style="background: rgba(34,197,94,0.15);">🧠</div>
+          <div class="arch-label">GPT-4o</div>
+          <div class="arch-sub">OpenAI API</div>
+        </div>
+      </div>
+
+      <!-- Connector -->
+      <div class="arch-connector"></div>
+
+      <!-- Center: Turing -->
+      <div class="arch-center">
+        <div class="arch-icon">⚡</div>
+        <div class="arch-label">Turing Cloud</div>
+        <div class="arch-sub" style="color: var(--text-secondary); margin-top: 4px;">路由 · 编排 · 计费</div>
+      </div>
+
+      <!-- Connector -->
+      <div class="arch-connector"></div>
+
+      <!-- Right Agents -->
+      <div class="arch-col">
+        <div class="arch-node">
+          <div class="arch-icon" style="background: rgba(245,158,11,0.15);">💬</div>
+          <div class="arch-label">GLM-4</div>
+          <div class="arch-sub">智谱 API</div>
+        </div>
+        <div class="arch-node">
+          <div class="arch-icon" style="background: rgba(139,92,246,0.15);">🔮</div>
+          <div class="arch-label">Gemini</div>
+          <div class="arch-sub">Google API</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== FEATURES ===================== -->
+  <section class="features-section" id="features">
+    <h2>为什么选择 Turing Cloud</h2>
+    <p class="section-sub">三个核心优势，让 Agent 协作变得简单</p>
+
+    <div class="features-grid">
+      <!-- Feature 1 -->
+      <div class="feature-card fade-in-up delay-1">
+        <div class="feature-icon" style="background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15));">
+          🔀
+        </div>
+        <h3>Agent 编排</h3>
+        <p>
+          通过 Session 和 Pipeline 灵活定义 Agent 之间的通信拓扑。
+          支持串行、并行、条件分支 —— 像搭积木一样构建复杂工作流。
+        </p>
+      </div>
+
+      <!-- Feature 2 -->
+      <div class="feature-card fade-in-up delay-2">
+        <div class="feature-icon" style="background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(249,115,22,0.15));">
+          🔑
+        </div>
+        <h3>用自己的 Key</h3>
+        <p>
+          自带 API Key，直接对接 Anthropic、OpenAI、智谱等主流提供商。
+          不锁定供应商，数据不经代理 —— 完全掌控你的 AI 资产。
+        </p>
+      </div>
+
+      <!-- Feature 3 -->
+      <div class="feature-card fade-in-up delay-3">
+        <div class="feature-icon" style="background: linear-gradient(135deg, rgba(34,197,94,0.15), rgba(16,185,129,0.15));">
+          📊
+        </div>
+        <h3>按需计费</h3>
+        <p>
+          只为实际使用的 Session 付费。透明的按轮次计费模式，
+          没有包月、没有隐藏费用。用多少、付多少。
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== CTA ===================== -->
+  <section class="cta-section">
+    <h2 class="fade-in-up" style="margin-bottom: 16px;">
+      准备好让 Agent 协作了吗？
+    </h2>
+    <p class="fade-in-up delay-1" style="color: var(--text-secondary); font-size: 1.05rem; margin-bottom: 36px;">
+      免费开始，按需扩展。几分钟内就能创建第一个 Session。
+    </p>
+    <div class="fade-in-up delay-2">
+      <a href="/" class="btn btn-primary" style="padding: 14px 36px; font-size: 1rem;">
+        开始使用 Turing Cloud
+        <span>→</span>
+      </a>
+    </div>
+  </section>
+
+  <!-- ===================== FOOTER ===================== -->
+  <footer class="landing-footer">
+    <p>© 2026 Turing Cloud. All rights reserved.</p>
+  </footer>
+
+<script>
+function toggleTheme() {
+  const html = document.documentElement;
+  const btn = document.querySelector('.theme-toggle');
+  const isDark = html.getAttribute('data-theme') !== 'light';
+  html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+  btn.textContent = isDark ? '☀️' : '🌙';
+  localStorage.setItem('turing-theme', isDark ? 'light' : 'dark');
+}
+(function() {
+  const saved = localStorage.getItem('turing-theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', saved);
+  document.addEventListener('DOMContentLoaded', function() {
+    const btn = document.querySelector('.theme-toggle');
+    if (btn) btn.textContent = saved === 'light' ? '☀️' : '🌙';
+  });
+})();
+</script>
+</body>
+</html>

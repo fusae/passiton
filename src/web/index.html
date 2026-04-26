@@ -3,19 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Turing</title>
+  <title>Turing Cloud</title>
+  <link rel="stylesheet" href="cloud.css" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js"></script>
 </head>
-<body>
+<body class="app-page">
   <header>
     <div class="header-left">
       <button id="mobile-menu-btn">☰</button>
       <div class="dot" id="server-dot"></div>
-      <h1>Turing</h1>
-      <span class="header-sub">agent-to-agent proxy</span>
+      <h1>Turing Cloud</h1>
+      <span class="header-sub">agent orchestration platform</span>
     </div>
     <div class="header-right">
+      <a href="/landing.html" class="toolbar-btn">Landing</a>
       <button id="log-toggle" title="Toggle execution logs">
         📋 <span>Logs</span>
         <span id="log-error-dot" class="log-error-dot hidden"></span>

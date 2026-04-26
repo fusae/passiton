@@ -1,22 +1,22 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:       #0d0d0d;
-  --surface:  #141414;
-  --surface2: #1a1a1a;
-  --border:   #262626;
-  --text:     #ededed;
-  --muted:    #888888;
-  --accent:   #5b8def;
-  --green:    #10b981;
-  --yellow:   #f59e0b;
+  --bg:       #0a0a0f;
+  --surface:  #0e0e16;
+  --surface2: rgba(255,255,255,.04);
+  --border:   rgba(255,255,255,.08);
+  --text:     #f0f0f5;
+  --muted:    #8a8a9a;
+  --accent:   #6366f1;
+  --green:    #22c55e;
+  --yellow:   #eab308;
   --red:      #ef4444;
-  --purple:   #a855f7;
-  --orange:   #f97316;
+  --purple:   #8b5cf6;
+  --orange:   #f59e0b;
   --font:     -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --mono:     "JetBrains Mono", "Fira Code", "SFMono-Regular", Consolas, monospace;
-  --radius:   6px;
-  --shadow:   0 2px 8px rgba(0,0,0,.4);
+  --radius:   8px;
+  --shadow:   0 2px 12px rgba(0,0,0,.35);
 }
 
 body {
@@ -2198,4 +2198,222 @@ header h1 { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
     align-items: stretch;
     flex-direction: column;
   }
+}
+
+/* ── Turing Cloud skin for the live app ────────────────────────────────── */
+body.app-page {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(99,102,241,.14), transparent 32%),
+    radial-gradient(circle at 88% 12%, rgba(245,158,11,.08), transparent 26%),
+    var(--bg);
+}
+
+body.app-page header {
+  height: 64px;
+  padding: 0 28px;
+  background: rgba(14,14,22,.86);
+  backdrop-filter: blur(16px);
+}
+
+body.app-page header h1 {
+  font-size: 17px;
+  font-weight: 750;
+}
+
+body.app-page .header-left::before {
+  content: 'T';
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+body.app-page #server-dot {
+  display: none;
+}
+
+body.app-page #sidebar {
+  width: 300px;
+  background: rgba(14,14,22,.94);
+  border-right-color: rgba(255,255,255,.08);
+}
+
+body.app-page #sidebar-header,
+body.app-page #pipeline-sidebar-section,
+body.app-page #stats-panel,
+body.app-page #agents-panel,
+body.app-page #sidebar-footer {
+  border-color: rgba(255,255,255,.08);
+}
+
+body.app-page #new-btn,
+body.app-page #inject-btn,
+body.app-page .modal-submit,
+body.app-page .settings-btn.primary,
+body.app-page #new-pipeline-btn:hover {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border: 0;
+  color: #fff;
+  box-shadow: 0 0 20px rgba(99,102,241,.22);
+}
+
+body.app-page .toolbar-btn,
+body.app-page .banner-btn,
+body.app-page #logout-btn,
+body.app-page .settings-btn,
+body.app-page .modal-cancel,
+body.app-page #new-pipeline-btn,
+body.app-page #log-toggle,
+body.app-page #settings-toggle {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  color: var(--text);
+}
+
+body.app-page .toolbar-btn:hover,
+body.app-page .banner-btn:hover,
+body.app-page #logout-btn:hover,
+body.app-page .settings-btn:hover,
+body.app-page .modal-cancel:hover,
+body.app-page #log-toggle:hover,
+body.app-page #settings-toggle:hover {
+  background: rgba(255,255,255,.07);
+  border-color: rgba(255,255,255,.14);
+  color: var(--text);
+}
+
+body.app-page .filter-btn.active,
+body.app-page .session-item.active,
+body.app-page .pipeline-item.active {
+  background: rgba(99,102,241,.09);
+  border-color: rgba(99,102,241,.32);
+}
+
+body.app-page .session-item,
+body.app-page .pipeline-item,
+body.app-page .stats-card,
+body.app-page .agent-row,
+body.app-page .change-snapshot,
+body.app-page .pipeline-step-card,
+body.app-page .pipeline-detail-card,
+body.app-page .agent-config-item,
+body.app-page .api-key-item {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+}
+
+body.app-page .session-item {
+  margin: 8px 12px;
+  border-left: 1px solid rgba(255,255,255,.08);
+}
+
+body.app-page .session-item:hover,
+body.app-page .pipeline-item:hover,
+body.app-page .stats-card:hover {
+  background: rgba(255,255,255,.07);
+  border-color: rgba(255,255,255,.14);
+}
+
+body.app-page #session-toolbar,
+body.app-page #pipeline-toolbar,
+body.app-page #inject-bar,
+body.app-page .session-chat-input {
+  background: rgba(14,14,22,.88);
+  border-color: rgba(255,255,255,.08);
+}
+
+body.app-page #messages {
+  max-width: 1280px;
+  padding: 28px 32px;
+}
+
+body.app-page .msg-bubble {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  color: #d7d7e3;
+}
+
+body.app-page .msg.msg-to .msg-bubble {
+  background: rgba(99,102,241,.09);
+  border-color: rgba(99,102,241,.20);
+}
+
+body.app-page .msg-avatar {
+  border-radius: 8px;
+}
+
+body.app-page .msg.msg-from .msg-avatar {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+}
+
+body.app-page .msg.msg-to .msg-avatar {
+  background: linear-gradient(135deg, #f59e0b, #f97316);
+}
+
+body.app-page .msg.msg-human .msg-avatar {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+}
+
+body.app-page .badge.active,
+body.app-page .badge.done,
+body.app-page .badge.paused,
+body.app-page .badge.error {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 20px;
+  padding: 3px 10px;
+}
+
+body.app-page input,
+body.app-page textarea,
+body.app-page select {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  color: var(--text);
+}
+
+body.app-page input:focus,
+body.app-page textarea:focus,
+body.app-page select:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99,102,241,.22);
+}
+
+body.app-page #modal,
+body.app-page #pipeline-modal,
+body.app-page #resume-modal,
+body.app-page .settings-content,
+body.auth-page .auth-card {
+  background: rgba(18,18,26,.98);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0,0,0,.5);
+}
+
+body.auth-page {
+  background:
+    radial-gradient(circle at 20% 0%, rgba(99,102,241,.18), transparent 34%),
+    radial-gradient(circle at 90% 15%, rgba(245,158,11,.10), transparent 28%),
+    #0a0a0f;
+}
+
+body.auth-page .auth-tabs {
+  background: rgba(255,255,255,.035);
+}
+
+body.auth-page .auth-tab.active {
+  background: rgba(99,102,241,.16);
+  color: #fff;
 }

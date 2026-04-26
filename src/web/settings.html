@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings — Turing Cloud</title>
+  <link rel="stylesheet" href="cloud.css">
+  <style>
+    .settings-content { max-width: 860px; }
+    .add-agent-form {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      padding: 28px;
+      margin-top: 16px;
+      display: none;
+    }
+    .add-agent-form.show { display: block; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .provider-selector {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    }
+    .provider-option {
+      padding: 14px 16px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-btn);
+      text-align: center; cursor: pointer;
+      transition: var(--transition);
+      font-size: 0.85rem; font-weight: 500;
+    }
+    .provider-option:hover {
+      background: rgba(255,255,255,0.06);
+      border-color: var(--border-hover);
+    }
+    .provider-option.selected {
+      border-color: var(--accent);
+      background: rgba(99,102,241,0.08);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    .provider-option .prov-icon { font-size: 1.4rem; margin-bottom: 6px; }
+    .provider-option .prov-name { font-size: 0.82rem; }
+
+    .api-key-row {
+      display: flex; align-items: center; gap: 12px;
+      padding: 14px 20px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-btn);
+      margin-bottom: 10px;
+      transition: var(--transition);
+    }
+    .api-key-row:hover {
+      background: var(--bg-card-hover);
+    }
+    .api-key-info { flex: 1; }
+    .api-key-name { font-weight: 600; font-size: 0.9rem; }
+    .api-key-token { font-family: 'SF Mono', monospace; font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+    .api-key-created { font-size: 0.75rem; color: var(--text-muted); white-space: nowrap; }
+  </style>
+</head>
+<body>
+
+<div class="app-layout">
+
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="logo-icon">T</div>
+      <span>Turing Cloud</span>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="/">
+        <span class="nav-icon">◉</span> Sessions
+      </a>
+      <a href="/">
+        <span class="nav-icon">⧫</span> Pipelines
+      </a>
+      <a href="/settings.html" class="active">
+        <span class="nav-icon">⬡</span> Agents
+      </a>
+      <a href="/settings.html">
+        <span class="nav-icon">⚙</span> Settings
+      </a>
+      <a href="/settings.html">
+        <span class="nav-icon">🔑</span> API Keys
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      Turing Cloud v0.1.0
+    </div>
+  </aside>
+
+  <!-- ===================== MAIN ===================== -->
+  <div class="main">
+
+    <!-- Topbar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <h2>Settings</h2>
+      </div>
+      <div class="topbar-right">
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+        <div class="avatar">JY</div>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="settings-content">
+
+        <!-- Tabs -->
+        <div class="tabs">
+          <button class="tab-btn active" onclick="switchTab('agents')">Agents</button>
+          <button class="tab-btn" onclick="switchTab('apikeys')">API Keys</button>
+          <button class="tab-btn" onclick="switchTab('billing')">Billing</button>
+        </div>
+
+        <!-- ===================== AGENTS TAB ===================== -->
+        <div id="tab-agents" class="tab-panel active">
+
+          <div class="flex-between mb-24">
+            <div>
+              <h3>Configured Agents</h3>
+              <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage your AI model connections</p>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="toggleAddAgent()">+ Add Agent</button>
+          </div>
+
+          <!-- Add Agent Form (hidden by default) -->
+          <div id="add-agent-form" class="add-agent-form">
+            <h3 style="margin-bottom: 20px;">Add New Agent</h3>
+
+            <div class="form-group">
+              <label>Provider</label>
+              <div class="provider-selector">
+                <div class="provider-option selected" onclick="selectProvider(this)">
+                  <div class="prov-icon">🤖</div>
+                  <div class="prov-name">Anthropic</div>
+                </div>
+                <div class="provider-option" onclick="selectProvider(this)">
+                  <div class="prov-icon">🧠</div>
+                  <div class="prov-name">OpenAI</div>
+                </div>
+                <div class="provider-option" onclick="selectProvider(this)">
+                  <div class="prov-icon">💬</div>
+                  <div class="prov-name">智谱 AI</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Model</label>
+                <select class="input">
+                  <option>claude-3.5-sonnet</option>
+                  <option>claude-3-opus</option>
+                  <option>claude-3-haiku</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Alias</label>
+                <input type="text" class="input" placeholder="e.g. My Code Reviewer">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>API Key</label>
+              <input type="password" class="input" placeholder="sk-ant-...">
+            </div>
+
+            <div class="form-group">
+              <label>System Prompt (Optional)</label>
+              <textarea class="input" placeholder="Instructions for this agent…"></textarea>
+            </div>
+
+            <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px;">
+              <button class="btn btn-secondary btn-sm" onclick="toggleAddAgent()">Cancel</button>
+              <button class="btn btn-primary btn-sm">Create Agent</button>
+            </div>
+          </div>
+
+          <!-- Agent List -->
+          <div class="agent-list" style="margin-top: 20px;">
+
+            <div class="agent-item">
+              <div class="agent-icon" style="background: linear-gradient(135deg, #6366f1, #8b5cf6);">C</div>
+              <div class="agent-info">
+                <div class="agent-name">Claude Reviewer</div>
+                <div class="agent-model">claude-3.5-sonnet · Anthropic</div>
+              </div>
+              <span class="key-masked">sk-ant-••••••7f3k</span>
+              <span class="badge badge-active">Active</span>
+              <div class="agent-actions">
+                <button class="btn btn-ghost btn-sm">Edit</button>
+                <button class="btn btn-ghost btn-sm" style="color: var(--red);">Delete</button>
+              </div>
+            </div>
+
+            <div class="agent-item">
+              <div class="agent-icon" style="background: linear-gradient(135deg, #22c55e, #16a34a);">G</div>
+              <div class="agent-info">
+                <div class="agent-name">GPT Analyst</div>
+                <div class="agent-model">gpt-4o · OpenAI</div>
+              </div>
+              <span class="key-masked">sk-••••••x9m2</span>
+              <span class="badge badge-active">Active</span>
+              <div class="agent-actions">
+                <button class="btn btn-ghost btn-sm">Edit</button>
+                <button class="btn btn-ghost btn-sm" style="color: var(--red);">Delete</button>
+              </div>
+            </div>
+
+            <div class="agent-item">
+              <div class="agent-icon" style="background: linear-gradient(135deg, #f59e0b, #f97316);">Z</div>
+              <div class="agent-info">
+                <div class="agent-name">GLM Translator</div>
+                <div class="agent-model">glm-4 · 智谱 AI</div>
+              </div>
+              <span class="key-masked">zhipu-••••••a8b1</span>
+              <span class="badge badge-active">Active</span>
+              <div class="agent-actions">
+                <button class="btn btn-ghost btn-sm">Edit</button>
+                <button class="btn btn-ghost btn-sm" style="color: var(--red);">Delete</button>
+              </div>
+            </div>
+
+            <div class="agent-item">
+              <div class="agent-icon" style="background: linear-gradient(135deg, #3b82f6, #6366f1);">Gm</div>
+              <div class="agent-info">
+                <div class="agent-name">Gemini Writer</div>
+                <div class="agent-model">gemini-1.5-pro · Google</div>
+              </div>
+              <span class="key-masked">AIza-••••••q4wz</span>
+              <span class="badge badge-error">Error</span>
+              <div class="agent-actions">
+                <button class="btn btn-ghost btn-sm">Edit</button>
+                <button class="btn btn-ghost btn-sm" style="color: var(--red);">Delete</button>
+              </div>
+            </div>
+
+            <div class="agent-item">
+              <div class="agent-icon" style="background: linear-gradient(135deg, #8b5cf6, #a855f7);">C3</div>
+              <div class="agent-info">
+                <div class="agent-name">Claude Haiku (Fast)</div>
+                <div class="agent-model">claude-3-haiku · Anthropic</div>
+              </div>
+              <span class="key-masked">sk-ant-••••••2d5n</span>
+              <span class="badge badge-active">Active</span>
+              <div class="agent-actions">
+                <button class="btn btn-ghost btn-sm">Edit</button>
+                <button class="btn btn-ghost btn-sm" style="color: var(--red);">Delete</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- ===================== API KEYS TAB ===================== -->
+        <div id="tab-apikeys" class="tab-panel">
+
+          <div class="flex-between mb-24">
+            <div>
+              <h3>Turing API Tokens</h3>
+              <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Tokens for programmatic access to Turing Cloud</p>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="createKey()">+ Create Token</button>
+          </div>
+
+          <!-- Generated key alert (hidden) -->
+          <div id="new-key-alert" style="display:none; background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.2); border-radius: var(--radius-btn); padding: 16px 20px; margin-bottom: 20px;">
+            <div style="font-weight: 600; color: var(--green); font-size: 0.88rem; margin-bottom: 6px;">✓ Token Created</div>
+            <div style="font-family: 'SF Mono', monospace; font-size: 0.82rem; color: var(--text-secondary); word-break: break-all;">
+              tur_sk_a7f3k9x2m4n8b1q5w7e3r6t9y2u4i8o1p5s3d6f9g2h5j8
+            </div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 8px;">
+              Copy this token now — it won't be shown again.
+            </div>
+          </div>
+
+          <div class="api-key-row">
+            <div class="api-key-info">
+              <div class="api-key-name">Production</div>
+              <div class="api-key-token">tur_sk_••••••••••••a7f3</div>
+            </div>
+            <div class="api-key-created">Created Apr 20, 2026</div>
+            <button class="btn btn-ghost btn-sm" title="Copy">📋</button>
+            <button class="btn btn-ghost btn-sm" style="color: var(--red);" title="Delete">🗑</button>
+          </div>
+
+          <div class="api-key-row">
+            <div class="api-key-info">
+              <div class="api-key-name">Development</div>
+              <div class="api-key-token">tur_sk_••••••••••••x9m2</div>
+            </div>
+            <div class="api-key-created">Created Apr 18, 2026</div>
+            <button class="btn btn-ghost btn-sm" title="Copy">📋</button>
+            <button class="btn btn-ghost btn-sm" style="color: var(--red);" title="Delete">🗑</button>
+          </div>
+
+          <div class="api-key-row">
+            <div class="api-key-info">
+              <div class="api-key-name">CI/CD Pipeline</div>
+              <div class="api-key-token">tur_sk_••••••••••••b5n8</div>
+            </div>
+            <div class="api-key-created">Created Apr 12, 2026</div>
+            <button class="btn btn-ghost btn-sm" title="Copy">📋</button>
+            <button class="btn btn-ghost btn-sm" style="color: var(--red);" title="Delete">🗑</button>
+          </div>
+
+        </div>
+
+        <!-- ===================== BILLING TAB ===================== -->
+        <div id="tab-billing" class="tab-panel">
+
+          <div class="mb-24">
+            <h3>Usage & Billing</h3>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Current billing period: Apr 1 – Apr 30, 2026</p>
+          </div>
+
+          <div class="stats-row" style="grid-template-columns: repeat(3, 1fr);">
+            <div class="stat-card">
+              <div class="label">Total Sessions</div>
+              <div class="stat-value">284</div>
+              <div class="stat-sub">this billing period</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">Total Rounds</div>
+              <div class="stat-value">12,847</div>
+              <div class="stat-sub">across all sessions</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">Current Bill</div>
+              <div class="stat-value grad-text">$23.40</div>
+              <div class="stat-sub">billed monthly</div>
+            </div>
+          </div>
+
+          <div class="mb-16" style="margin-top: 32px;">
+            <div class="label mb-16">Daily Usage (Sessions)</div>
+            <div class="chart-placeholder">
+              <div class="chart-bars">
+                <div class="chart-bar" style="height: 30%;"></div>
+                <div class="chart-bar" style="height: 45%;"></div>
+                <div class="chart-bar" style="height: 60%;"></div>
+                <div class="chart-bar" style="height: 35%;"></div>
+                <div class="chart-bar" style="height: 80%;"></div>
+                <div class="chart-bar" style="height: 55%;"></div>
+                <div class="chart-bar" style="height: 70%;"></div>
+                <div class="chart-bar" style="height: 90%;"></div>
+                <div class="chart-bar" style="height: 65%;"></div>
+                <div class="chart-bar" style="height: 50%;"></div>
+                <div class="chart-bar" style="height: 75%;"></div>
+                <div class="chart-bar" style="height: 85%;"></div>
+                <div class="chart-bar" style="height: 40%;"></div>
+                <div class="chart-bar" style="height: 95%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 32px;">
+            <div class="label mb-16">Billing History</div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Period</th>
+                    <th>Sessions</th>
+                    <th>Rounds</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Mar 2026</td>
+                    <td>312</td>
+                    <td>14,291</td>
+                    <td style="color: var(--text-primary); font-weight: 600;">$26.80</td>
+                    <td><span class="badge badge-done">Paid</span></td>
+                  </tr>
+                  <tr>
+                    <td>Feb 2026</td>
+                    <td>198</td>
+                    <td>8,432</td>
+                    <td style="color: var(--text-primary); font-weight: 600;">$15.60</td>
+                    <td><span class="badge badge-done">Paid</span></td>
+                  </tr>
+                  <tr>
+                    <td>Jan 2026</td>
+                    <td>87</td>
+                    <td>3,211</td>
+                    <td style="color: var(--text-primary); font-weight: 600;">$6.40</td>
+                    <td><span class="badge badge-done">Paid</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Tab switching
+function switchTab(tabName) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + tabName).classList.add('active');
+  // find button by text content
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    if (b.textContent.toLowerCase().replace(/\s/g, '') === tabName.toLowerCase().replace(/\s/g, '')) {
+      b.classList.add('active');
+    }
+  });
+}
+
+// Toggle add agent form
+function toggleAddAgent() {
+  const form = document.getElementById('add-agent-form');
+  form.classList.toggle('show');
+}
+
+// Provider selection
+function selectProvider(el) {
+  document.querySelectorAll('.provider-option').forEach(p => p.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+// Create key (demo)
+function createKey() {
+  document.getElementById('new-key-alert').style.display = 'block';
+}
+</script>
+
+<script>
+function toggleTheme(){var h=document.documentElement,b=document.querySelector(".theme-toggle"),d=h.getAttribute("data-theme")!=="light";h.setAttribute("data-theme",d?"light":"dark");b.textContent=d?"☀️":"🌙";localStorage.setItem("turing-theme",d?"light":"dark")}
+(function(){var s=localStorage.getItem("turing-theme")||"dark";document.documentElement.setAttribute("data-theme",s);document.addEventListener("DOMContentLoaded",function(){var b=document.querySelector(".theme-toggle");if(b)b.textContent=s==="light"?"☀️":"🌙"})})();
+</script>
+</body>
+</html>
