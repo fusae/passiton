@@ -834,6 +834,46 @@ textarea.input { resize: vertical; min-height: 80px; }
   justify-content: flex-end;
   gap: 12px;
 }
+.confirm-modal {
+  width: min(420px, 100%);
+}
+
+#toast-container {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+}
+.toast {
+  max-width: 360px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.24);
+  font-size: 0.86rem;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+.toast-success {
+  border-color: rgba(34,197,94,0.28);
+  color: var(--green);
+}
+.toast-error {
+  border-color: rgba(239,68,68,0.28);
+  color: var(--red);
+}
+
 .pipeline-step-form {
   padding: 16px;
   border: 1px solid var(--border);

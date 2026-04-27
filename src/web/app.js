@@ -583,7 +583,7 @@ window.handleLogin = async function(e) {
     state.user = data.user
     navigate('/dashboard')
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
@@ -596,7 +596,7 @@ window.handleRegister = async function(e) {
   const confirmPassword = fd.get('confirmPassword')
 
   if (password !== confirmPassword) {
-    alert('Passwords do not match')
+    showToast('Passwords do not match')
     return
   }
 
@@ -606,7 +606,7 @@ window.handleRegister = async function(e) {
     state.user = data.user
     navigate('/dashboard')
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
@@ -995,7 +995,7 @@ window.pauseSession = async function() {
     await api(`/api/sessions/${state.currentSessionId}/pause`, 'POST')
     renderSession(state.currentSessionId)
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
@@ -1005,18 +1005,23 @@ window.resumeSession = async function() {
     await api(`/api/sessions/${state.currentSessionId}/resume`, 'POST')
     renderSession(state.currentSessionId)
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
 window.stopSession = async function() {
   if (!state.currentSessionId) return
-  if (!confirm('Are you sure you want to stop this task?')) return
+  if (!await confirmAction({
+    title: 'Stop Task',
+    message: 'Stop this task now?',
+    confirmText: 'Stop',
+    danger: true,
+  })) return
   try {
     await api(`/api/sessions/${state.currentSessionId}/stop`, 'POST')
     navigate('/dashboard')
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
@@ -1032,7 +1037,7 @@ window.injectMessage = async function() {
     input.value = ''
     loadSessionDetail(state.currentSessionId)
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
@@ -1040,20 +1045,25 @@ window.extendSessionTimeout = async function() {
   if (!state.currentSessionId) return
   try {
     const result = await api(`/api/sessions/${state.currentSessionId}/extend-timeout`, 'POST')
-    alert(`Timeout extended +${Math.round(result.extensionMs / 60000)}m`)
+    showToast(`Timeout extended +${Math.round(result.extensionMs / 60000)}m`, 'success')
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
 window.deleteCurrentSession = async function() {
   if (!state.currentSessionId) return
-  if (!confirm('Delete this task?')) return
+  if (!await confirmAction({
+    title: 'Delete Task',
+    message: 'Delete this task permanently?',
+    confirmText: 'Delete',
+    danger: true,
+  })) return
   try {
     await api(`/api/sessions/${state.currentSessionId}`, 'DELETE')
     navigate('/dashboard')
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
@@ -1309,9 +1319,9 @@ window.saveGeneralSettings = async function() {
     await api('/api/config', 'PUT', {
       defaults: { maxRounds, mode }
     })
-    alert('Settings saved successfully')
+    showToast('Settings saved successfully', 'success')
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
@@ -1490,7 +1500,7 @@ window.createSession = async function(e) {
     closeModal()
     navigate(`/session/${session.id}`)
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
@@ -1566,17 +1576,22 @@ window.saveAgent = async function(e, originalName) {
     closeModal()
     renderAgentsList()
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
 window.deleteAgent = async function(name) {
-  if (!confirm(`Delete assistant "${name}"?`)) return
+  if (!await confirmAction({
+    title: 'Delete Assistant',
+    message: `Delete assistant "${name}"?`,
+    confirmText: 'Delete',
+    danger: true,
+  })) return
   try {
     state.agents = await api(`/api/agents/${encodeURIComponent(name)}`, 'DELETE')
     renderAgentsList()
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
@@ -1631,18 +1646,23 @@ window.saveApiKey = async function(e) {
     closeModal()
     renderApiKeysList()
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
 window.deleteApiKey = async function(id) {
-  if (!confirm('Delete this API key?')) return
+  if (!await confirmAction({
+    title: 'Delete API Key',
+    message: 'Delete this API key?',
+    confirmText: 'Delete',
+    danger: true,
+  })) return
   try {
     await api(`/api/keys/${encodeURIComponent(id)}`, 'DELETE')
     state.apiKeys = state.apiKeys.filter(key => key.id !== id)
     renderApiKeysList()
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
@@ -1715,7 +1735,7 @@ window.createPipeline = async function(e) {
     closeModal()
     navigate(`/pipeline/${pipeline.id}`)
   } catch (err) {
-    alert(err.message)
+    showToast(err.message)
   }
 }
 
@@ -1802,6 +1822,49 @@ function closeModal() {
 }
 
 window.closeModal = closeModal
+
+function confirmAction({ title, message, confirmText = 'Confirm', danger = false }) {
+  return new Promise((resolve) => {
+    window.__resolveConfirmAction = (value) => {
+      closeModal()
+      resolve(Boolean(value))
+      delete window.__resolveConfirmAction
+    }
+    showModal(`
+      <div class="modal-card confirm-modal">
+        <div class="modal-head">
+          <div>
+            <h3>${escapeHtml(title)}</h3>
+            <p>${escapeHtml(message)}</p>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.__resolveConfirmAction(false)">Cancel</button>
+          <button type="button" class="btn ${danger ? 'btn-danger' : 'btn-primary'}" onclick="window.__resolveConfirmAction(true)">${escapeHtml(confirmText)}</button>
+        </div>
+      </div>
+    `)
+  })
+}
+
+function showToast(message, type = 'error') {
+  const text = String(message || 'Something went wrong')
+  let container = document.getElementById('toast-container')
+  if (!container) {
+    container = document.createElement('div')
+    container.id = 'toast-container'
+    document.body.appendChild(container)
+  }
+  const toast = document.createElement('div')
+  toast.className = `toast toast-${type}`
+  toast.textContent = text
+  container.appendChild(toast)
+  requestAnimationFrame(() => toast.classList.add('show'))
+  setTimeout(() => {
+    toast.classList.remove('show')
+    setTimeout(() => toast.remove(), 250)
+  }, 3000)
+}
 
 function buildContextFromForm(fd) {
   const rules = String(fd.get('contextRules') || '').trim()
