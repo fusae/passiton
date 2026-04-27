@@ -632,7 +632,7 @@ function renderDashboard() {
             <span class="nav-icon">⚙</span> Settings
           </a>
           <a href="/settings">
-            <span class="nav-icon">🔑</span> API Keys
+            <span class="nav-icon">🔑</span> Provider Keys
           </a>
         </nav>
         <div class="sidebar-footer">
@@ -1167,7 +1167,7 @@ async function renderSettings() {
             <span class="nav-icon">⚙</span> Settings
           </a>
           <a href="/settings">
-            <span class="nav-icon">🔑</span> API Keys
+            <span class="nav-icon">🔑</span> Provider Keys
           </a>
         </nav>
         <div class="sidebar-footer">
@@ -1190,7 +1190,7 @@ async function renderSettings() {
           <div style="max-width: 860px;">
             <div class="tabs">
               <button class="tab-btn active" onclick="window.switchSettingsTab('agents')">Assistants</button>
-              <button class="tab-btn" onclick="window.switchSettingsTab('apikeys')">API Keys</button>
+              <button class="tab-btn" onclick="window.switchSettingsTab('apikeys')">Provider Keys</button>
               <button class="tab-btn" onclick="window.switchSettingsTab('general')">General</button>
             </div>
 
@@ -1209,8 +1209,8 @@ async function renderSettings() {
             <div id="tab-apikeys" class="tab-panel">
               <div class="flex-between mb-24">
                 <div>
-                  <h3>API Keys</h3>
-                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage your API keys for different providers</p>
+                  <h3>Provider Keys</h3>
+                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage keys used by assistants and workflows</p>
                 </div>
                 <button class="btn btn-primary btn-sm" onclick="window.showApiKeyModal()">+ Add Key</button>
               </div>
@@ -1284,7 +1284,7 @@ function renderApiKeysList() {
   if (!container) return
 
   if (state.apiKeys.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No API keys stored</p>'
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No provider keys stored</p>'
     return
   }
 
@@ -1293,9 +1293,13 @@ function renderApiKeysList() {
       <div class="agent-icon">${escapeHtml(providerIcon(key.provider))}</div>
       <div class="agent-info">
         <div class="agent-name">${escapeHtml(key.name)}</div>
-        <div class="agent-model">${escapeHtml(providerLabel(key.provider))} · <span class="key-masked">${escapeHtml(key.maskedKey)}</span></div>
+        <div class="agent-model">
+          ${escapeHtml(providerLabel(key.provider))} · <span class="key-masked">${escapeHtml(key.maskedKey)}</span>
+          ${key.usedBy?.length ? ` · used by ${escapeHtml(key.usedBy.join(', '))}` : ''}
+          ${key.source ? ` · ${escapeHtml(keySourceLabel(key.source))}` : ''}
+        </div>
       </div>
-      <button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteApiKey(${jsString(key.id)})'>Delete</button>
+      ${key.readOnly ? '<span class="badge badge-paused">linked</span>' : `<button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteApiKey(${jsString(key.id)})'>Delete</button>`}
     </div>
   `).join('')
 }
@@ -1504,8 +1508,10 @@ window.createSession = async function(e) {
   }
 }
 
-window.showAgentModal = function(name) {
+window.showAgentModal = async function(name) {
+  if (!state.apiKeys.length) await loadApiKeys()
   const existing = state.agents.find(agent => agent.name === name)
+  const keyOptions = providerKeyOptions(existing)
   showModal(`
     <div class="modal-card">
       <div class="modal-head">
@@ -1540,8 +1546,15 @@ window.showAgentModal = function(name) {
           <input class="input" name="baseUrl" value="${escapeAttr(existing?.baseUrl || '')}" placeholder="Optional">
         </div>
         <div class="form-group">
-          <label>API Key ${existing?.hasKey ? '(leave blank to keep existing)' : ''}</label>
-          <input class="input" name="apiKey" type="password" autocomplete="new-password">
+          <label>Provider Key</label>
+          <select class="input" name="keyId">
+            ${existing?.hasKey ? '<option value="">Keep current key</option>' : '<option value="">Paste a new key below</option>'}
+            ${keyOptions}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>New API Key ${existing?.hasKey ? '(optional replacement)' : '(optional)'}</label>
+          <input class="input" name="apiKey" type="password" autocomplete="new-password" placeholder="Paste only when adding or rotating a key">
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -1568,11 +1581,13 @@ window.saveAgent = async function(e, originalName) {
     model: String(fd.get('model') || '').trim() || undefined,
     baseUrl: String(fd.get('baseUrl') || '').trim() || undefined,
     apiKey: String(fd.get('apiKey') || '').trim() || undefined,
+    keyId: String(fd.get('keyId') || '').trim() || undefined,
     timeout: parseInt(fd.get('timeout')) || undefined,
   })
 
   try {
     state.agents = await api(originalName ? `/api/agents/${encodeURIComponent(originalName)}` : '/api/agents', originalName ? 'PUT' : 'POST', body)
+    await loadApiKeys()
     closeModal()
     renderAgentsList()
   } catch (err) {
@@ -1589,6 +1604,7 @@ window.deleteAgent = async function(name) {
   })) return
   try {
     state.agents = await api(`/api/agents/${encodeURIComponent(name)}`, 'DELETE')
+    await loadApiKeys()
     renderAgentsList()
   } catch (err) {
     showToast(err.message)
@@ -1600,7 +1616,7 @@ window.showApiKeyModal = function() {
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>Add API Key</h3>
+          <h3>Add Provider Key</h3>
           <p>Stored encrypted in the local key vault.</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
@@ -1985,6 +2001,24 @@ function compactObject(obj) {
 
 function adapterOption(value, selected) {
   return `<option value="${escapeAttr(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(value)}</option>`
+}
+
+function providerKeyOptions(existing) {
+  return state.apiKeys
+    .filter(key => !key.readOnly && (!existing || providerMatchesAdapter(key.provider, existing.adapter)))
+    .map(key => `<option value="${escapeAttr(key.id)}">${escapeHtml(key.name)} · ${escapeHtml(providerLabel(key.provider))} · ${escapeHtml(key.maskedKey)}</option>`)
+    .join('')
+}
+
+function providerMatchesAdapter(provider, adapter) {
+  if (adapter === 'anthropic-api') return provider === 'anthropic'
+  if (adapter === 'openai-api' || adapter === 'custom-api') return provider === 'openai'
+  if (adapter === 'zhipu-api') return provider === 'zhipu'
+  return true
+}
+
+function keySourceLabel(source) {
+  return ({ vault: 'saved key', assistant: 'assistant key', global: 'global config' })[source] || source
 }
 
 function preferredAgentName(agents, preferredAdapter, avoidName) {

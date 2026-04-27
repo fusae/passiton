@@ -112,6 +112,47 @@ test('agent CRUD stores user API model configs', async () => {
   })
 })
 
+test('provider keys include vault keys and assistant-linked keys', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'provider-keys@example.com')
+    const keyCreate = await fetch(`${baseUrl}/api/keys`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'anthropic',
+        name: 'Claude Vault',
+        key: 'sk-ant-vault1234',
+      }),
+    })
+    assert.equal(keyCreate.status, 201)
+    const storedKey = await keyCreate.json() as { id: string }
+    const keysResponse = await fetch(`${baseUrl}/api/keys`, { headers: authHeaders(auth.token) })
+    assert.equal(keysResponse.status, 200)
+    const keys = await keysResponse.json() as Array<{ id: string; source: string; maskedKey: string }>
+    const vaultKey = keys.find((key) => key.id === storedKey.id && key.source === 'vault')
+    assert.ok(vaultKey)
+
+    const createAgent = await fetch(`${baseUrl}/api/agents`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'claude-api',
+        adapter: 'anthropic-api',
+        keyId: vaultKey.id,
+        model: 'claude-sonnet-4-20250514',
+      }),
+    })
+    assert.equal(createAgent.status, 201)
+
+    const listed = await fetch(`${baseUrl}/api/keys`, { headers: authHeaders(auth.token) })
+    assert.equal(listed.status, 200)
+    const payload = await listed.json() as Array<{ source: string; name: string; maskedKey: string; readOnly?: boolean; usedBy?: string[] }>
+    assert.ok(payload.some((key) => key.source === 'vault' && key.name === 'Claude Vault' && key.maskedKey === '****1234'))
+    assert.ok(payload.some((key) => key.source === 'assistant' && key.name === 'claude-api key' && key.readOnly && key.usedBy?.includes('claude-api')))
+    assert.ok(!JSON.stringify(payload).includes('sk-ant-vault1234'))
+  })
+})
+
 test('GET /api/pipelines/:id returns pipeline with session details', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'pipelines@example.com')

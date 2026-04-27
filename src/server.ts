@@ -45,6 +45,17 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
   'zhipu-api': 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
 }
 
+type ProviderKeyInfo = {
+  id: string
+  provider: state.StoredApiKeyRecord['provider']
+  name: string
+  maskedKey: string
+  createdAt: number
+  source: 'vault' | 'assistant' | 'global'
+  usedBy?: string[]
+  readOnly?: boolean
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html',
   '.js': 'application/javascript',
@@ -262,6 +273,7 @@ function parseApiAgentConfigBody(body: unknown, existing?: state.UserAgentRecord
   name: string
   adapter: string
   apiKey?: string
+  keyId?: string
   model?: string
   baseUrl?: string
   timeout?: number
@@ -281,6 +293,7 @@ function parseApiAgentConfigBody(body: unknown, existing?: state.UserAgentRecord
     name,
     adapter,
     apiKey: optionalString(data.apiKey, 'apiKey'),
+    keyId: optionalString(data.keyId, 'keyId'),
     model: optionalString(data.model, 'model') ?? existing?.model,
     baseUrl,
     timeout: optionalPositiveInt(data.timeout, 'timeout') ?? existing?.timeout,
@@ -371,6 +384,43 @@ function apiAgentInfoFromRecord(record: state.UserAgentRecord): ApiAgentInfo {
   }
 }
 
+function providerKeyList(userId: string): ProviderKeyInfo[] {
+  const keys = listKeys(userId).map((key) => ({
+    ...key,
+    source: 'vault' as const,
+    usedBy: [] as string[],
+  }))
+  const result: ProviderKeyInfo[] = [...keys]
+  for (const record of state.listUserAgents(userId)) {
+    const apiKey = decryptUserAgentKey(record)
+    if (!apiKey) continue
+    result.push({
+      id: `assistant:${record.name}`,
+      provider: providerValueForAdapter(record.adapter),
+      name: `${record.name} key`,
+      maskedKey: maskAgentKey(apiKey),
+      createdAt: record.createdAt,
+      source: 'assistant',
+      usedBy: [record.name],
+      readOnly: true,
+    })
+  }
+  for (const [name, cfg] of Object.entries(loadConfig().agents)) {
+    if (!API_ADAPTERS.has(cfg.adapter) || !cfg.apiKey) continue
+    result.push({
+      id: `global:${name}`,
+      provider: providerValueForAdapter(cfg.adapter),
+      name: `${name} key`,
+      maskedKey: maskAgentKey(cfg.apiKey),
+      createdAt: 0,
+      source: 'global',
+      usedBy: [name],
+      readOnly: true,
+    })
+  }
+  return result
+}
+
 function apiConfigHealthy(cfg: AgentConfig): boolean {
   try {
     return Boolean(cfg.apiKey && createAdapter(cfg))
@@ -381,6 +431,22 @@ function apiConfigHealthy(cfg: AgentConfig): boolean {
 
 function providerForAdapter(adapter: string): string {
   return PROVIDER_BY_ADAPTER[adapter] ?? 'Custom'
+}
+
+function providerValueForAdapter(adapter: string): state.StoredApiKeyRecord['provider'] {
+  if (adapter === 'anthropic-api') return 'anthropic'
+  if (adapter === 'openai-api' || adapter === 'custom-api') return 'openai'
+  if (adapter === 'zhipu-api') return 'zhipu'
+  return 'openai'
+}
+
+function resolveApiKeySelection(userId: string, parsed: { apiKey?: string; keyId?: string }): string | undefined {
+  if (parsed.apiKey) return parsed.apiKey
+  if (!parsed.keyId) return undefined
+  if (parsed.keyId.startsWith('assistant:') || parsed.keyId.startsWith('global:')) {
+    throw new HttpError(400, 'Read-only keys cannot be rebound; paste a key or choose a saved Provider Key')
+  }
+  return decryptKey(userId, parsed.keyId).key
 }
 
 function parseAgentRef(value: unknown, field: string): { adapter: string; label?: string } {
@@ -639,7 +705,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // GET /api/keys
       if (pathname === '/api/keys' && method === 'GET') {
-        return json(res, 200, listKeys(authUser!.userId))
+        return json(res, 200, providerKeyList(authUser!.userId))
       }
 
       // POST /api/keys
@@ -670,7 +736,8 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // POST /api/agents
       if (pathname === '/api/agents' && method === 'POST') {
         const parsed = parseApiAgentConfigBody(await parseBody(req))
-        const encrypted = parsed.apiKey ? encryptSecret(authUser!.userId, parsed.apiKey) : {}
+        const apiKey = resolveApiKeySelection(authUser!.userId, parsed)
+        const encrypted = apiKey ? encryptSecret(authUser!.userId, apiKey) : {}
         try {
           state.createUserAgent({
             id: crypto.randomUUID(),
@@ -697,7 +764,8 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const current = state.getUserAgent(authUser!.userId, decodeURIComponent(userAgentMatch[1]))
         if (!current) return json(res, 404, { error: 'Not found' })
         const parsed = parseApiAgentConfigBody(await parseBody(req), current)
-        const encrypted = parsed.apiKey ? encryptSecret(authUser!.userId, parsed.apiKey) : undefined
+        const apiKey = resolveApiKeySelection(authUser!.userId, parsed)
+        const encrypted = apiKey ? encryptSecret(authUser!.userId, apiKey) : undefined
         try {
           state.updateUserAgent(authUser!.userId, current.name, {
             name: parsed.name,
