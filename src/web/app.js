@@ -379,16 +379,16 @@ function renderLanding() {
 
     <section class="hero">
       <div class="hero-badge fade-in-up">
-        <span>✦</span> Agent Orchestration Platform
+        <span>✦</span> Assistant Workflow Platform
       </div>
 
       <h1 class="fade-in-up delay-1">
-        让你的 AI Agent<br><span class="grad-text">互相对话</span>
+        让你的 AI 助手<br><span class="grad-text">协同工作</span>
       </h1>
 
       <p class="hero-sub fade-in-up delay-2">
-        Turing Cloud 是一个 Agent 间通信编排平台。自带 API Key，灵活路由，
-        按 Session 计费 —— 让多个 AI 模型协作完成复杂任务。
+        Turing Cloud 是一个 AI 助手协作平台。自带 API Key，灵活路由，
+        用任务和工作流让多个 AI 模型协作完成复杂任务。
       </p>
 
       <div class="hero-cta fade-in-up delay-3">
@@ -404,7 +404,7 @@ function renderLanding() {
 
     <section class="arch-section" id="architecture">
       <h2 class="fade-in-up">工作原理</h2>
-      <p class="section-sub fade-in-up delay-1">Agent ↔ Turing ↔ Agent —— 简洁而强大的通信编排</p>
+      <p class="section-sub fade-in-up delay-1">Assistant A ↔ Turing ↔ Assistant B —— 简洁而强大的任务编排</p>
 
       <div class="arch-diagram fade-in-up delay-2">
         <div class="arch-col">
@@ -447,16 +447,16 @@ function renderLanding() {
 
     <section class="features-section" id="features">
       <h2>为什么选择 Turing Cloud</h2>
-      <p class="section-sub">三个核心优势，让 Agent 协作变得简单</p>
+      <p class="section-sub">三个核心优势，让助手协作变得简单</p>
 
       <div class="features-grid">
         <div class="feature-card fade-in-up delay-1">
           <div class="feature-icon" style="background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15));">
             🔀
           </div>
-          <h3>Agent 编排</h3>
+          <h3>助手编排</h3>
           <p>
-            通过 Session 和 Pipeline 灵活定义 Agent 之间的通信拓扑。
+            通过任务和工作流灵活定义助手之间的通信拓扑。
             支持串行、并行、条件分支 —— 像搭积木一样构建复杂工作流。
           </p>
         </div>
@@ -478,7 +478,7 @@ function renderLanding() {
           </div>
           <h3>按需计费</h3>
           <p>
-            只为实际使用的 Session 付费。透明的按轮次计费模式，
+            只为实际使用的任务付费。透明的按回合计费模式，
             没有包月、没有隐藏费用。用多少、付多少。
           </p>
         </div>
@@ -487,10 +487,10 @@ function renderLanding() {
 
     <section class="cta-section">
       <h2 class="fade-in-up" style="margin-bottom: 16px;">
-        准备好让 Agent 协作了吗？
+        准备好让助手协作了吗？
       </h2>
       <p class="fade-in-up delay-1" style="color: var(--text-secondary); font-size: 1.05rem; margin-bottom: 36px;">
-        免费开始，按需扩展。几分钟内就能创建第一个 Session。
+        免费开始，按需扩展。几分钟内就能创建第一个任务。
       </p>
       <div class="fade-in-up delay-2">
         <a href="/dashboard" class="btn btn-primary" style="padding: 14px 36px; font-size: 1rem;">
@@ -516,7 +516,7 @@ function renderLogin() {
             <div class="logo-icon" style="width: 36px; height: 36px; font-size: 1rem;">T</div>
             <h2 style="margin: 0;">Turing Cloud</h2>
           </div>
-          <p style="color: var(--text-secondary); font-size: 0.9rem;">Agent Orchestration Platform</p>
+          <p style="color: var(--text-secondary); font-size: 0.9rem;">Assistant Workflow Platform</p>
         </div>
 
         <div class="tabs" style="margin-bottom: 24px;">
@@ -620,13 +620,13 @@ function renderDashboard() {
         </div>
         <nav class="sidebar-nav">
           <a href="/dashboard" class="active">
-            <span class="nav-icon">◉</span> Sessions
+            <span class="nav-icon">◉</span> Tasks
           </a>
           <a href="/dashboard" onclick="window.switchDashboardView('pipelines'); return false;">
-            <span class="nav-icon">⧫</span> Pipelines
+            <span class="nav-icon">⧫</span> Workflows
           </a>
           <a href="/settings">
-            <span class="nav-icon">⬡</span> Agents
+            <span class="nav-icon">⬡</span> Assistants
           </a>
           <a href="/settings">
             <span class="nav-icon">⚙</span> Settings
@@ -645,8 +645,8 @@ function renderDashboard() {
           <div class="topbar-left">
             <h2>Dashboard</h2>
             <div class="view-toggle">
-              <button class="active" onclick="window.switchDashboardView('sessions')">Sessions</button>
-              <button onclick="window.switchDashboardView('pipelines')">Pipelines</button>
+              <button class="active" onclick="window.switchDashboardView('sessions')">Tasks</button>
+              <button onclick="window.switchDashboardView('pipelines')">Workflows</button>
             </div>
           </div>
           <div class="topbar-right">
@@ -659,7 +659,7 @@ function renderDashboard() {
         <div class="content">
           <div class="stats-row">
             <div class="stat-card">
-              <div class="label">Active Sessions</div>
+              <div class="label">Active Tasks</div>
               <div class="stat-value grad-text" id="stat-active">0</div>
               <div class="stat-sub">running right now</div>
             </div>
@@ -669,12 +669,12 @@ function renderDashboard() {
               <div class="stat-sub">↑ vs yesterday</div>
             </div>
             <div class="stat-card">
-              <div class="label">Avg Rounds</div>
+              <div class="label">Avg Turns</div>
               <div class="stat-value" id="stat-rounds">0</div>
-              <div class="stat-sub">across all sessions</div>
+              <div class="stat-sub">across all tasks</div>
             </div>
             <div class="stat-card">
-              <div class="label">Active Agents</div>
+              <div class="label">Active Assistants</div>
               <div class="stat-value" id="stat-agents">0</div>
               <div class="stat-sub">providers configured</div>
             </div>
@@ -682,16 +682,16 @@ function renderDashboard() {
 
           <div id="view-sessions">
             <div class="flex-between mb-24">
-              <h3>Recent Sessions</h3>
-              <input type="text" class="input" placeholder="Search sessions..." style="width: 240px;">
+              <h3>Recent Tasks</h3>
+              <input type="text" class="input" placeholder="Search tasks..." style="width: 240px;">
             </div>
             <div id="session-cards" class="session-cards"></div>
           </div>
 
           <div id="view-pipelines" style="display: none;">
             <div class="flex-between mb-24">
-              <h3>Pipelines</h3>
-              <button class="btn btn-primary btn-sm" onclick="window.showNewPipelineModal()">+ New Pipeline</button>
+              <h3>Workflows</h3>
+              <button class="btn btn-primary btn-sm" onclick="window.showNewPipelineModal()">+ New Workflow</button>
             </div>
             <div id="pipeline-cards" class="pipeline-cards"></div>
           </div>
@@ -736,7 +736,7 @@ function renderSessionCards() {
   if (!container) return
 
   if (state.sessions.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No sessions yet. Create your first one!</p>'
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No tasks yet. Create your first one!</p>'
     return
   }
 
@@ -752,7 +752,7 @@ function renderSessionCards() {
         <span>${escapeHtml(session.to.label || session.to.adapter)}</span>
       </div>
       <div class="session-card-meta">
-        <span>⟳ ${session.currentRound} rounds</span>
+        <span>⟳ ${session.currentRound} turns</span>
         <span>⏱ ${formatTime(session.updatedAt)}</span>
       </div>
     </a>
@@ -764,7 +764,7 @@ function renderPipelineCards() {
   if (!container) return
 
   if (state.pipelines.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No pipelines yet.</p>'
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No workflows yet.</p>'
     return
   }
 
@@ -774,7 +774,7 @@ function renderPipelineCards() {
         <span style="font-weight: 600;">${escapeHtml(pipeline.name)}</span>
         <span class="badge badge-${pipeline.status}">${pipeline.status}</span>
       </div>
-      <p style="font-size: 0.82rem; color: var(--text-muted);">${pipeline.sessions.length} sessions</p>
+      <p style="font-size: 0.82rem; color: var(--text-muted);">${pipeline.sessions.length} tasks</p>
     </a>
   `).join('')
 }
@@ -805,7 +805,7 @@ async function renderSession(id) {
   try {
     session = await api(`/api/sessions/${id}`)
   } catch (err) {
-    document.body.innerHTML = '<div>Session not found</div>'
+    document.body.innerHTML = '<div>Task not found</div>'
     return
   }
   state.currentSession = session
@@ -819,13 +819,13 @@ async function renderSession(id) {
         </div>
         <nav class="sidebar-nav">
           <a href="/dashboard">
-            <span class="nav-icon">◉</span> Sessions
+            <span class="nav-icon">◉</span> Tasks
           </a>
           <a href="/dashboard">
-            <span class="nav-icon">⧫</span> Pipelines
+            <span class="nav-icon">⧫</span> Workflows
           </a>
           <a href="/settings">
-            <span class="nav-icon">⬡</span> Agents
+            <span class="nav-icon">⬡</span> Assistants
           </a>
           <a href="/settings">
             <span class="nav-icon">⚙</span> Settings
@@ -862,7 +862,7 @@ async function renderSession(id) {
             </div>
             <div class="session-chat-input">
               <div class="inject-bar">
-                <input type="text" class="input" id="inject-input" placeholder="Inject a message into this session…">
+                <input type="text" class="input" id="inject-input" placeholder="Inject a message into this task…">
                 <button class="btn btn-primary btn-sm" onclick="window.injectMessage()">Send</button>
               </div>
             </div>
@@ -886,18 +886,18 @@ function renderSessionPanel(session) {
   const progress = session.maxRounds ? Math.min(100, session.currentRound / session.maxRounds * 100) : 0
   panel.innerHTML = `
     <div class="panel-section">
-      <div class="label mb-16">Session Info</div>
+      <div class="label mb-16">Task Info</div>
       <div class="panel-kv">
         <div class="panel-kv-row">
-          <span class="kv-label">Session ID</span>
+          <span class="kv-label">Task ID</span>
           <span class="kv-value mono" style="font-size: 0.78rem;">${escapeHtml(session.id.slice(0, 12))}</span>
         </div>
         <div class="panel-kv-row">
-          <span class="kv-label">From Agent</span>
+          <span class="kv-label">Assistant A</span>
           <span class="kv-value">${escapeHtml(agentLabel(session.from))}</span>
         </div>
         <div class="panel-kv-row">
-          <span class="kv-label">To Agent</span>
+          <span class="kv-label">Assistant B</span>
           <span class="kv-value">${escapeHtml(agentLabel(session.to))}</span>
         </div>
         <div class="panel-kv-row">
@@ -906,7 +906,7 @@ function renderSessionPanel(session) {
         </div>
         ${session.templateId ? `<div class="panel-kv-row"><span class="kv-label">Template</span><span class="kv-value">${escapeHtml(session.templateId)}</span></div>` : ''}
         <div class="panel-kv-row">
-          <span class="kv-label">Rounds</span>
+          <span class="kv-label">Turns</span>
           <span class="kv-value">${session.currentRound} / ${session.maxRounds}</span>
         </div>
         <div class="panel-kv-row">
@@ -925,7 +925,7 @@ function renderSessionPanel(session) {
 
     <div class="panel-section">
       <div class="label mb-8">Progress</div>
-      <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 8px;">Round ${session.currentRound} of ${session.maxRounds}</p>
+      <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 8px;">Turn ${session.currentRound} of ${session.maxRounds}</p>
       <div class="progress-bar">
         <div class="progress-bar-fill" style="width: ${progress}%;"></div>
       </div>
@@ -934,7 +934,7 @@ function renderSessionPanel(session) {
     ${session.errorMessage ? `
       <div class="divider"></div>
       <div class="error-box">
-        <div class="error-title">${escapeHtml(session.errorType || 'Session error')}</div>
+        <div class="error-title">${escapeHtml(session.errorType || 'Task error')}</div>
         <div class="error-detail">${escapeHtml(session.errorMessage)}</div>
       </div>
     ` : ''}
@@ -942,7 +942,7 @@ function renderSessionPanel(session) {
     ${session.lastAgentOutput ? `
       <div class="divider"></div>
       <div class="panel-section">
-        <div class="label mb-8">Last Agent Output</div>
+        <div class="label mb-8">Last Assistant Output</div>
         <pre class="code-block">${escapeHtml(session.lastAgentOutput)}</pre>
       </div>
     ` : ''}
@@ -967,7 +967,7 @@ function renderSessionMessages() {
         <div>
           <div class="chat-bubble">${renderMarkdown(msg.content)}</div>
           <div class="chat-meta">
-            <span>${escapeHtml(msg.from)} · Round ${msg.round} · ${new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+            <span>${escapeHtml(msg.from)} · Turn ${msg.round} · ${new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
           <button class="msg-copy-btn" onclick="window.copyMessage(${jsString(msg.id)})" title="Copy">Copy</button>
           </div>
         </div>
@@ -1004,7 +1004,7 @@ window.resumeSession = async function() {
 
 window.stopSession = async function() {
   if (!state.currentSessionId) return
-  if (!confirm('Are you sure you want to stop this session?')) return
+  if (!confirm('Are you sure you want to stop this task?')) return
   try {
     await api(`/api/sessions/${state.currentSessionId}/stop`, 'POST')
     navigate('/dashboard')
@@ -1041,7 +1041,7 @@ window.extendSessionTimeout = async function() {
 
 window.deleteCurrentSession = async function() {
   if (!state.currentSessionId) return
-  if (!confirm('Delete this session?')) return
+  if (!confirm('Delete this task?')) return
   try {
     await api(`/api/sessions/${state.currentSessionId}`, 'DELETE')
     navigate('/dashboard')
@@ -1077,17 +1077,17 @@ function renderPipeline(id) {
       <aside class="sidebar">
         <div class="sidebar-brand"><div class="logo-icon">T</div><span>Turing Cloud</span></div>
         <nav class="sidebar-nav">
-          <a href="/dashboard"><span class="nav-icon">◉</span> Sessions</a>
-          <a href="/dashboard" onclick="window.switchDashboardView('pipelines'); return false;" class="active"><span class="nav-icon">⧫</span> Pipelines</a>
+          <a href="/dashboard"><span class="nav-icon">◉</span> Tasks</a>
+          <a href="/dashboard" onclick="window.switchDashboardView('pipelines'); return false;" class="active"><span class="nav-icon">⧫</span> Workflows</a>
           <a href="/settings"><span class="nav-icon">⚙</span> Settings</a>
         </nav>
       </aside>
       <div class="main">
         <header class="topbar">
-          <div class="topbar-left"><a href="/dashboard" class="btn btn-ghost btn-sm">← Back</a><h2>Pipeline</h2></div>
+          <div class="topbar-left"><a href="/dashboard" class="btn btn-ghost btn-sm">← Back</a><h2>Workflow</h2></div>
           <div class="topbar-right"><button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>${renderUserMenu()}</div>
         </header>
-        <div class="content" id="pipeline-detail"><p style="color: var(--text-muted);">Loading pipeline...</p></div>
+        <div class="content" id="pipeline-detail"><p style="color: var(--text-muted);">Loading workflow...</p></div>
       </div>
     </div>
   `
@@ -1103,7 +1103,7 @@ function renderPipelineBody(pipeline) {
     <div class="flex-between mb-24">
       <div>
         <h2>${escapeHtml(pipeline.name)}</h2>
-        <p style="color: var(--text-muted); font-size: 0.86rem;">${sessions.length} sessions · ${new Date(pipeline.createdAt).toLocaleString()}</p>
+        <p style="color: var(--text-muted); font-size: 0.86rem;">${sessions.length} tasks · ${new Date(pipeline.createdAt).toLocaleString()}</p>
       </div>
       <span class="badge badge-${pipeline.status}">${pipeline.status}</span>
     </div>
@@ -1138,13 +1138,13 @@ async function renderSettings() {
         </div>
         <nav class="sidebar-nav">
           <a href="/dashboard">
-            <span class="nav-icon">◉</span> Sessions
+            <span class="nav-icon">◉</span> Tasks
           </a>
           <a href="/dashboard">
-            <span class="nav-icon">⧫</span> Pipelines
+            <span class="nav-icon">⧫</span> Workflows
           </a>
           <a href="/settings" class="active">
-            <span class="nav-icon">⬡</span> Agents
+            <span class="nav-icon">⬡</span> Assistants
           </a>
           <a href="/settings">
             <span class="nav-icon">⚙</span> Settings
@@ -1172,7 +1172,7 @@ async function renderSettings() {
         <div class="content">
           <div style="max-width: 860px;">
             <div class="tabs">
-              <button class="tab-btn active" onclick="window.switchSettingsTab('agents')">Agents</button>
+              <button class="tab-btn active" onclick="window.switchSettingsTab('agents')">Assistants</button>
               <button class="tab-btn" onclick="window.switchSettingsTab('apikeys')">API Keys</button>
               <button class="tab-btn" onclick="window.switchSettingsTab('general')">General</button>
             </div>
@@ -1180,10 +1180,10 @@ async function renderSettings() {
             <div id="tab-agents" class="tab-panel active">
               <div class="flex-between mb-24">
                 <div>
-                  <h3>Configured Agents</h3>
+                  <h3>Configured Assistants</h3>
                   <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage your AI model connections</p>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="window.showAgentModal()">+ Add Agent</button>
+                <button class="btn btn-primary btn-sm" onclick="window.showAgentModal()">+ Add Assistant</button>
               </div>
 
               <div class="agent-list" id="agents-list"></div>
@@ -1204,14 +1204,14 @@ async function renderSettings() {
               <h3 class="mb-24">General Settings</h3>
 
               <div class="form-group">
-                <label>Default Max Rounds</label>
+                <label>Default Max Turns</label>
                 <input type="number" class="input" value="${state.config?.defaults?.maxRounds || 20}" id="max-rounds-input">
               </div>
 
               <div class="form-group">
                 <label>Default Mode</label>
                 <select class="input" id="mode-input">
-                  <option value="collaborate" ${state.config?.defaults?.mode === 'collaborate' ? 'selected' : ''}>Collaborate</option>
+                  <option value="collaborate" ${state.config?.defaults?.mode === 'collaborate' ? 'selected' : ''}>Collaboration</option>
                   <option value="discuss" ${state.config?.defaults?.mode === 'discuss' ? 'selected' : ''}>Discuss</option>
                   <option value="review" ${state.config?.defaults?.mode === 'review' ? 'selected' : ''}>Review</option>
                   <option value="freeform" ${state.config?.defaults?.mode === 'freeform' ? 'selected' : ''}>Freeform</option>
@@ -1236,7 +1236,7 @@ function renderAgentsList() {
   if (!container) return
 
   if (state.agents.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No agents configured</p>'
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No assistants configured</p>'
     return
   }
 
@@ -1373,7 +1373,7 @@ window.showNewSessionModal = async function(templateId = 'custom') {
       <div class="modal-head">
         <div>
           <h3>New Task</h3>
-          <p>Create an agent-to-agent conversation.</p>
+          <p>Create an assistant collaboration task.</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
       </div>
@@ -1388,11 +1388,11 @@ window.showNewSessionModal = async function(templateId = 'custom') {
         <input type="hidden" name="templateId" value="${escapeAttr(template?.id || 'custom')}">
         <div class="form-row">
           <div class="form-group">
-            <label>From</label>
+            <label>Assistant A</label>
             <select class="input" name="from" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultFrom) || options}</select>
           </div>
           <div class="form-group">
-            <label>To</label>
+            <label>Assistant B</label>
             <select class="input" name="to" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultTo) || options}</select>
           </div>
         </div>
@@ -1400,24 +1400,24 @@ window.showNewSessionModal = async function(templateId = 'custom') {
           <div class="form-group">
             <label>Mode</label>
             <select class="input" name="mode">
-              <option value="collaborate" ${mode === 'collaborate' ? 'selected' : ''}>Collaborate</option>
+              <option value="collaborate" ${mode === 'collaborate' ? 'selected' : ''}>Collaboration</option>
               <option value="discuss" ${mode === 'discuss' ? 'selected' : ''}>Discuss</option>
               <option value="review" ${mode === 'review' ? 'selected' : ''}>Review</option>
               <option value="freeform" ${mode === 'freeform' ? 'selected' : ''}>Freeform</option>
             </select>
           </div>
           <div class="form-group">
-            <label>Max Rounds</label>
+            <label>Max Turns</label>
             <input class="input" type="number" name="maxRounds" min="1" value="${maxRounds}">
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>From System Prompt</label>
+            <label>Assistant A System Prompt</label>
             <textarea class="input" name="systemPromptFrom" rows="4">${escapeHtml(prompts.from)}</textarea>
           </div>
           <div class="form-group">
-            <label>To System Prompt</label>
+            <label>Assistant B System Prompt</label>
             <textarea class="input" name="systemPromptTo" rows="4">${escapeHtml(prompts.to)}</textarea>
           </div>
         </div>
@@ -1493,7 +1493,7 @@ window.showAgentModal = function(name) {
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>${existing ? 'Edit Agent' : 'Add Agent'}</h3>
+          <h3>${existing ? 'Edit Assistant' : 'Add Assistant'}</h3>
           <p>Configure an API-backed model.</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
@@ -1564,7 +1564,7 @@ window.saveAgent = async function(e, originalName) {
 }
 
 window.deleteAgent = async function(name) {
-  if (!confirm(`Delete agent "${name}"?`)) return
+  if (!confirm(`Delete assistant "${name}"?`)) return
   try {
     state.agents = await api(`/api/agents/${encodeURIComponent(name)}`, 'DELETE')
     renderAgentsList()
@@ -1645,15 +1645,15 @@ window.showNewPipelineModal = function() {
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>New Pipeline</h3>
-          <p>Run multiple sessions with optional dependencies.</p>
+          <h3>New Workflow</h3>
+          <p>Run multiple tasks with optional dependencies.</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
       </div>
       <form onsubmit="window.createPipeline(event)">
         <div class="form-group">
           <label>Name</label>
-          <input class="input" name="name" required placeholder="Frontend review pipeline">
+          <input class="input" name="name" required placeholder="Frontend review workflow">
         </div>
         <div id="pipeline-steps-form">
           ${pipelineStepForm(0, options)}
@@ -1661,7 +1661,7 @@ window.showNewPipelineModal = function() {
         <button type="button" class="btn btn-secondary btn-sm" onclick="window.addPipelineStep()">+ Add Step</button>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">Create Pipeline</button>
+          <button type="submit" class="btn btn-primary">Create Workflow</button>
         </div>
       </form>
     </div>
@@ -1722,11 +1722,11 @@ function pipelineStepForm(index, options) {
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>From</label>
+          <label>Assistant A</label>
           <select class="input" name="from" required>${options}</select>
         </div>
         <div class="form-group">
-          <label>To</label>
+          <label>Assistant B</label>
           <select class="input" name="to" required>${options}</select>
         </div>
       </div>
@@ -1734,14 +1734,14 @@ function pipelineStepForm(index, options) {
         <div class="form-group">
           <label>Mode</label>
           <select class="input" name="mode">
-            <option value="collaborate">Collaborate</option>
+            <option value="collaborate">Collaboration</option>
             <option value="discuss">Discuss</option>
             <option value="review">Review</option>
             <option value="freeform">Freeform</option>
           </select>
         </div>
         <div class="form-group">
-          <label>Max Rounds</label>
+          <label>Max Turns</label>
           <input class="input" name="maxRounds" type="number" min="1" value="${state.config?.defaults?.maxRounds || 5}">
         </div>
       </div>
@@ -1885,10 +1885,10 @@ function buildSessionExport(session, messages) {
   const lines = [
     `# ${agentLabel(session.from)} -> ${agentLabel(session.to)}`,
     '',
-    `- Session ID: ${session.id}`,
+    `- Task ID: ${session.id}`,
     `- Status: ${session.status}`,
     `- Mode: ${session.mode}`,
-    `- Rounds: ${session.currentRound}/${session.maxRounds}`,
+    `- Turns: ${session.currentRound}/${session.maxRounds}`,
     `- Exported At: ${new Date().toLocaleString()}`,
     '',
   ]
@@ -1896,7 +1896,7 @@ function buildSessionExport(session, messages) {
   let lastRound = null
   for (const msg of messages) {
     if (msg.round !== lastRound) {
-      lines.push(`## Round ${msg.round}`, '')
+      lines.push(`## Turn ${msg.round}`, '')
       lastRound = msg.round
     }
     lines.push(`### ${msg.from === 'human' ? 'you' : msg.from} · ${new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`, '')

@@ -71,13 +71,13 @@
     </div>
     <nav class="sidebar-nav">
       <a href="dashboard.html">
-        <span class="nav-icon">◉</span> Sessions
+        <span class="nav-icon">◉</span> Tasks
       </a>
       <a href="dashboard.html">
-        <span class="nav-icon">⧫</span> Pipelines
+        <span class="nav-icon">⧫</span> Workflows
       </a>
       <a href="settings.html" class="active">
-        <span class="nav-icon">⬡</span> Agents
+        <span class="nav-icon">⬡</span> Assistants
       </a>
       <a href="settings.html">
         <span class="nav-icon">⚙</span> Settings
@@ -110,7 +110,7 @@
 
         <!-- Tabs -->
         <div class="tabs">
-          <button class="tab-btn active" onclick="switchTab('agents')">Agents</button>
+          <button class="tab-btn active" onclick="switchTab('agents')">Assistants</button>
           <button class="tab-btn" onclick="switchTab('apikeys')">API Keys</button>
           <button class="tab-btn" onclick="switchTab('billing')">Billing</button>
         </div>
@@ -120,15 +120,15 @@
 
           <div class="flex-between mb-24">
             <div>
-              <h3>Configured Agents</h3>
+              <h3>Configured Assistants</h3>
               <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage your AI model connections</p>
             </div>
-            <button class="btn btn-primary btn-sm" onclick="toggleAddAgent()">+ Add Agent</button>
+            <button class="btn btn-primary btn-sm" onclick="toggleAddAgent()">+ Add Assistant</button>
           </div>
 
-          <!-- Add Agent Form (hidden by default) -->
+          <!-- Add Assistant Form (hidden by default) -->
           <div id="add-agent-form" class="add-agent-form">
-            <h3 style="margin-bottom: 20px;">Add New Agent</h3>
+            <h3 style="margin-bottom: 20px;">Add New Assistant</h3>
 
             <div class="form-group">
               <label>Provider</label>
@@ -170,16 +170,16 @@
 
             <div class="form-group">
               <label>System Prompt (Optional)</label>
-              <textarea class="input" placeholder="Instructions for this agent…"></textarea>
+              <textarea class="input" placeholder="Instructions for this assistant…"></textarea>
             </div>
 
             <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px;">
               <button class="btn btn-secondary btn-sm" onclick="toggleAddAgent()">Cancel</button>
-              <button class="btn btn-primary btn-sm">Create Agent</button>
+              <button class="btn btn-primary btn-sm">Create Assistant</button>
             </div>
           </div>
 
-          <!-- Agent List -->
+          <!-- Assistant List -->
           <div class="agent-list" style="margin-top: 20px;">
 
             <div class="agent-item">
@@ -299,7 +299,7 @@
 
           <div class="api-key-row">
             <div class="api-key-info">
-              <div class="api-key-name">CI/CD Pipeline</div>
+              <div class="api-key-name">CI/CD Workflow</div>
               <div class="api-key-token">tur_sk_••••••••••••b5n8</div>
             </div>
             <div class="api-key-created">Created Apr 12, 2026</div>
@@ -319,14 +319,14 @@
 
           <div class="stats-row" style="grid-template-columns: repeat(3, 1fr);">
             <div class="stat-card">
-              <div class="label">Total Sessions</div>
+              <div class="label">Total Tasks</div>
               <div class="stat-value">284</div>
               <div class="stat-sub">this billing period</div>
             </div>
             <div class="stat-card">
-              <div class="label">Total Rounds</div>
+              <div class="label">Total Turns</div>
               <div class="stat-value">12,847</div>
-              <div class="stat-sub">across all sessions</div>
+              <div class="stat-sub">across all tasks</div>
             </div>
             <div class="stat-card">
               <div class="label">Current Bill</div>
@@ -336,7 +336,7 @@
           </div>
 
           <div class="mb-16" style="margin-top: 32px;">
-            <div class="label mb-16">Daily Usage (Sessions)</div>
+            <div class="label mb-16">Daily Usage (Tasks)</div>
             <div class="chart-placeholder">
               <div class="chart-bars">
                 <div class="chart-bar" style="height: 30%;"></div>
@@ -364,8 +364,8 @@
                 <thead>
                   <tr>
                     <th>Period</th>
-                    <th>Sessions</th>
-                    <th>Rounds</th>
+                    <th>Tasks</th>
+                    <th>Turns</th>
                     <th>Amount</th>
                     <th>Status</th>
                   </tr>
@@ -418,7 +418,7 @@ function switchTab(tabName) {
   });
 }
 
-// Toggle add agent form
+// Toggle add assistant form
 function toggleAddAgent() {
   const form = document.getElementById('add-agent-form');
   form.classList.toggle('show');

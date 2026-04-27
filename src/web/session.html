@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=1440">
-  <title>Session Detail — Turing Cloud</title>
+  <title>Task Detail — Turing Cloud</title>
   <link rel="stylesheet" href="/style.css">
   <style>
     .inject-bar {
@@ -66,13 +66,13 @@
     </div>
     <nav class="sidebar-nav">
       <a href="dashboard.html">
-        <span class="nav-icon">◉</span> Sessions
+        <span class="nav-icon">◉</span> Tasks
       </a>
       <a href="dashboard.html">
-        <span class="nav-icon">⧫</span> Pipelines
+        <span class="nav-icon">⧫</span> Workflows
       </a>
       <a href="settings.html">
-        <span class="nav-icon">⬡</span> Agents
+        <span class="nav-icon">⬡</span> Assistants
       </a>
       <a href="settings.html">
         <span class="nav-icon">⚙</span> Settings
@@ -93,7 +93,7 @@
     <header class="topbar">
       <div class="topbar-left">
         <a href="dashboard.html" class="btn btn-ghost btn-sm">← Back</a>
-        <h2>Code Review Pipeline</h2>
+        <h2>Code Review Workflow</h2>
         <span class="badge badge-active">Active</span>
       </div>
       <div class="topbar-right">
@@ -104,7 +104,7 @@
       </div>
     </header>
 
-    <!-- Session Layout: Chat + Panel -->
+    <!-- Task Layout: Chat + Panel -->
     <div class="session-layout">
 
       <!-- ===================== CHAT ===================== -->
@@ -112,7 +112,7 @@
         <div class="session-chat-messages">
           <div class="chat-stream">
 
-            <!-- Message 1: From agent -->
+            <!-- Message 1: Assistant A -->
             <div class="chat-msg from">
               <div class="chat-avatar">C</div>
               <div>
@@ -125,11 +125,11 @@
                   <br><br>
                   Let me start with the authentication module. I'll provide specific code suggestions for each issue.
                 </div>
-                <div class="chat-meta">Claude 3.5 Sonnet · Round 1 · 14:32:08</div>
+                <div class="chat-meta">Claude 3.5 Sonnet · Turn 1 · 14:32:08</div>
               </div>
             </div>
 
-            <!-- Message 2: To agent -->
+            <!-- Message 2: Assistant B -->
             <div class="chat-msg to">
               <div class="chat-avatar">G</div>
               <div>
@@ -138,11 +138,11 @@
                   <br><br>
                   For the rate limiting, we should use a sliding window approach with Redis. I'll draft the implementation. For the N+1 queries, let's use eager loading with <code>include</code> statements.
                 </div>
-                <div class="chat-meta">GPT-4o · Round 2 · 14:32:15</div>
+                <div class="chat-meta">GPT-4o · Turn 2 · 14:32:15</div>
               </div>
             </div>
 
-            <!-- Message 3: From agent -->
+            <!-- Message 3: Assistant A -->
             <div class="chat-msg from">
               <div class="chat-avatar">C</div>
               <div>
@@ -162,11 +162,11 @@ app.use(<span style="color: var(--green);">'/api/auth'</span>, rateLimiter);
                   <br>
                   This gives us 100 requests per 15-minute window per IP. Should we also add per-user rate limiting for authenticated endpoints?
                 </div>
-                <div class="chat-meta">Claude 3.5 Sonnet · Round 3 · 14:32:28</div>
+                <div class="chat-meta">Claude 3.5 Sonnet · Turn 3 · 14:32:28</div>
               </div>
             </div>
 
-            <!-- Message 4: To agent -->
+            <!-- Message 4: Assistant B -->
             <div class="chat-msg to">
               <div class="chat-avatar">G</div>
               <div>
@@ -186,18 +186,18 @@ app.use(<span style="color: var(--green);">'/api/auth'</span>, rateLimiter);
 });
                   </div>
                 </div>
-                <div class="chat-meta">GPT-4o · Round 4 · 14:32:41</div>
+                <div class="chat-meta">GPT-4o · Turn 4 · 14:32:41</div>
               </div>
             </div>
 
-            <!-- Message 5: From agent (latest) -->
+            <!-- Message 5: Assistant A (latest) -->
             <div class="chat-msg from">
               <div class="chat-avatar">C</div>
               <div>
                 <div class="chat-bubble">
                   Perfect. I've reviewed the eager loading approach and it looks correct. Let me now move on to the error handling improvements. I'll catalog all unhandled promise rejections I've found across the codebase…
                 </div>
-                <div class="chat-meta">Claude 3.5 Sonnet · Round 5 · 14:32:55 · streaming…</div>
+                <div class="chat-meta">Claude 3.5 Sonnet · Turn 5 · 14:32:55 · streaming…</div>
               </div>
             </div>
 
@@ -207,7 +207,7 @@ app.use(<span style="color: var(--green);">'/api/auth'</span>, rateLimiter);
         <!-- Inject Input -->
         <div class="session-chat-input">
           <div class="inject-bar">
-            <input type="text" class="input" placeholder="Inject a message into this session…">
+            <input type="text" class="input" placeholder="Inject a message into this task…">
             <button class="btn btn-primary btn-sm">Send</button>
           </div>
         </div>
@@ -216,28 +216,28 @@ app.use(<span style="color: var(--green);">'/api/auth'</span>, rateLimiter);
       <!-- ===================== RIGHT PANEL ===================== -->
       <div class="session-panel">
 
-        <!-- Session Info -->
+        <!-- Task Info -->
         <div class="panel-section">
-          <div class="label mb-16">Session Info</div>
+          <div class="label mb-16">Task Info</div>
           <div class="panel-kv">
             <div class="panel-kv-row">
-              <span class="kv-label">Session ID</span>
+              <span class="kv-label">Task ID</span>
               <span class="kv-value mono" style="font-size: 0.78rem;">ses_a7f3k9x2</span>
             </div>
             <div class="panel-kv-row">
-              <span class="kv-label">From Agent</span>
+              <span class="kv-label">Assistant A</span>
               <span class="kv-value">Claude 3.5 Sonnet</span>
             </div>
             <div class="panel-kv-row">
-              <span class="kv-label">To Agent</span>
+              <span class="kv-label">Assistant B</span>
               <span class="kv-value">GPT-4o</span>
             </div>
             <div class="panel-kv-row">
               <span class="kv-label">Mode</span>
-              <span class="kv-value">Auto (max 50 rounds)</span>
+              <span class="kv-value">Auto (max 50 turns)</span>
             </div>
             <div class="panel-kv-row">
-              <span class="kv-label">Rounds</span>
+              <span class="kv-label">Turns</span>
               <span class="kv-value">5 / 50</span>
             </div>
             <div class="panel-kv-row">
@@ -256,7 +256,7 @@ app.use(<span style="color: var(--green);">'/api/auth'</span>, rateLimiter);
         <!-- Heartbeat -->
         <div class="panel-section">
           <div class="label mb-8">Heartbeat</div>
-          <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 8px;">Round 5 of 50</p>
+          <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 8px;">Turn 5 of 50</p>
           <div class="progress-bar">
             <div class="progress-bar-fill" style="width: 10%;"></div>
           </div>
@@ -321,11 +321,11 @@ app.use(<span style="color: var(--green);">'/api/auth'</span>, rateLimiter);
             <div class="error-title">⚠ Rate Limit Exceeded</div>
             <div class="error-detail">
               OpenAI API returned 429: Too Many Requests.
-              Retry after 32 seconds. This session will auto-resume.
+              Retry after 32 seconds. This task will auto-resume.
             </div>
           </div>
           <button class="btn btn-primary btn-sm mt-16" style="width: 100%; justify-content: center;">
-            ↻ Resume Session
+            ↻ Resume Task
           </button>
         </div>
 

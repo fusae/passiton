@@ -21,7 +21,7 @@
     }
     .session-card-meta span { display: flex; align-items: center; gap: 4px; }
 
-    /* Pipeline cards */
+    /* Workflow cards */
     .pipeline-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
     .pipeline-card { cursor: pointer; }
     .pipeline-steps {
@@ -65,13 +65,13 @@
     </div>
     <nav class="sidebar-nav">
       <a href="dashboard.html" class="active">
-        <span class="nav-icon">◉</span> Sessions
+        <span class="nav-icon">◉</span> Tasks
       </a>
       <a href="dashboard.html" onclick="switchView('pipelines'); return false;">
-        <span class="nav-icon">⧫</span> Pipelines
+        <span class="nav-icon">⧫</span> Workflows
       </a>
       <a href="settings.html">
-        <span class="nav-icon">⬡</span> Agents
+        <span class="nav-icon">⬡</span> Assistants
       </a>
       <a href="settings.html">
         <span class="nav-icon">⚙</span> Settings
@@ -93,12 +93,12 @@
       <div class="topbar-left">
         <h2>Dashboard</h2>
         <div class="view-toggle">
-          <button class="active" onclick="switchView('sessions')">Sessions</button>
-          <button onclick="switchView('pipelines')">Pipelines</button>
+          <button class="active" onclick="switchView('sessions')">Tasks</button>
+          <button onclick="switchView('pipelines')">Workflows</button>
         </div>
       </div>
       <div class="topbar-right">
-        <a href="session.html" class="btn btn-primary btn-sm">+ New Session</a>
+        <a href="session.html" class="btn btn-primary btn-sm">+ New Task</a>
         <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
         <div class="avatar">JY</div>
       </div>
@@ -109,7 +109,7 @@
       <!-- Stats Row -->
       <div class="stats-row">
         <div class="stat-card">
-          <div class="label">Active Sessions</div>
+          <div class="label">Active Tasks</div>
           <div class="stat-value grad-text">12</div>
           <div class="stat-sub">3 running right now</div>
         </div>
@@ -119,23 +119,23 @@
           <div class="stat-sub">↑ 12% vs yesterday</div>
         </div>
         <div class="stat-card">
-          <div class="label">Total Rounds</div>
+          <div class="label">Total Turns</div>
           <div class="stat-value">2,831</div>
-          <div class="stat-sub">across all sessions</div>
+          <div class="stat-sub">across all tasks</div>
         </div>
         <div class="stat-card">
-          <div class="label">Active Agents</div>
+          <div class="label">Active Assistants</div>
           <div class="stat-value">5</div>
           <div class="stat-sub">3 providers configured</div>
         </div>
       </div>
 
-      <!-- Sessions View -->
+      <!-- Tasks View -->
       <div id="view-sessions">
         <div class="flex-between mb-24">
-          <h3>Recent Sessions</h3>
+          <h3>Recent Tasks</h3>
           <div class="flex-center gap-8">
-            <input type="text" class="input" placeholder="Search sessions..." style="width: 240px;">
+            <input type="text" class="input" placeholder="Search tasks..." style="width: 240px;">
           </div>
         </div>
 
@@ -144,7 +144,7 @@
           <!-- Card 1 -->
           <a href="session.html" class="card session-card">
             <div class="session-card-header">
-              <span class="session-card-title">Code Review Pipeline</span>
+              <span class="session-card-title">Code Review Workflow</span>
               <span class="badge badge-active">Active</span>
             </div>
             <div class="session-card-route">
@@ -153,7 +153,7 @@
               <span>GPT-4o</span>
             </div>
             <div class="session-card-meta">
-              <span>⟳ 24 rounds</span>
+              <span>⟳ 24 turns</span>
               <span>⏱ 2 min ago</span>
             </div>
           </a>
@@ -170,7 +170,7 @@
               <span>Claude 3.5</span>
             </div>
             <div class="session-card-meta">
-              <span>⟳ 18 rounds</span>
+              <span>⟳ 18 turns</span>
               <span>⏱ 15 min ago</span>
             </div>
           </a>
@@ -187,7 +187,7 @@
               <span>Claude 3.5</span>
             </div>
             <div class="session-card-meta">
-              <span>⟳ 8 rounds</span>
+              <span>⟳ 8 turns</span>
               <span>⏱ just now</span>
             </div>
           </a>
@@ -204,7 +204,7 @@
               <span>GPT-4o</span>
             </div>
             <div class="session-card-meta">
-              <span>⟳ 6 rounds</span>
+              <span>⟳ 6 turns</span>
               <span>⏱ 1 hr ago</span>
             </div>
           </a>
@@ -221,7 +221,7 @@
               <span>GLM-4</span>
             </div>
             <div class="session-card-meta">
-              <span>⟳ 42 rounds</span>
+              <span>⟳ 42 turns</span>
               <span>⏱ 3 hr ago</span>
             </div>
           </a>
@@ -238,7 +238,7 @@
               <span>Gemini</span>
             </div>
             <div class="session-card-meta">
-              <span>⟳ 31 rounds</span>
+              <span>⟳ 31 turns</span>
               <span>⏱ 5 hr ago</span>
             </div>
           </a>
@@ -246,11 +246,11 @@
         </div>
       </div>
 
-      <!-- Pipelines View (hidden by default) -->
+      <!-- Workflows View (hidden by default) -->
       <div id="view-pipelines" style="display: none;">
         <div class="flex-between mb-24">
-          <h3>Pipelines</h3>
-          <button class="btn btn-primary btn-sm">+ New Pipeline</button>
+          <h3>Workflows</h3>
+          <button class="btn btn-primary btn-sm">+ New Workflow</button>
         </div>
 
         <div class="pipeline-cards">
@@ -260,7 +260,7 @@
               <span style="font-weight: 600;">Full Code Review</span>
               <span class="badge badge-active">Running</span>
             </div>
-            <p style="font-size: 0.82rem; color: var(--text-muted);">3 sessions · 2 parallel, 1 sequential</p>
+            <p style="font-size: 0.82rem; color: var(--text-muted);">3 tasks · 2 parallel, 1 sequential</p>
             <div class="pipeline-steps">
               <span class="pipeline-step">Claude → GPT (lint)</span>
               <span class="pipeline-step-arrow">‖</span>
@@ -275,7 +275,7 @@
               <span style="font-weight: 600;">Content Localization</span>
               <span class="badge badge-done">Done</span>
             </div>
-            <p style="font-size: 0.82rem; color: var(--text-muted);">4 sessions · all parallel</p>
+            <p style="font-size: 0.82rem; color: var(--text-muted);">4 tasks · all parallel</p>
             <div class="pipeline-steps">
               <span class="pipeline-step">GPT → GLM (zh)</span>
               <span class="pipeline-step-arrow">‖</span>
@@ -289,10 +289,10 @@
 
           <div class="card pipeline-card">
             <div class="flex-between mb-8">
-              <span style="font-weight: 600;">Research Agent Chain</span>
+              <span style="font-weight: 600;">Research Assistant Chain</span>
               <span class="badge badge-paused">Paused</span>
             </div>
-            <p style="font-size: 0.82rem; color: var(--text-muted);">5 sessions · sequential chain</p>
+            <p style="font-size: 0.82rem; color: var(--text-muted);">5 tasks · sequential chain</p>
             <div class="pipeline-steps">
               <span class="pipeline-step">Search</span>
               <span class="pipeline-step-arrow">→</span>
@@ -311,7 +311,7 @@
               <span style="font-weight: 600;">Test Generation</span>
               <span class="badge badge-error">Error</span>
             </div>
-            <p style="font-size: 0.82rem; color: var(--text-muted);">2 sessions · sequential</p>
+            <p style="font-size: 0.82rem; color: var(--text-muted);">2 tasks · sequential</p>
             <div class="pipeline-steps">
               <span class="pipeline-step">Claude → GPT (gen)</span>
               <span class="pipeline-step-arrow">→</span>
