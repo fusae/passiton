@@ -1,13 +1,14 @@
 // Server module — HTTP + WebSocket
 
 import http from 'http'
+import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { WebSocketServer } from 'ws'
 import type { WebSocket } from 'ws'
 import type { AgentCatalog } from './agents.js'
-import { createDiscoveredAgentConfig, registerConfiguredAdapters } from './adapters/factory.js'
+import { createAdapter, createDiscoveredAgentConfig, registerConfiguredAdapters, registerUserConfiguredAdapters } from './adapters/factory.js'
 import {
   AuthError,
   authCookie,
@@ -20,10 +21,10 @@ import {
   type AuthUser,
 } from './auth.js'
 import { loadConfig, writeConfig } from './config.js'
-import { KeyVaultError, decryptKey, deleteKey, listKeys, storeKey } from './keyvault.js'
+import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { AgentConfig, AppConfig, SessionMode, SessionContext, SessionContextInput, WsEvent } from './types.js'
+import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, SessionMode, SessionContext, SessionContextInput, WsEvent } from './types.js'
 import { templates } from './templates.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -31,6 +32,19 @@ const WEB_DIR = path.join(__dirname, 'web')
 const MAX_BODY_SIZE = 1024 * 1024
 const WS_HEARTBEAT_MS = 30_000
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const API_ADAPTERS = new Set(['anthropic-api', 'openai-api', 'zhipu-api', 'custom-api'])
+const LOCAL_ADAPTERS = new Set(['claude-code', 'codex', 'opencode'])
+const PROVIDER_BY_ADAPTER: Record<string, string> = {
+  'anthropic-api': 'Anthropic',
+  'openai-api': 'OpenAI',
+  'zhipu-api': '智谱',
+  'custom-api': 'Custom',
+}
+const DEFAULT_BASE_URLS: Record<string, string> = {
+  'anthropic-api': 'https://api.anthropic.com/v1/messages',
+  'openai-api': 'https://api.openai.com/v1/chat/completions',
+  'zhipu-api': 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html',
@@ -245,6 +259,35 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
   }
 }
 
+function parseApiAgentConfigBody(body: unknown, existing?: state.UserAgentRecord): {
+  name: string
+  adapter: string
+  apiKey?: string
+  model?: string
+  baseUrl?: string
+  timeout?: number
+} {
+  const data = requireRecord(body, 'body')
+  const name = optionalString(data.name, 'name') ?? existing?.name ?? ''
+  if (!name) throw new HttpError(400, '"name" must be a non-empty string')
+  const adapter = requireNonEmptyString(data.adapter ?? existing?.adapter, 'adapter')
+  if (!API_ADAPTERS.has(adapter)) {
+    throw new HttpError(400, '"adapter" must be one of anthropic-api, openai-api, zhipu-api, custom-api')
+  }
+  const baseUrl = optionalString(data.baseUrl, 'baseUrl') ?? existing?.baseUrl
+  if (adapter === 'custom-api' && !baseUrl) {
+    throw new HttpError(400, '"baseUrl" is required for custom-api')
+  }
+  return {
+    name,
+    adapter,
+    apiKey: optionalString(data.apiKey, 'apiKey'),
+    model: optionalString(data.model, 'model') ?? existing?.model,
+    baseUrl,
+    timeout: optionalPositiveInt(data.timeout, 'timeout') ?? existing?.timeout,
+  }
+}
+
 function agentNameFromPath(pathname: string): string | undefined {
   const match = pathname.match(/^\/api\/config\/agents\/([^/]+)$/)
   return match ? decodeURIComponent(match[1]) : undefined
@@ -256,6 +299,102 @@ async function reloadAgents(router: Router, agentCatalog: AgentCatalog, config: 
   await agentCatalog.discover()
   registerConfiguredAdapters(router, config.agents)
   agentCatalog.registerDiscoveredAdapters(router)
+}
+
+function decryptUserAgentKey(record: state.UserAgentRecord): string | undefined {
+  if (!record.encryptedKey || !record.iv || !record.authTag) return undefined
+  return decryptSecret({
+    userId: record.userId,
+    encryptedKey: record.encryptedKey,
+    iv: record.iv,
+    authTag: record.authTag,
+  })
+}
+
+function userAgentConfigs(userId: string): Record<string, AgentConfig> {
+  const result: Record<string, AgentConfig> = {}
+  for (const record of state.listUserAgents(userId)) {
+    result[record.name] = state.userAgentRecordToConfig(record, decryptUserAgentKey(record))
+  }
+  return result
+}
+
+export function registerPersistedUserAgents(router: Router): void {
+  const byUser = new Map<string, Record<string, AgentConfig>>()
+  for (const record of state.listAllUserAgents()) {
+    const agents = byUser.get(record.userId) ?? {}
+    agents[record.name] = state.userAgentRecordToConfig(record, decryptUserAgentKey(record))
+    byUser.set(record.userId, agents)
+  }
+  for (const [userId, agents] of byUser.entries()) {
+    registerUserConfiguredAdapters(router, userId, agents)
+  }
+}
+
+function reloadUserAgents(router: Router, userId: string): void {
+  registerUserConfiguredAdapters(router, userId, userAgentConfigs(userId))
+}
+
+async function listAgentModels(agentCatalog: AgentCatalog, userId: string): Promise<AgentListResponse> {
+  const current = loadConfig()
+  const globalApi = Object.entries(current.agents)
+    .filter(([, cfg]) => API_ADAPTERS.has(cfg.adapter))
+    .map(([name, cfg]) => apiAgentInfoFromConfig(name, cfg))
+  const userApi = state.listUserAgents(userId).map(apiAgentInfoFromRecord)
+  const userNames = new Set(userApi.map((agent) => agent.name))
+  const api = [
+    ...userApi,
+    ...globalApi.filter((agent) => !userNames.has(agent.name)),
+  ]
+
+  const local = (await agentCatalog.listAgents())
+    .filter((agent) => LOCAL_ADAPTERS.has(agent.adapter))
+    .filter((agent) => !userNames.has(agent.name))
+    .map((agent) => ({
+      name: agent.name,
+      adapter: agent.adapter,
+      healthy: agent.healthy,
+      version: agent.version,
+      status: agent.healthy ? 'online' as const : 'offline' as const,
+    }))
+
+  return { api, local }
+}
+
+function apiAgentInfoFromConfig(name: string, cfg: AgentConfig): ApiAgentInfo {
+  const hasKey = Boolean(cfg.apiKey)
+  return {
+    name,
+    adapter: cfg.adapter,
+    model: cfg.model,
+    provider: providerForAdapter(cfg.adapter),
+    baseUrl: cfg.baseUrl ?? DEFAULT_BASE_URLS[cfg.adapter],
+    hasKey,
+    keyMasked: cfg.apiKey ? maskAgentKey(cfg.apiKey) : undefined,
+    status: hasKey && apiConfigHealthy(cfg) ? 'ready' : hasKey ? 'invalid' : 'no_key',
+  }
+}
+
+function apiAgentInfoFromRecord(record: state.UserAgentRecord): ApiAgentInfo {
+  const apiKey = decryptUserAgentKey(record)
+  const cfg = state.userAgentRecordToConfig(record, apiKey)
+  return {
+    ...apiAgentInfoFromConfig(record.name, cfg),
+    hasKey: Boolean(apiKey),
+    keyMasked: apiKey ? maskAgentKey(apiKey) : undefined,
+  }
+}
+
+function apiConfigHealthy(cfg: AgentConfig): boolean {
+  try {
+    return Boolean(cfg.apiKey && createAdapter(cfg))
+  } catch {
+    return false
+  }
+}
+
+function providerForAdapter(adapter: string): string {
+  return PROVIDER_BY_ADAPTER[adapter] ?? 'Custom'
 }
 
 function parseAgentRef(value: unknown, field: string): { adapter: string; label?: string } {
@@ -524,8 +663,66 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // GET /api/agents
       if (pathname === '/api/agents' && method === 'GET') {
-        const agents = await agentCatalog.listAgents()
+        const agents = await listAgentModels(agentCatalog, authUser!.userId)
         return json(res, 200, agents)
+      }
+
+      // POST /api/agents
+      if (pathname === '/api/agents' && method === 'POST') {
+        const parsed = parseApiAgentConfigBody(await parseBody(req))
+        const encrypted = parsed.apiKey ? encryptSecret(authUser!.userId, parsed.apiKey) : {}
+        try {
+          state.createUserAgent({
+            id: crypto.randomUUID(),
+            userId: authUser!.userId,
+            name: parsed.name,
+            adapter: parsed.adapter,
+            model: parsed.model,
+            baseUrl: parsed.baseUrl,
+            timeout: parsed.timeout,
+            ...encrypted,
+          })
+        } catch (err) {
+          if (err instanceof Error && err.message.includes('UNIQUE')) {
+            throw new HttpError(409, `Agent "${parsed.name}" already exists`)
+          }
+          throw err
+        }
+        reloadUserAgents(router, authUser!.userId)
+        return json(res, 201, await listAgentModels(agentCatalog, authUser!.userId))
+      }
+
+      const userAgentMatch = pathname.match(/^\/api\/agents\/([^/]+)$/)
+      if (userAgentMatch && method === 'PUT') {
+        const current = state.getUserAgent(authUser!.userId, decodeURIComponent(userAgentMatch[1]))
+        if (!current) return json(res, 404, { error: 'Not found' })
+        const parsed = parseApiAgentConfigBody(await parseBody(req), current)
+        const encrypted = parsed.apiKey ? encryptSecret(authUser!.userId, parsed.apiKey) : undefined
+        try {
+          state.updateUserAgent(authUser!.userId, current.name, {
+            name: parsed.name,
+            adapter: parsed.adapter,
+            model: parsed.model,
+            baseUrl: parsed.baseUrl,
+            timeout: parsed.timeout,
+            ...(encrypted ? encrypted : {}),
+          })
+        } catch (err) {
+          if (err instanceof Error && err.message.includes('UNIQUE')) {
+            throw new HttpError(409, `Agent "${parsed.name}" already exists`)
+          }
+          throw err
+        }
+        reloadUserAgents(router, authUser!.userId)
+        return json(res, 200, await listAgentModels(agentCatalog, authUser!.userId))
+      }
+
+      if (userAgentMatch && method === 'DELETE') {
+        if (!state.deleteUserAgent(authUser!.userId, decodeURIComponent(userAgentMatch[1]))) {
+          return json(res, 404, { error: 'Not found' })
+        }
+        reloadUserAgents(router, authUser!.userId)
+        return json(res, 200, await listAgentModels(agentCatalog, authUser!.userId))
       }
 
       // GET /api/templates

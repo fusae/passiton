@@ -83,6 +83,35 @@ test('GET /health returns unauthenticated liveness payload', async () => {
   })
 })
 
+test('agent CRUD stores user API model configs', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'agents@example.com')
+    const create = await fetch(`${baseUrl}/api/agents`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'claude-api',
+        adapter: 'anthropic-api',
+        apiKey: 'sk-ant-test1234',
+        model: 'claude-sonnet-4-20250514',
+      }),
+    })
+    assert.equal(create.status, 201)
+    const created = await create.json() as { api: Array<{ name: string; status: string; keyMasked: string }> }
+    assert.equal(created.api[0].name, 'claude-api')
+    assert.equal(created.api[0].status, 'ready')
+    assert.equal(created.api[0].keyMasked, 'sk-...1234')
+    assert.notEqual(state.getUserAgent(auth.userId, 'claude-api')?.encryptedKey, 'sk-ant-test1234')
+
+    const remove = await fetch(`${baseUrl}/api/agents/claude-api`, {
+      method: 'DELETE',
+      headers: authHeaders(auth.token),
+    })
+    assert.equal(remove.status, 200)
+    assert.equal(state.getUserAgent(auth.userId, 'claude-api'), undefined)
+  })
+})
+
 test('GET /api/pipelines/:id returns pipeline with session details', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'pipelines@example.com')

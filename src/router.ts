@@ -26,6 +26,7 @@ const PIPELINE_DEP_TEXT_CHARS = 4_000
 
 export class Router extends EventEmitter {
   private adapters = new Map<string, Adapter>()
+  private userAdapters = new Map<string, Map<string, Adapter>>()
   private policy: PolicyConfig
   // Track in-flight sessions so runSession loops can be cancelled
   private runningLoops = new Set<string>()
@@ -44,6 +45,16 @@ export class Router extends EventEmitter {
 
   clearAdapters(): void {
     this.adapters.clear()
+  }
+
+  registerUserAdapter(userId: string, adapter: Adapter): void {
+    const adapters = this.userAdapters.get(userId) ?? new Map<string, Adapter>()
+    adapters.set(adapter.name, adapter)
+    this.userAdapters.set(userId, adapters)
+  }
+
+  clearUserAdapters(userId: string): void {
+    this.userAdapters.delete(userId)
   }
 
   getAdapter(name: string): Adapter | undefined {
@@ -387,7 +398,7 @@ export class Router extends EventEmitter {
     const recipient = session.nextTurn
     const target = recipient === 'to' ? session.to : session.from
     const round = roundOverride ?? (recipient === 'to' ? session.currentRound + 1 : session.currentRound)
-    const adapter = this.adapters.get(target.adapter)
+    const adapter = this.resolveAdapter(target.adapter, session.userId)
 
     if (!adapter) throw new Error(`Adapter not found: ${target.adapter}`)
     this.emitLog('info', `Adapter call: ${target.adapter} [${sessionId.slice(0, 8)}] round=${round} turn=${recipient}`, sessionId)
@@ -480,6 +491,14 @@ export class Router extends EventEmitter {
       opts.apiKey = decryptKey(session.userId, keyId).key
     }
     return opts
+  }
+
+  private resolveAdapter(name: string, userId?: string): Adapter | undefined {
+    if (userId) {
+      const adapter = this.userAdapters.get(userId)?.get(name)
+      if (adapter) return adapter
+    }
+    return this.adapters.get(name)
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────

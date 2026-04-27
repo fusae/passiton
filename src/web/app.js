@@ -6,7 +6,7 @@ const AUTH_TOKEN_KEY = 'turing-jwt'
 // ── State ─────────────────────────────────────────────────────────────────────
 let sessions = []
 let pipelines = []
-let agents = []
+let agents = { api: [], local: [] }
 let apiKeys = []
 let templates = []
 let stats = null
@@ -27,6 +27,17 @@ const AGENT_COMMAND_DEFAULTS = {
   opencode: 'opencode',
 }
 const UI_PREFS_KEY = 'turing-ui-prefs'
+const PROVIDER_OPTIONS = {
+  'anthropic-api': { label: 'Anthropic', color: '#D97706', models: ['claude-sonnet-4-20250514', 'claude-3.5-haiku'] },
+  'openai-api': { label: 'OpenAI', color: '#10B981', models: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'] },
+  'zhipu-api': { label: '智谱', color: '#3B82F6', models: ['glm-4-flash', 'glm-4'] },
+  'custom-api': { label: 'Custom', color: '#8B5CF6', models: [] },
+}
+const DEFAULT_BASE_URLS = {
+  'anthropic-api': 'https://api.anthropic.com/v1/messages',
+  'openai-api': 'https://api.openai.com/v1/chat/completions',
+  'zhipu-api': 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+}
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const sessionList      = document.getElementById('session-list')
@@ -255,29 +266,79 @@ async function loadAgents() {
 }
 
 function renderAgents() {
-  if (!agents.length) {
+  const apiAgents = agents.api || []
+  const localAgents = agents.local || []
+  if (!apiAgents.length && !localAgents.length) {
     agentsList.innerHTML = '<span class="no-agents">No agents registered</span>'
     return
   }
-  agentsList.innerHTML = agents.map(a => `
-    <div class="agent-row">
-      <span class="agent-dot ${a.healthy ? 'ok' : 'err'}"></span>
-      <div class="agent-meta">
-        <div class="agent-line">
-          <span class="agent-name">${a.name}</span>
-          <span class="agent-status ${a.healthy ? 'ok' : 'err'}">${a.healthy ? 'online' : 'offline'}</span>
-        </div>
-        <div class="agent-subline">
-          <span class="agent-kind">${a.adapter}</span>
-          <span class="agent-source">${a.source}</span>
-          ${a.version ? `<span class="agent-version">${escHtml(a.version)}</span>` : ''}
-        </div>
-      </div>
-    </div>
-  `).join('')
+  const apiSection = `
+    <div class="agent-section">
+      <div class="agent-section-title">API Models</div>
+      ${apiAgents.length ? apiAgents.map(renderApiAgentRow).join('') : '<span class="no-agents">No API models</span>'}
+    </div>`
+  const localSection = localAgents.length ? `
+    <details class="agent-section local-agent-section">
+      <summary class="agent-section-title">Local Agents</summary>
+      ${localAgents.map(renderLocalAgentRow).join('')}
+    </details>` : ''
+  agentsList.innerHTML = `${apiSection}${localSection}<button type="button" class="add-agent-sidebar-btn" id="sidebar-add-agent-btn">+ Add Agent</button>`
+  agentsList.querySelectorAll('[data-agent-edit]').forEach((row) => {
+    row.addEventListener('click', () => openAgentEditor(row.dataset.agentEdit))
+  })
+  agentsList.querySelector('#sidebar-add-agent-btn')?.addEventListener('click', () => openAgentEditor())
 }
 
 document.getElementById('refresh-agents-btn').addEventListener('click', loadAgents)
+
+function renderApiAgentRow(agent) {
+  const provider = providerMeta(agent.adapter)
+  const customEndpoint = agent.baseUrl && agent.baseUrl !== DEFAULT_BASE_URLS[agent.adapter]
+  return `<button type="button" class="api-agent-row" data-agent-edit="${escHtml(agent.name)}">
+    <span class="provider-dot" style="background:${provider.color}"></span>
+    <span class="agent-meta">
+      <span class="agent-line">
+        <span class="agent-name">${escHtml(agent.model || agent.name)}</span>
+        ${statusBadge(agent.status)}
+      </span>
+      <span class="agent-subline">
+        <span>${escHtml(agent.provider || provider.label)}</span>
+        ${agent.hasKey ? `<span>${escHtml(agent.keyMasked || '')}</span>` : ''}
+        ${customEndpoint ? '<span class="agent-tag">custom endpoint</span>' : ''}
+      </span>
+    </span>
+  </button>`
+}
+
+function renderLocalAgentRow(agent) {
+  return `<div class="agent-row">
+    <span class="agent-dot ${agent.status === 'online' ? 'ok' : 'off'}"></span>
+    <div class="agent-meta">
+      <div class="agent-line">
+        <span class="agent-name">${escHtml(agent.name)}</span>
+        ${statusBadge(agent.status)}
+      </div>
+      <div class="agent-subline">
+        <span class="agent-kind">${escHtml(agent.adapter)}</span>
+        ${agent.version ? `<span class="agent-version">${escHtml(agent.version)}</span>` : ''}
+      </div>
+    </div>
+  </div>`
+}
+
+function statusBadge(status) {
+  const labels = { ready: 'Ready', no_key: 'No Key', invalid: 'Invalid', online: 'Online', offline: 'Offline' }
+  return `<span class="model-status ${escHtml(status)}"><span></span>${escHtml(labels[status] || status)}</span>`
+}
+
+function providerMeta(adapter) {
+  return PROVIDER_OPTIONS[adapter] || PROVIDER_OPTIONS['custom-api']
+}
+
+async function openAgentEditor(name) {
+  await openSettingsPanel()
+  showAgentForm(name)
+}
 
 function renderStats() {
   if (!statsGrid || !stats) return
@@ -1034,7 +1095,7 @@ document.getElementById('modal-form').addEventListener('submit', async e => {
 })
 
 function populateAgentSelects() {
-  const names = agents.filter(a => a.availableForSessions).map(a => a.name)
+  const names = availableAgentNames()
   ;['from-select', 'to-select'].forEach((id, idx) => {
     const el = document.getElementById(id)
     if (!el) return
@@ -1110,7 +1171,7 @@ function closePipelineModal() {
 
 function addPipelineStepEditor() {
   const stepIndex = pipelineStepList.children.length
-  const names = agents.filter(a => a.availableForSessions).map(a => a.name)
+  const names = availableAgentNames()
   const defaultFrom = names[0] || ''
   const defaultTo = names[1] || names[0] || ''
   const defaultMode = appConfig?.defaults?.mode || 'collaborate'
@@ -1163,6 +1224,12 @@ function addPipelineStepEditor() {
   })
   pipelineStepList.appendChild(wrap)
   refreshPipelineStepLabels()
+}
+
+function availableAgentNames() {
+  const apiNames = (agents.api || []).filter(a => a.status === 'ready').map(a => a.name)
+  const localNames = (agents.local || []).filter(a => a.status === 'online').map(a => a.name)
+  return [...new Set([...apiNames, ...localNames])]
 }
 
 function refreshPipelineStepLabels() {
@@ -1768,6 +1835,7 @@ function setupSettingsPanel() {
 
 async function openSettingsPanel() {
   await loadAppConfig()
+  await loadAgents()
   await loadApiKeys()
   renderSettingsPanel()
   settingsPanel.classList.remove('hidden')
@@ -1792,26 +1860,26 @@ function renderSettingsPanel() {
 }
 
 function renderAgentConfigList() {
-  const entries = Object.entries(appConfig?.agents || {})
+  const entries = agents.api || []
   if (!entries.length) {
-    agentsConfigList.innerHTML = '<div class="settings-empty">No configured agents</div>'
+    agentsConfigList.innerHTML = '<div class="settings-empty">No API model configs</div>'
     return
   }
 
-  agentsConfigList.innerHTML = entries.map(([name, cfg]) => {
-    const env = Object.entries(cfg.env || {})
+  agentsConfigList.innerHTML = entries.map((cfg) => {
+    const provider = providerMeta(cfg.adapter)
     return `<div class="agent-config-item">
       <div class="agent-config-header">
-        <div class="agent-config-name">${escHtml(name)}</div>
+        <div class="agent-config-name"><span class="provider-dot" style="background:${provider.color}"></span>${escHtml(cfg.name)}</div>
         <div class="agent-config-actions">
-          <button class="agent-config-btn" data-agent-edit="${escHtml(name)}">Edit</button>
-          <button class="agent-config-btn danger" data-agent-delete="${escHtml(name)}">Delete</button>
+          <button class="agent-config-btn" data-agent-edit="${escHtml(cfg.name)}">Edit</button>
+          <button class="agent-config-btn danger" data-agent-delete="${escHtml(cfg.name)}">Delete</button>
         </div>
       </div>
       <div class="agent-config-details">
-        <div><span class="agent-config-label">Adapter</span><span class="agent-config-value">${escHtml(cfg.adapter)}</span></div>
-        <div><span class="agent-config-label">Command</span><span class="agent-config-value">${escHtml(cfg.command)}</span></div>
-        <div><span class="agent-config-label">Env</span><span class="agent-config-value">${env.length ? env.map(([k, v]) => `${escHtml(k)}=${escHtml(v)}`).join(', ') : 'none'}</span></div>
+        <div><span class="agent-config-label">Provider</span><span class="agent-config-value">${escHtml(cfg.provider)}</span></div>
+        <div><span class="agent-config-label">Model</span><span class="agent-config-value">${escHtml(cfg.model || '')}</span></div>
+        <div><span class="agent-config-label">Key</span><span class="agent-config-value">${cfg.hasKey ? escHtml(cfg.keyMasked || '') : 'none'}</span></div>
       </div>
     </div>`
   }).join('')
@@ -1819,33 +1887,37 @@ function renderAgentConfigList() {
 
 function showAgentForm(agentName) {
   editingAgentName = agentName || null
-  const cfg = editingAgentName ? appConfig?.agents?.[editingAgentName] : null
-  const selectedAdapter = cfg?.adapter || 'codex'
-  const envEntries = Object.entries(cfg?.env || {})
+  const cfg = editingAgentName ? (agents.api || []).find(a => a.name === editingAgentName) : null
+  const selectedAdapter = cfg?.adapter || 'anthropic-api'
+  const modelOptions = providerMeta(selectedAdapter).models
+  const isCustom = selectedAdapter === 'custom-api'
   addAgentBtn.classList.add('hidden')
   agentFormSlot.innerHTML = `<form class="agent-config-form" id="agent-config-form">
     <div class="form-row">
       <label>Name</label>
-      <input name="name" type="text" required value="${escHtml(editingAgentName || '')}" />
+      <input name="name" type="text" required value="${escHtml(editingAgentName || '')}" placeholder="claude-api" />
     </div>
     <div class="form-row">
-      <label>Adapter</label>
+      <label>Provider</label>
       <select name="adapter">
-        ${['claude-code', 'codex', 'opencode'].map(adapter => `
-          <option value="${adapter}" ${selectedAdapter === adapter ? 'selected' : ''}>${adapter}</option>
+        ${Object.entries(PROVIDER_OPTIONS).map(([adapter, option]) => `
+          <option value="${adapter}" ${selectedAdapter === adapter ? 'selected' : ''}>${escHtml(option.label)}</option>
         `).join('')}
       </select>
     </div>
-    <div class="form-row">
-      <label>Command Path</label>
-      <input name="command" type="text" required value="${escHtml(cfg?.command || AGENT_COMMAND_DEFAULTS[selectedAdapter])}" placeholder="codex" />
+    <div class="form-row" id="model-row">
+      <label>Model</label>
+      ${isCustom
+        ? `<input name="model" type="text" required value="${escHtml(cfg?.model || '')}" placeholder="model name" />`
+        : `<select name="model">${modelOptions.map(model => `<option value="${model}" ${cfg?.model === model ? 'selected' : ''}>${model}</option>`).join('')}</select>`}
     </div>
     <div class="form-row">
-      <label>Environment Variables</label>
-      <div class="env-vars-list">
-        ${envEntries.map(([key, value]) => envRowMarkup(key, value)).join('')}
-      </div>
-      <button type="button" class="add-env-btn">+ Add env var</button>
+      <label>API Key</label>
+      <input name="apiKey" type="password" ${editingAgentName ? '' : 'required'} placeholder="${editingAgentName ? 'Leave blank to keep existing key' : 'Paste API key'}" />
+    </div>
+    <div class="form-row">
+      <label>Base URL</label>
+      <input name="baseUrl" type="text" ${isCustom ? 'required' : ''} value="${escHtml(cfg?.baseUrl || '')}" placeholder="${escHtml(DEFAULT_BASE_URLS[selectedAdapter] || 'https://example.com/v1/chat/completions')}" />
     </div>
     <div class="agent-form-actions">
       <button type="button" class="settings-btn" id="agent-form-cancel">Cancel</button>
@@ -1855,23 +1927,24 @@ function showAgentForm(agentName) {
 
   const form = document.getElementById('agent-config-form')
   const adapterSelect = form.querySelector('select[name="adapter"]')
-  const commandInput = form.querySelector('input[name="command"]')
   form.addEventListener('submit', saveAgent)
   adapterSelect.addEventListener('change', () => {
-    const currentDefault = Object.values(AGENT_COMMAND_DEFAULTS).includes(commandInput.value)
-    if (!editingAgentName || currentDefault) {
-      commandInput.value = AGENT_COMMAND_DEFAULTS[adapterSelect.value] || ''
-    }
+    refreshAgentModelField(form)
   })
   form.querySelector('#agent-form-cancel').addEventListener('click', clearAgentForm)
-  form.querySelector('.add-env-btn').addEventListener('click', () => {
-    form.querySelector('.env-vars-list').insertAdjacentHTML('beforeend', envRowMarkup())
-  })
-  form.querySelector('.env-vars-list').addEventListener('click', (event) => {
-    const btn = event.target.closest('.env-var-remove')
-    if (btn) btn.closest('.env-var-row').remove()
-  })
   form.querySelector('input[name="name"]').focus()
+}
+
+function refreshAgentModelField(form) {
+  const adapter = form.querySelector('select[name="adapter"]').value
+  const row = form.querySelector('#model-row')
+  const models = providerMeta(adapter).models
+  row.innerHTML = `<label>Model</label>${adapter === 'custom-api'
+    ? '<input name="model" type="text" required placeholder="model name" />'
+    : `<select name="model">${models.map(model => `<option value="${model}">${model}</option>`).join('')}</select>`}`
+  const baseUrl = form.querySelector('input[name="baseUrl"]')
+  baseUrl.required = adapter === 'custom-api'
+  baseUrl.placeholder = DEFAULT_BASE_URLS[adapter] || 'https://example.com/v1/chat/completions'
 }
 
 function envRowMarkup(key = '', value = '') {
@@ -1905,16 +1978,17 @@ async function saveAgent(event) {
   const body = {
     name: String(fd.get('name') || '').trim(),
     adapter: fd.get('adapter'),
-    command: String(fd.get('command') || '').trim(),
-    env: collectEnv(form),
+    apiKey: String(fd.get('apiKey') || '').trim() || undefined,
+    model: String(fd.get('model') || '').trim(),
+    baseUrl: String(fd.get('baseUrl') || '').trim() || undefined,
   }
   const path = editingAgentName
-    ? `/api/config/agents/${encodeURIComponent(editingAgentName)}`
-    : '/api/config/agents'
+    ? `/api/agents/${encodeURIComponent(editingAgentName)}`
+    : '/api/agents'
   const method = editingAgentName ? 'PUT' : 'POST'
 
   try {
-    appConfig = await api(path, method, body)
+    agents = await api(path, method, body)
     await loadAgents()
     clearAgentForm()
     renderSettingsPanel()
@@ -1927,7 +2001,7 @@ async function saveAgent(event) {
 async function deleteAgent(name) {
   if (!name || !confirm(`Delete agent "${name}"?`)) return
   try {
-    appConfig = await api(`/api/config/agents/${encodeURIComponent(name)}`, 'DELETE')
+    agents = await api(`/api/agents/${encodeURIComponent(name)}`, 'DELETE')
     await loadAgents()
     clearAgentForm()
     renderSettingsPanel()

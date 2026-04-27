@@ -201,7 +201,7 @@ async function serverStart() {
   const { initDb } = await import('./state.js')
   const { Router } = await import('./router.js')
   const { registerConfiguredAdapters } = await import('./adapters/factory.js')
-  const { createServer } = await import('./server.js')
+  const { createServer, registerPersistedUserAgents } = await import('./server.js')
   const { installGracefulShutdown } = await import('./shutdown.js')
 
   initDb(undefined, { messageRetentionMs: config.policy.messageRetentionMs })
@@ -209,6 +209,7 @@ async function serverStart() {
   const agentCatalog = new AgentCatalog(config.agents)
   await agentCatalog.discover()
   registerConfiguredAdapters(router, config.agents)
+  registerPersistedUserAgents(router)
   agentCatalog.registerDiscoveredAdapters(router)
 
   const server = createServer(router, config.server.port, agentCatalog)
@@ -643,23 +644,21 @@ async function listAgents() {
     die(`Cannot reach server at ${BASE}`)
   }
 
-  const agents = r!.data as Array<{
-    name: string
-    healthy: boolean
-    adapter: string
-    source: string
-    version?: string
-    availableForSessions: boolean
-  }>
+  const payload = r!.data as {
+    api?: Array<{ name: string; adapter: string; model?: string; provider: string; status: string }>
+    local?: Array<{ name: string; healthy: boolean; adapter: string; version?: string; status: string }>
+  }
+  const agents = [...(payload.api ?? []), ...(payload.local ?? [])]
   if (!agents.length) { console.log('No agents registered.'); return }
 
   console.log()
   for (const a of agents) {
-    const dot = a.healthy ? '\x1b[32m●\x1b[0m' : '\x1b[31m●\x1b[0m'
-    const status = a.healthy ? '\x1b[32monline\x1b[0m' : '\x1b[31moffline\x1b[0m'
-    const availability = a.availableForSessions ? 'session' : 'discover-only'
-    console.log(`  ${dot}  ${a.name.padEnd(18)} ${status}  ${a.adapter.padEnd(12)} ${a.source.padEnd(10)} ${availability}`)
-    if (a.version) {
+    const ok = a.status === 'ready' || a.status === 'online'
+    const dot = ok ? '\x1b[32m●\x1b[0m' : '\x1b[90m●\x1b[0m'
+    const status = ok ? `\x1b[32m${a.status}\x1b[0m` : `\x1b[90m${a.status}\x1b[0m`
+    const model = 'model' in a && a.model ? ` ${a.model}` : ''
+    console.log(`  ${dot}  ${a.name.padEnd(18)} ${status}  ${a.adapter.padEnd(14)}${model}`)
+    if ('version' in a && a.version) {
       console.log(`      version: ${a.version}`)
     }
   }
@@ -676,14 +675,18 @@ async function health() {
     process.exit(1)
   }
 
-  const agents = r!.data as Array<{ name: string; healthy: boolean }>
+  const payload = r!.data as {
+    api?: Array<{ name: string; status: string }>
+    local?: Array<{ name: string; status: string }>
+  }
+  const agents = [...(payload.api ?? []), ...(payload.local ?? [])]
   let allHealthy = true
   console.log()
   for (const a of agents) {
-    if (a.healthy) {
+    if (a.status === 'ready' || a.status === 'online') {
       console.log(`  \x1b[32m✓\x1b[0m  ${a.name}`)
     } else {
-      console.log(`  \x1b[31m✗\x1b[0m  ${a.name}  (unreachable)`)
+      console.log(`  \x1b[31m✗\x1b[0m  ${a.name}  (${a.status})`)
       allHealthy = false
     }
   }

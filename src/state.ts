@@ -19,6 +19,7 @@ import type {
   PipelineWithSessions,
   TuringStats,
   AgentUsageStats,
+  AgentConfig,
 } from './types.js'
 
 const DB_DIR = join(homedir(), '.turing')
@@ -57,6 +58,20 @@ export interface StoredApiKeyRecord {
   iv: string
   authTag: string
   name: string
+  createdAt: number
+}
+
+export interface UserAgentRecord {
+  id: string
+  userId: string
+  name: string
+  adapter: string
+  encryptedKey?: string
+  iv?: string
+  authTag?: string
+  model?: string
+  baseUrl?: string
+  timeout: number
   createdAt: number
 }
 
@@ -109,6 +124,21 @@ function createTables(): void {
       auth_tag      TEXT NOT NULL,
       name          TEXT NOT NULL,
       created_at    INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS user_agents (
+      id                TEXT PRIMARY KEY,
+      user_id           TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      name              TEXT NOT NULL,
+      adapter           TEXT NOT NULL,
+      api_key_encrypted TEXT,
+      iv                TEXT,
+      auth_tag          TEXT,
+      model             TEXT,
+      base_url          TEXT,
+      timeout           INTEGER DEFAULT 120000,
+      created_at        TEXT NOT NULL,
+      UNIQUE(user_id, name)
     );
 
     CREATE TABLE IF NOT EXISTS sessions (
@@ -235,6 +265,7 @@ function createTables(): void {
     CREATE INDEX IF NOT EXISTS idx_pipelines_user ON pipelines(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
     CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_agents_user ON user_agents(user_id);
   `)
 }
 
@@ -272,6 +303,22 @@ function rowToStoredApiKey(row: Record<string, unknown>): StoredApiKeyRecord {
     authTag: row.auth_tag as string,
     name: row.name as string,
     createdAt: row.created_at as number,
+  }
+}
+
+function rowToUserAgent(row: Record<string, unknown>): UserAgentRecord {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    name: row.name as string,
+    adapter: row.adapter as string,
+    encryptedKey: row.api_key_encrypted as string | undefined,
+    iv: row.iv as string | undefined,
+    authTag: row.auth_tag as string | undefined,
+    model: row.model as string | undefined,
+    baseUrl: row.base_url as string | undefined,
+    timeout: (row.timeout as number | undefined) ?? 120_000,
+    createdAt: Number(row.created_at),
   }
 }
 
@@ -347,6 +394,93 @@ export function listStoredApiKeys(userId: string): StoredApiKeyRecord[] {
 
 export function deleteStoredApiKey(id: string, userId: string): boolean {
   return db.prepare('DELETE FROM api_keys WHERE id = ? AND user_id = ?').run(id, userId).changes > 0
+}
+
+export function createUserAgent(params: {
+  id: string
+  userId: string
+  name: string
+  adapter: string
+  encryptedKey?: string
+  iv?: string
+  authTag?: string
+  model?: string
+  baseUrl?: string
+  timeout?: number
+}): UserAgentRecord {
+  const now = Date.now()
+  db.prepare(`
+    INSERT INTO user_agents (id, user_id, name, adapter, api_key_encrypted, iv, auth_tag, model, base_url, timeout, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    params.id,
+    params.userId,
+    params.name,
+    params.adapter,
+    params.encryptedKey ?? null,
+    params.iv ?? null,
+    params.authTag ?? null,
+    params.model ?? null,
+    params.baseUrl ?? null,
+    params.timeout ?? 120_000,
+    String(now)
+  )
+  return getUserAgent(params.userId, params.name)!
+}
+
+export function updateUserAgent(userId: string, name: string, updates: {
+  name?: string
+  adapter?: string
+  encryptedKey?: string | null
+  iv?: string | null
+  authTag?: string | null
+  model?: string
+  baseUrl?: string
+  timeout?: number
+}): UserAgentRecord | undefined {
+  const fields: string[] = []
+  const values: unknown[] = []
+  if (updates.name !== undefined) { fields.push('name = ?'); values.push(updates.name) }
+  if (updates.adapter !== undefined) { fields.push('adapter = ?'); values.push(updates.adapter) }
+  if (updates.encryptedKey !== undefined) { fields.push('api_key_encrypted = ?'); values.push(updates.encryptedKey) }
+  if (updates.iv !== undefined) { fields.push('iv = ?'); values.push(updates.iv) }
+  if (updates.authTag !== undefined) { fields.push('auth_tag = ?'); values.push(updates.authTag) }
+  if (updates.model !== undefined) { fields.push('model = ?'); values.push(updates.model) }
+  if (updates.baseUrl !== undefined) { fields.push('base_url = ?'); values.push(updates.baseUrl || null) }
+  if (updates.timeout !== undefined) { fields.push('timeout = ?'); values.push(updates.timeout) }
+  if (!fields.length) return getUserAgent(userId, name)
+  values.push(userId, name)
+  db.prepare(`UPDATE user_agents SET ${fields.join(', ')} WHERE user_id = ? AND name = ?`).run(...values)
+  return getUserAgent(userId, updates.name ?? name)
+}
+
+export function getUserAgent(userId: string, name: string): UserAgentRecord | undefined {
+  const row = db.prepare('SELECT * FROM user_agents WHERE user_id = ? AND name = ?').get(userId, name) as Record<string, unknown> | undefined
+  return row ? rowToUserAgent(row) : undefined
+}
+
+export function listUserAgents(userId: string): UserAgentRecord[] {
+  const rows = db.prepare('SELECT * FROM user_agents WHERE user_id = ? ORDER BY created_at DESC').all(userId) as Record<string, unknown>[]
+  return rows.map(rowToUserAgent)
+}
+
+export function listAllUserAgents(): UserAgentRecord[] {
+  const rows = db.prepare('SELECT * FROM user_agents ORDER BY created_at DESC').all() as Record<string, unknown>[]
+  return rows.map(rowToUserAgent)
+}
+
+export function deleteUserAgent(userId: string, name: string): boolean {
+  return db.prepare('DELETE FROM user_agents WHERE user_id = ? AND name = ?').run(userId, name).changes > 0
+}
+
+export function userAgentRecordToConfig(record: UserAgentRecord, apiKey?: string): AgentConfig {
+  return {
+    adapter: record.adapter,
+    model: record.model,
+    baseUrl: record.baseUrl,
+    timeout: record.timeout,
+    ...(apiKey ? { apiKey } : {}),
+  }
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────

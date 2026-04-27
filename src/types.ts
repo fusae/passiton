@@ -205,6 +205,30 @@ export interface AgentConfig {
   env?: Record<string, string>
 }
 
+export interface ApiAgentInfo {
+  name: string
+  adapter: string
+  model?: string
+  provider: string
+  baseUrl?: string
+  hasKey: boolean
+  keyMasked?: string
+  status: 'ready' | 'no_key' | 'invalid'
+}
+
+export interface LocalAgentInfo {
+  name: string
+  adapter: string
+  healthy: boolean
+  version?: string
+  status: 'online' | 'offline'
+}
+
+export interface AgentListResponse {
+  api: ApiAgentInfo[]
+  local: LocalAgentInfo[]
+}
+
 export interface DefaultsConfig {
   maxRounds: number
   mode: SessionMode

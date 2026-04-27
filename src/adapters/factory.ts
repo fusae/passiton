@@ -57,6 +57,7 @@ export function createAdapter(agentCfg: AgentConfig): Adapter | undefined {
         timeout: agentCfg.timeout,
       })
     case 'openai-api':
+    case 'custom-api':
       return new OpenAIApiAdapter({
         apiKey: requireApiKey(agentCfg),
         model: agentCfg.model,
@@ -87,6 +88,25 @@ export function registerConfiguredAdapters(
     }
     ;(adapter as { name: string }).name = name
     router.registerAdapter(adapter)
+  }
+}
+
+export function registerUserConfiguredAdapters(
+  router: Router,
+  userId: string,
+  agents: Record<string, AgentConfig>
+): void {
+  router.clearUserAdapters(userId)
+  for (const [name, agentCfg] of Object.entries(agents)) {
+    let adapter: Adapter | undefined
+    try {
+      adapter = createAdapter(agentCfg)
+    } catch {
+      continue
+    }
+    if (!adapter) continue
+    ;(adapter as { name: string }).name = name
+    router.registerUserAdapter(userId, adapter)
   }
 }
 

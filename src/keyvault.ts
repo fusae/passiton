@@ -46,7 +46,7 @@ function deriveUserKey(userId: string): Buffer {
   ))
 }
 
-function encryptApiKey(userId: string, key: string): { encryptedKey: string; iv: string; authTag: string } {
+export function encryptSecret(userId: string, key: string): { encryptedKey: string; iv: string; authTag: string } {
   const iv = crypto.randomBytes(12)
   const cipher = crypto.createCipheriv('aes-256-gcm', deriveUserKey(userId), iv)
   const encrypted = Buffer.concat([cipher.update(key, 'utf-8'), cipher.final()])
@@ -57,7 +57,7 @@ function encryptApiKey(userId: string, key: string): { encryptedKey: string; iv:
   }
 }
 
-function decryptApiKey(record: state.StoredApiKeyRecord): string {
+export function decryptSecret(record: { userId: string; encryptedKey: string; iv: string; authTag: string }): string {
   const decipher = crypto.createDecipheriv(
     'aes-256-gcm',
     deriveUserKey(record.userId),
@@ -81,7 +81,7 @@ export function storeKey(params: { userId: string; provider: string; key: string
   if (!params.key.trim()) {
     throw new KeyVaultError(400, '"key" must be a non-empty string')
   }
-  const encrypted = encryptApiKey(params.userId, params.key)
+  const encrypted = encryptSecret(params.userId, params.key)
   const record = state.createStoredApiKey({
     id: crypto.randomUUID(),
     userId: params.userId,
@@ -100,7 +100,7 @@ export function storeKey(params: { userId: string; provider: string; key: string
 
 export function listKeys(userId: string): Array<{ id: string; provider: Provider; name: string; maskedKey: string; createdAt: number }> {
   return state.listStoredApiKeys(userId).map((record) => {
-    const key = decryptApiKey(record)
+    const key = decryptSecret(record)
     return {
       id: record.id,
       provider: record.provider,
@@ -116,7 +116,7 @@ export function decryptKey(userId: string, id: string): { provider: Provider; ke
   if (!record) throw new KeyVaultError(404, 'Not found')
   return {
     provider: record.provider,
-    key: decryptApiKey(record),
+    key: decryptSecret(record),
     envVar: envVarForProvider(record.provider),
   }
 }
@@ -136,6 +136,11 @@ export function envVarForProvider(provider: Provider): string {
   }
 }
 
-function maskKey(key: string): string {
+export function maskKey(key: string): string {
   return `****${key.slice(-4)}`
+}
+
+export function maskAgentKey(key: string): string {
+  if (key.length <= 8) return maskKey(key)
+  return `${key.slice(0, 3)}...${key.slice(-4)}`
 }

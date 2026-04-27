@@ -5,7 +5,7 @@ import { AgentCatalog } from './agents.js'
 import { initDb } from './state.js'
 import { Router } from './router.js'
 import { registerConfiguredAdapters } from './adapters/factory.js'
-import { createServer } from './server.js'
+import { createServer, registerPersistedUserAgents } from './server.js'
 import { installGracefulShutdown } from './shutdown.js'
 
 async function main(): Promise<void> {
@@ -21,6 +21,7 @@ async function main(): Promise<void> {
 
   // Register adapters based on config
   registerConfiguredAdapters(router, config.agents)
+  registerPersistedUserAgents(router)
   agentCatalog.registerDiscoveredAdapters(router)
 
   // Start HTTP + WebSocket server
