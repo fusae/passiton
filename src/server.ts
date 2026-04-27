@@ -457,6 +457,11 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
     try {
       // ── API routes ─────────────────────────────────────────────────────────
 
+      // GET /health — unauthenticated liveness check for Docker/Fly.
+      if (pathname === '/health' && method === 'GET') {
+        return json(res, 200, { ok: true })
+      }
+
       // POST /api/auth/login
       if (pathname === '/api/auth/login' && method === 'POST') {
         const { email, password } = parseAuthBody(await parseBody(req))

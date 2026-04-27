@@ -75,6 +75,14 @@ test('GET /api/stats returns aggregated stats payload', async () => {
   })
 })
 
+test('GET /health returns unauthenticated liveness payload', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/health`)
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), { ok: true })
+  })
+})
+
 test('GET /api/pipelines/:id returns pipeline with session details', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'pipelines@example.com')
