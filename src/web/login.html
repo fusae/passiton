@@ -58,6 +58,10 @@
 
   <script>
     const TOKEN_KEY = 'turing-jwt'
+    const API_BASE = window.location.protocol === 'file:' ? 'http://127.0.0.1:4590' : ''
+    if (window.location.protocol === 'file:') {
+      window.location.href = `${API_BASE}/login.html`
+    }
     const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
     function showToast(message, type = 'error') {
@@ -94,7 +98,7 @@
         const body = validateAuthForm(form, mode)
         btn.disabled = true
         btn.textContent = mode === 'login' ? 'Logging in...' : 'Creating...'
-        const res = await fetch(`/api/auth/${mode}`, {
+        const res = await fetch(`${API_BASE}/api/auth/${mode}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -102,7 +106,7 @@
         const data = await res.json().catch(() => null)
         if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
         localStorage.setItem(TOKEN_KEY, data.token)
-        window.location.href = 'index.html'
+        window.location.href = API_BASE ? `${API_BASE}/dashboard` : '/dashboard'
       } catch (err) {
         showToast(err.message || 'Authentication failed', 'error')
       } finally {

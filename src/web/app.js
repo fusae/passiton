@@ -1,137 +1,136 @@
-// Turing Web UI — vanilla JS
+// Turing Cloud — SPA Application
+// Complete rewrite based on new UI design
 
 const API = ''  // same origin
 const AUTH_TOKEN_KEY = 'turing-jwt'
+const THEME_KEY = 'turing-theme'
 
-// ── State ─────────────────────────────────────────────────────────────────────
-let sessions = []
-let pipelines = []
-let agents = []
-let apiKeys = []
-let templates = []
-let stats = null
-let activeSessionId = null
-let activePipelineId = null
-let ws = null
-let currentMessages = []
-let currentSnapshots = []
-let activeSession = null
-let activePipeline = null
-let sessionFilter = 'all'
-let appConfig = null
-let editingAgentName = null
-const heartbeats = new Map()
-const UI_PREFS_KEY = 'turing-ui-prefs'
-const PROVIDER_OPTIONS = {
-  'anthropic-api': { label: 'Anthropic', color: '#D97706', models: ['claude-sonnet-4-20250514', 'claude-3.5-haiku'] },
-  'openai-api': { label: 'OpenAI', color: '#10B981', models: ['gpt-4o', 'gpt-4o-mini', 'o3-mini'] },
-  'zhipu-api': { label: '智谱', color: '#3B82F6', models: ['glm-4-flash', 'glm-4'] },
-  'custom-api': { label: 'Custom', color: '#8B5CF6', models: [] },
-}
-const DEFAULT_BASE_URLS = {
-  'anthropic-api': 'https://api.anthropic.com/v1/messages',
-  'openai-api': 'https://api.openai.com/v1/chat/completions',
-  'zhipu-api': 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+// ── Global State ──────────────────────────────────────────────────────────────
+const state = {
+  user: null,
+  sessions: [],
+  pipelines: [],
+  agents: [],
+  apiKeys: [],
+  stats: null,
+  config: null,
+  currentView: 'dashboard',
+  currentSessionId: null,
+  currentPipelineId: null,
+  currentPipeline: null,
+  currentSession: null,
+  currentMessages: [],
+  currentSnapshots: [],
+  ws: null,
+  heartbeats: new Map(),
 }
 
-// ── DOM refs ──────────────────────────────────────────────────────────────────
-const sessionList      = document.getElementById('session-list')
-const pipelineList     = document.getElementById('pipeline-list')
-const pipelineSidebarSection = document.getElementById('pipeline-sidebar-section')
-const pipelineToggle   = document.getElementById('pipeline-toggle')
-const pipelineToggleIcon = document.getElementById('pipeline-toggle-icon')
-const agentsList       = document.querySelector('.agents-list')
-const statsGrid        = document.getElementById('stats-grid')
-const statsPanel       = document.getElementById('stats-panel')
-const statsToggle      = document.getElementById('stats-toggle')
-const statsToggleIcon  = document.getElementById('stats-toggle-icon')
-const emptyState       = document.getElementById('empty-state')
-const sessionView      = document.getElementById('session-view')
-const pipelineView     = document.getElementById('pipeline-view')
-const messagesEl       = document.getElementById('messages')
-const sessionTitle     = document.getElementById('session-title')
-const sessionBadge     = document.getElementById('session-badge')
-const sessionRounds    = document.getElementById('session-rounds')
-const pipelineTitle    = document.getElementById('pipeline-title')
-const pipelineBadge    = document.getElementById('pipeline-badge')
-const pipelineProgress = document.getElementById('pipeline-progress-label')
-const pipelineDetail   = document.getElementById('pipeline-detail')
-const injectInput      = document.getElementById('inject-input')
-const modalOverlay     = document.getElementById('modal-overlay')
-const pipelineModalOverlay = document.getElementById('pipeline-modal-overlay')
-const pipelineStepList = document.getElementById('pipeline-step-list')
-const roundsBanner     = document.getElementById('rounds-banner')
-const roundsBannerMsg  = document.getElementById('rounds-banner-msg')
-const errorBanner      = document.getElementById('error-banner')
-const errorBannerMsg   = document.getElementById('error-banner-msg')
-const errorDetail      = document.getElementById('error-detail')
-const sessionProgress  = document.getElementById('session-progress')
-const progressAgent    = document.getElementById('progress-agent')
-const progressElapsed  = document.getElementById('progress-elapsed')
-const progressOutput   = document.getElementById('progress-output')
-const changesSection   = document.getElementById('changes-section')
-const changesCount     = document.getElementById('changes-count')
-const changesList      = document.getElementById('changes-list')
-const resumeModalOv    = document.getElementById('resume-modal-overlay')
-const wsStatusEl       = document.getElementById('ws-status')
-const scrollToBottomBtn = document.getElementById('scroll-to-bottom')
-const settingsToggle   = document.getElementById('settings-toggle')
-const settingsPanel    = document.getElementById('settings-panel')
-const settingsClose    = document.getElementById('settings-close')
-const agentsConfigList = document.getElementById('agents-config-list')
-const agentFormSlot    = document.getElementById('agent-config-form-slot')
-const addAgentBtn      = document.getElementById('add-agent-btn')
-const saveGlobalBtn    = document.getElementById('save-global-settings-btn')
-const sidebarUserEmail = document.getElementById('sidebar-user-email')
-const logoutBtn        = document.getElementById('logout-btn')
-const apiKeysList      = document.getElementById('api-keys-list')
-const apiKeyForm       = document.getElementById('api-key-form')
-
-// ── Init ──────────────────────────────────────────────────────────────────────
-async function init() {
-  if (!requireAuth()) return
-  renderAuthenticatedUser()
-  setupLogout()
-  await loadAppConfig()
-  await loadAgents()
-  await loadTemplates()
-  await loadStats()
-  await loadPipelines()
-  await loadSessions()
-  connectWs()
-  setInterval(() => {
-    loadAgents()
-    loadStats()
-    loadPipelines()
-  }, 30_000)
-  setupFilterBtns()
-  setupMobileMenu()
-  setupMarked()
-  setupMessageActions()
-  setupScrollToBottom()
-  setupSettingsPanel()
-  setupPipelineUi()
-  setupStatsToggle()
-  setupPipelineToggle()
-  setInterval(tickProgressIndicators, 1000)
+// ── Router ────────────────────────────────────────────────────────────────────
+const routes = {
+  '/': 'landing',
+  '/dashboard': 'dashboard',
+  '/session/:id': 'session',
+  '/pipeline/:id': 'pipeline',
+  '/settings': 'settings',
+  '/login': 'login',
 }
 
-// ── Marked.js setup ───────────────────────────────────────────────────────────
-function setupMarked() {
-  if (typeof marked !== 'undefined') {
-    marked.setOptions({
-      breaks: true,
-      gfm: true,
-    })
+function navigate(path) {
+  history.pushState(null, '', path)
+  render()
+}
+
+function render() {
+  const path = location.pathname
+
+  // Auth check
+  if (path !== '/' && path !== '/login' && !getValidAuthToken()) {
+    return navigate('/login')
+  }
+
+  // Route matching
+  if (path === '/' || path === '/landing') {
+    renderLanding()
+  } else if (path === '/login') {
+    renderLogin()
+  } else if (path === '/dashboard') {
+    renderDashboard()
+  } else if (path.startsWith('/session/')) {
+    const id = path.split('/')[2]
+    renderSession(id)
+  } else if (path.startsWith('/pipeline/')) {
+    const id = path.split('/')[2]
+    renderPipeline(id)
+  } else if (path === '/settings') {
+    renderSettings()
+  } else {
+    navigate('/dashboard')
   }
 }
 
-// ── API helpers ───────────────────────────────────────────────────────────────
+window.addEventListener('popstate', render)
+
+// ── API Helpers ───────────────────────────────────────────────────────────────
+function getAuthToken() {
+  return localStorage.getItem(AUTH_TOKEN_KEY)
+}
+
+function getValidAuthToken() {
+  const token = getAuthToken()
+  if (!token) return null
+  if (isJwtExpired(token)) {
+    clearAuthToken()
+    return null
+  }
+  return token
+}
+
+function getCurrentUser() {
+  const token = getValidAuthToken()
+  if (!token) return null
+  try {
+    const [, payload] = token.split('.')
+    const data = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))
+    return {
+      id: data.sub || '',
+      email: data.email || 'unknown',
+      initials: initialsFromEmail(data.email || 'U'),
+    }
+  } catch {
+    return null
+  }
+}
+
+function isJwtExpired(token) {
+  try {
+    const [, payload] = token.split('.')
+    if (!payload) return true
+    const data = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))
+    return typeof data.exp === 'number' && data.exp * 1000 <= Date.now()
+  } catch {
+    return true
+  }
+}
+
+function setAuthToken(token) {
+  localStorage.setItem(AUTH_TOKEN_KEY, token)
+  connectWs()
+}
+
+function clearAuthToken() {
+  localStorage.removeItem(AUTH_TOKEN_KEY)
+  if (state.ws) {
+    state.ws.close()
+    state.ws = null
+  }
+}
+
 async function api(path, method = 'GET', body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } }
-  const token = getAuthToken()
+  const token = getValidAuthToken()
   if (token) opts.headers.Authorization = `Bearer ${token}`
   if (body !== undefined) opts.body = JSON.stringify(body)
+
   let r
   try {
     r = await fetch(API + path, opts)
@@ -151,1511 +150,1628 @@ async function api(path, method = 'GET', body) {
 
   if (!r.ok) {
     if (r.status === 401) {
-      clearAuthAndRedirect()
-      throw new Error('Session expired')
+      clearAuthToken()
+      navigate('/login')
     }
-    const errorMsg = data?.error || text || `HTTP ${r.status}`
-    throw new Error(errorMsg)
+    throw new Error(data?.error || `HTTP ${r.status}`)
   }
+
   return data
 }
 
-function getAuthToken() {
-  return localStorage.getItem(AUTH_TOKEN_KEY)
+// ── Theme ─────────────────────────────────────────────────────────────────────
+function initTheme() {
+  const saved = localStorage.getItem(THEME_KEY) || 'dark'
+  document.documentElement.setAttribute('data-theme', saved)
 }
 
-function decodeJwtPayload(token) {
-  try {
-    const payload = token.split('.')[1]
-    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = base64.padEnd(base64.length + ((4 - base64.length % 4) % 4), '=')
-    return JSON.parse(atob(padded))
-  } catch {
-    return null
+function toggleTheme() {
+  const html = document.documentElement
+  const current = html.getAttribute('data-theme')
+  const next = current === 'dark' ? 'light' : 'dark'
+  html.setAttribute('data-theme', next)
+  localStorage.setItem(THEME_KEY, next)
+  updateThemeButton()
+}
+
+function updateThemeButton() {
+  const btn = document.querySelector('.theme-toggle')
+  if (!btn) return
+  const theme = document.documentElement.getAttribute('data-theme')
+  btn.textContent = theme === 'dark' ? '🌙' : '☀️'
+}
+
+function renderUserMenu() {
+  const user = getCurrentUser()
+  return `
+    <div class="user-menu">
+      <button class="avatar" onclick="window.toggleUserMenu()" title="${escapeAttr(user?.email || 'Account')}">${escapeHtml(user?.initials || 'U')}</button>
+      <div class="user-menu-popover" id="user-menu-popover">
+        <div class="user-menu-email">${escapeHtml(user?.email || 'unknown')}</div>
+        <button onclick="window.logout()">Logout</button>
+      </div>
+    </div>
+  `
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connectWs() {
+  if (state.ws) return
+  const token = getValidAuthToken()
+  if (!token || location.protocol === 'file:') return
+
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const wsUrl = `${protocol}//${location.host}/ws?token=${encodeURIComponent(token)}`
+
+  state.ws = new WebSocket(wsUrl)
+
+  state.ws.onopen = () => {
+    console.log('[ws] connected')
+  }
+
+  state.ws.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data)
+      handleWsEvent(msg)
+    } catch (err) {
+      console.error('[ws] parse error:', err)
+    }
+  }
+
+  state.ws.onclose = () => {
+    console.log('[ws] disconnected')
+    state.ws = null
+    setTimeout(connectWs, 3000)
+  }
+
+  state.ws.onerror = (err) => {
+    console.error('[ws] error:', err)
   }
 }
 
-function isJwtExpired(token) {
-  const payload = decodeJwtPayload(token)
-  return !payload?.exp || payload.exp * 1000 <= Date.now()
-}
+function handleWsEvent(event) {
+  console.log('[ws] event:', event.type)
 
-function requireAuth() {
-  const token = getAuthToken()
-  if (!token || isJwtExpired(token)) {
-    clearAuthAndRedirect()
-    return false
+  switch (event.type) {
+    case 'session:created':
+    case 'session:updated':
+      loadSessions()
+      if (state.currentSessionId === event.payload.id) {
+        loadSessionDetail(event.payload.id)
+      }
+      break
+    case 'session:deleted':
+      loadSessions()
+      if (state.currentSessionId === event.payload.id) {
+        navigate('/dashboard')
+      }
+      break
+    case 'message:new':
+      if (state.currentSessionId === event.payload.sessionId) {
+        loadSessionDetail(state.currentSessionId)
+      }
+      break
+    case 'pipeline:created':
+    case 'pipeline:updated':
+      loadPipelines()
+      if (state.currentPipelineId === event.payload.id) {
+        loadPipelineDetail(event.payload.id)
+      }
+      break
+    case 'heartbeat':
+      state.heartbeats.set(event.sessionId, event)
+      updateHeartbeat(event)
+      break
   }
-  return true
 }
 
-function clearAuthAndRedirect() {
-  localStorage.removeItem(AUTH_TOKEN_KEY)
-  window.location.href = 'login.html'
+function updateHeartbeat(hb) {
+  // Update progress indicators if on session page
+  if (state.currentSessionId === hb.sessionId) {
+    const progressAgent = document.getElementById('progress-agent')
+    const progressElapsed = document.getElementById('progress-elapsed')
+    const progressOutput = document.getElementById('progress-output')
+
+    if (progressAgent) progressAgent.textContent = hb.agent
+    if (progressElapsed) progressElapsed.textContent = `${Math.floor(hb.elapsed / 1000)}s`
+    if (progressOutput) progressOutput.textContent = hb.lastOutput || 'Processing...'
+  }
 }
 
-function renderAuthenticatedUser() {
-  const payload = decodeJwtPayload(getAuthToken() || '')
-  if (sidebarUserEmail) sidebarUserEmail.textContent = payload?.email || payload?.sub || 'unknown'
-}
-
-function setupLogout() {
-  if (!logoutBtn) return
-  logoutBtn.addEventListener('click', clearAuthAndRedirect)
-}
-
-async function loadAppConfig() {
+// ── Data Loading ──────────────────────────────────────────────────────────────
+async function loadSessions() {
   try {
-    appConfig = await api('/api/config')
-    applyConfigDefaultsToNewSession()
-  } catch {
-    appConfig = null
+    state.sessions = await api('/api/sessions')
+  } catch (err) {
+    console.error('Failed to load sessions:', err)
+  }
+}
+
+async function loadPipelines() {
+  try {
+    state.pipelines = await api('/api/pipelines')
+  } catch (err) {
+    console.error('Failed to load pipelines:', err)
+  }
+}
+
+async function loadAgents() {
+  try {
+    state.agents = await api('/api/agents')
+  } catch (err) {
+    console.error('Failed to load agents:', err)
+  }
+}
+
+async function loadApiKeys() {
+  try {
+    state.apiKeys = await api('/api/keys')
+  } catch (err) {
+    console.error('Failed to load API keys:', err)
+    state.apiKeys = []
   }
 }
 
 async function loadStats() {
   try {
-    stats = await api('/api/stats')
-    renderStats()
-  } catch { /* server might be down */ }
+    state.stats = await api('/api/stats')
+  } catch (err) {
+    console.error('Failed to load stats:', err)
+  }
 }
 
-async function loadPipelines() {
+async function loadConfig() {
   try {
-    pipelines = await api('/api/pipelines')
-    renderPipelineList()
-    if (activePipelineId) {
-      const pipeline = pipelines.find((item) => item.id === activePipelineId)
-      if (pipeline) {
-        await selectPipeline(activePipelineId, false)
-      }
-    }
-  } catch { /* server might be down */ }
+    state.config = await api('/api/config')
+  } catch (err) {
+    console.error('Failed to load config:', err)
+  }
 }
 
-// ── Toast notifications ───────────────────────────────────────────────────────
-function showToast(message, type = 'error') {
-  const container = document.getElementById('toast-container')
-  if (!container) return
-
-  const toast = document.createElement('div')
-  toast.className = `toast toast-${type}`
-  toast.textContent = message
-  container.appendChild(toast)
-
-  setTimeout(() => toast.classList.add('show'), 10)
-
-  setTimeout(() => {
-    toast.classList.remove('show')
-    setTimeout(() => toast.remove(), 300)
-  }, 3000)
-}
-
-// ── Agents ────────────────────────────────────────────────────────────────────
-async function loadAgents() {
+async function loadSessionDetail(id) {
   try {
-    agents = await api('/api/agents')
-    renderAgents()
-    populateAgentSelects()
-  } catch { /* server might be down */ }
+    const session = await api(`/api/sessions/${id}`)
+    state.currentSession = session
+    state.currentMessages = session.messages || []
+    renderSessionMessages()
+    renderSessionPanel(session)
+  } catch (err) {
+    console.error('Failed to load session detail:', err)
+  }
 }
 
-function renderAgents() {
-  const apiAgents = agents || []
-  if (!apiAgents.length) {
-    agentsList.innerHTML = '<span class="no-agents">No agents registered</span>'
+async function loadPipelineDetail(id) {
+  try {
+    const pipeline = await api(`/api/pipelines/${id}`)
+    state.currentPipeline = pipeline
+    renderPipelineBody(pipeline)
+  } catch (err) {
+    console.error('Failed to load pipeline detail:', err)
+  }
+}
+
+// ── Render Functions ──────────────────────────────────────────────────────────
+function renderLanding() {
+  document.body.innerHTML = `
+    <nav class="landing-nav">
+      <div class="landing-brand">
+        <div class="logo-icon">T</div>
+        <span>Turing Cloud</span>
+      </div>
+      <div class="landing-nav-links">
+        <a href="#features">Features</a>
+        <a href="#architecture">Architecture</a>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/dashboard" class="btn btn-primary btn-sm">Get Started</a>
+        <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
+      </div>
+    </nav>
+
+    <section class="hero">
+      <div class="hero-badge fade-in-up">
+        <span>✦</span> Agent Orchestration Platform
+      </div>
+
+      <h1 class="fade-in-up delay-1">
+        让你的 AI Agent<br><span class="grad-text">互相对话</span>
+      </h1>
+
+      <p class="hero-sub fade-in-up delay-2">
+        Turing Cloud 是一个 Agent 间通信编排平台。自带 API Key，灵活路由，
+        按 Session 计费 —— 让多个 AI 模型协作完成复杂任务。
+      </p>
+
+      <div class="hero-cta fade-in-up delay-3">
+        <a href="/dashboard" class="btn btn-primary pulse-glow">
+          Get Started
+          <span>→</span>
+        </a>
+        <a href="/login" class="btn btn-secondary">
+          Sign In
+        </a>
+      </div>
+    </section>
+
+    <section class="arch-section" id="architecture">
+      <h2 class="fade-in-up">工作原理</h2>
+      <p class="section-sub fade-in-up delay-1">Agent ↔ Turing ↔ Agent —— 简洁而强大的通信编排</p>
+
+      <div class="arch-diagram fade-in-up delay-2">
+        <div class="arch-col">
+          <div class="arch-node">
+            <div class="arch-icon" style="background: rgba(99,102,241,0.15);">🤖</div>
+            <div class="arch-label">Claude</div>
+            <div class="arch-sub">Anthropic API</div>
+          </div>
+          <div class="arch-node">
+            <div class="arch-icon" style="background: rgba(34,197,94,0.15);">🧠</div>
+            <div class="arch-label">GPT-4o</div>
+            <div class="arch-sub">OpenAI API</div>
+          </div>
+        </div>
+
+        <div class="arch-connector"></div>
+
+        <div class="arch-center">
+          <div class="arch-icon">⚡</div>
+          <div class="arch-label">Turing Cloud</div>
+          <div class="arch-sub" style="color: var(--text-secondary); margin-top: 4px;">路由 · 编排 · 计费</div>
+        </div>
+
+        <div class="arch-connector"></div>
+
+        <div class="arch-col">
+          <div class="arch-node">
+            <div class="arch-icon" style="background: rgba(245,158,11,0.15);">💬</div>
+            <div class="arch-label">GLM-4</div>
+            <div class="arch-sub">智谱 API</div>
+          </div>
+          <div class="arch-node">
+            <div class="arch-icon" style="background: rgba(139,92,246,0.15);">🔮</div>
+            <div class="arch-label">Gemini</div>
+            <div class="arch-sub">Google API</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="features-section" id="features">
+      <h2>为什么选择 Turing Cloud</h2>
+      <p class="section-sub">三个核心优势，让 Agent 协作变得简单</p>
+
+      <div class="features-grid">
+        <div class="feature-card fade-in-up delay-1">
+          <div class="feature-icon" style="background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15));">
+            🔀
+          </div>
+          <h3>Agent 编排</h3>
+          <p>
+            通过 Session 和 Pipeline 灵活定义 Agent 之间的通信拓扑。
+            支持串行、并行、条件分支 —— 像搭积木一样构建复杂工作流。
+          </p>
+        </div>
+
+        <div class="feature-card fade-in-up delay-2">
+          <div class="feature-icon" style="background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(249,115,22,0.15));">
+            🔑
+          </div>
+          <h3>用自己的 Key</h3>
+          <p>
+            自带 API Key，直接对接 Anthropic、OpenAI、智谱等主流提供商。
+            不锁定供应商，数据不经代理 —— 完全掌控你的 AI 资产。
+          </p>
+        </div>
+
+        <div class="feature-card fade-in-up delay-3">
+          <div class="feature-icon" style="background: linear-gradient(135deg, rgba(34,197,94,0.15), rgba(16,185,129,0.15));">
+            📊
+          </div>
+          <h3>按需计费</h3>
+          <p>
+            只为实际使用的 Session 付费。透明的按轮次计费模式，
+            没有包月、没有隐藏费用。用多少、付多少。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta-section">
+      <h2 class="fade-in-up" style="margin-bottom: 16px;">
+        准备好让 Agent 协作了吗？
+      </h2>
+      <p class="fade-in-up delay-1" style="color: var(--text-secondary); font-size: 1.05rem; margin-bottom: 36px;">
+        免费开始，按需扩展。几分钟内就能创建第一个 Session。
+      </p>
+      <div class="fade-in-up delay-2">
+        <a href="/dashboard" class="btn btn-primary" style="padding: 14px 36px; font-size: 1rem;">
+          开始使用 Turing Cloud
+          <span>→</span>
+        </a>
+      </div>
+    </section>
+
+    <footer class="landing-footer">
+      <p>© 2026 Turing Cloud. All rights reserved.</p>
+    </footer>
+  `
+  updateThemeButton()
+}
+
+function renderLogin() {
+  document.body.innerHTML = `
+    <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;">
+      <div class="card" style="max-width: 420px; width: 100%;">
+        <div style="text-align: center; margin-bottom: 32px;">
+          <div style="display: inline-flex; align-items: center; gap: 10px; margin-bottom: 16px;">
+            <div class="logo-icon" style="width: 36px; height: 36px; font-size: 1rem;">T</div>
+            <h2 style="margin: 0;">Turing Cloud</h2>
+          </div>
+          <p style="color: var(--text-secondary); font-size: 0.9rem;">Agent Orchestration Platform</p>
+        </div>
+
+        <div class="tabs" style="margin-bottom: 24px;">
+          <button class="tab-btn active" onclick="window.switchAuthTab('login')">Login</button>
+          <button class="tab-btn" onclick="window.switchAuthTab('register')">Register</button>
+        </div>
+
+        <form id="login-form" class="tab-panel active" onsubmit="window.handleLogin(event)">
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" class="input" name="email" required autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" class="input" name="password" required minlength="8" autocomplete="current-password">
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
+            Login
+          </button>
+        </form>
+
+        <form id="register-form" class="tab-panel" onsubmit="window.handleRegister(event)">
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" class="input" name="email" required autocomplete="email">
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" class="input" name="password" required minlength="8" autocomplete="new-password">
+          </div>
+          <div class="form-group">
+            <label>Confirm Password</label>
+            <input type="password" class="input" name="confirmPassword" required minlength="8" autocomplete="new-password">
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
+            Create Account
+          </button>
+        </form>
+      </div>
+    </div>
+  `
+  updateThemeButton()
+}
+
+window.switchAuthTab = function(tab) {
+  document.querySelectorAll('.tab-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', (i === 0 && tab === 'login') || (i === 1 && tab === 'register'))
+  })
+  document.querySelectorAll('.tab-panel').forEach((panel, i) => {
+    panel.classList.toggle('active', (i === 0 && tab === 'login') || (i === 1 && tab === 'register'))
+  })
+}
+
+window.handleLogin = async function(e) {
+  e.preventDefault()
+  const form = e.target
+  const fd = new FormData(form)
+  const email = fd.get('email')
+  const password = fd.get('password')
+
+  try {
+    const data = await api('/api/auth/login', 'POST', { email, password })
+    setAuthToken(data.token)
+    state.user = data.user
+    navigate('/dashboard')
+  } catch (err) {
+    alert(err.message)
+  }
+}
+
+window.handleRegister = async function(e) {
+  e.preventDefault()
+  const form = e.target
+  const fd = new FormData(form)
+  const email = fd.get('email')
+  const password = fd.get('password')
+  const confirmPassword = fd.get('confirmPassword')
+
+  if (password !== confirmPassword) {
+    alert('Passwords do not match')
     return
   }
-  const apiSection = `
-    <div class="agent-section">
-      <div class="agent-section-title">Models</div>
-      ${apiAgents.length ? apiAgents.map(renderApiAgentRow).join('') : '<span class="no-agents">No API models</span>'}
-    </div>`
-  agentsList.innerHTML = `${apiSection}<button type="button" class="add-agent-sidebar-btn" id="sidebar-add-agent-btn">+ Add Agent</button>`
-  agentsList.querySelectorAll('[data-agent-edit]').forEach((row) => {
-    row.addEventListener('click', () => openAgentEditor(row.dataset.agentEdit))
-  })
-  agentsList.querySelector('#sidebar-add-agent-btn')?.addEventListener('click', () => openAgentEditor())
+
+  try {
+    const data = await api('/api/auth/register', 'POST', { email, password })
+    setAuthToken(data.token)
+    state.user = data.user
+    navigate('/dashboard')
+  } catch (err) {
+    alert(err.message)
+  }
 }
 
-document.getElementById('refresh-agents-btn').addEventListener('click', loadAgents)
+function renderDashboard() {
+  document.body.innerHTML = `
+    <div class="app-layout">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="logo-icon">T</div>
+          <span>Turing Cloud</span>
+        </div>
+        <nav class="sidebar-nav">
+          <a href="/dashboard" class="active">
+            <span class="nav-icon">◉</span> Sessions
+          </a>
+          <a href="/dashboard" onclick="window.switchDashboardView('pipelines'); return false;">
+            <span class="nav-icon">⧫</span> Pipelines
+          </a>
+          <a href="/settings">
+            <span class="nav-icon">⬡</span> Agents
+          </a>
+          <a href="/settings">
+            <span class="nav-icon">⚙</span> Settings
+          </a>
+          <a href="/settings">
+            <span class="nav-icon">🔑</span> API Keys
+          </a>
+        </nav>
+        <div class="sidebar-footer">
+          Turing Cloud v0.1.0
+        </div>
+      </aside>
 
-function renderApiAgentRow(agent) {
-  const provider = providerMeta(agent.adapter)
-  const customEndpoint = agent.baseUrl && agent.baseUrl !== DEFAULT_BASE_URLS[agent.adapter]
-  return `<button type="button" class="api-agent-row" data-agent-edit="${escHtml(agent.name)}">
-    <span class="provider-dot" style="background:${provider.color}"></span>
-    <span class="agent-meta">
-      <span class="agent-line">
-        <span class="agent-name">${escHtml(agent.model || agent.name)}</span>
-        ${statusBadge(agent.status)}
-      </span>
-      <span class="agent-subline">
-        <span>${escHtml(agent.provider || provider.label)}</span>
-        ${agent.hasKey ? `<span>${escHtml(agent.keyMasked || '')}</span>` : ''}
-        ${customEndpoint ? '<span class="agent-tag">custom endpoint</span>' : ''}
-      </span>
-    </span>
-  </button>`
-}
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-left">
+            <h2>Dashboard</h2>
+            <div class="view-toggle">
+              <button class="active" onclick="window.switchDashboardView('sessions')">Sessions</button>
+              <button onclick="window.switchDashboardView('pipelines')">Pipelines</button>
+            </div>
+          </div>
+          <div class="topbar-right">
+            <button class="btn btn-primary btn-sm" onclick="window.showNewSessionModal()">+ New Session</button>
+            <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
+            ${renderUserMenu()}
+          </div>
+        </header>
 
-function statusBadge(status) {
-  const labels = { ready: 'Ready', no_key: 'No Key', invalid: 'Invalid', online: 'Online', offline: 'Offline' }
-  return `<span class="model-status ${escHtml(status)}"><span></span>${escHtml(labels[status] || status)}</span>`
-}
+        <div class="content">
+          <div class="stats-row">
+            <div class="stat-card">
+              <div class="label">Active Sessions</div>
+              <div class="stat-value grad-text" id="stat-active">0</div>
+              <div class="stat-sub">running right now</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">Completed Today</div>
+              <div class="stat-value" id="stat-done">0</div>
+              <div class="stat-sub">↑ vs yesterday</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">Avg Rounds</div>
+              <div class="stat-value" id="stat-rounds">0</div>
+              <div class="stat-sub">across all sessions</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">Active Agents</div>
+              <div class="stat-value" id="stat-agents">0</div>
+              <div class="stat-sub">providers configured</div>
+            </div>
+          </div>
 
-function providerMeta(adapter) {
-  return PROVIDER_OPTIONS[adapter] || PROVIDER_OPTIONS['custom-api']
-}
+          <div id="view-sessions">
+            <div class="flex-between mb-24">
+              <h3>Recent Sessions</h3>
+              <input type="text" class="input" placeholder="Search sessions..." style="width: 240px;">
+            </div>
+            <div id="session-cards" class="session-cards"></div>
+          </div>
 
-async function openAgentEditor(name) {
-  await openSettingsPanel()
-  showAgentForm(name)
-}
-
-function renderStats() {
-  if (!statsGrid || !stats) return
-  const cards = [
-    {
-      label: 'Sessions',
-      value: stats.sessions.total,
-      sub: `${stats.sessions.active} active · ${stats.sessions.error} error`,
-    },
-    {
-      label: 'Success',
-      value: `${Math.round((stats.sessions.successRate || 0) * 100)}%`,
-      sub: `${stats.sessions.done} done`,
-    },
-    {
-      label: 'Avg rounds',
-      value: stats.sessions.avgRounds.toFixed(1),
-      sub: formatDuration(stats.sessions.avgDurationMs || 0),
-    },
-    {
-      label: 'Pipelines',
-      value: stats.pipelines.total,
-      sub: `${stats.pipelines.active} active · ${stats.pipelines.done} done`,
-    },
-  ]
-  statsGrid.innerHTML = cards.map(card => `
-    <div class="stats-card">
-      <span class="stats-label">${escHtml(card.label)}</span>
-      <div class="stats-value">${escHtml(card.value)}</div>
-      <div class="stats-subvalue">${escHtml(card.sub)}</div>
+          <div id="view-pipelines" style="display: none;">
+            <div class="flex-between mb-24">
+              <h3>Pipelines</h3>
+              <button class="btn btn-primary btn-sm" onclick="window.showNewPipelineModal()">+ New Pipeline</button>
+            </div>
+            <div id="pipeline-cards" class="pipeline-cards"></div>
+          </div>
+        </div>
+      </div>
     </div>
+  `
+
+  updateThemeButton()
+  loadDashboardData()
+}
+
+async function loadDashboardData() {
+  await Promise.all([
+    loadSessions(),
+    loadPipelines(),
+    loadAgents(),
+    loadStats()
+  ])
+
+  renderDashboardStats()
+  renderSessionCards()
+  renderPipelineCards()
+}
+
+function renderDashboardStats() {
+  if (!state.stats) return
+
+  const statActive = document.getElementById('stat-active')
+  const statDone = document.getElementById('stat-done')
+  const statRounds = document.getElementById('stat-rounds')
+  const statAgents = document.getElementById('stat-agents')
+
+  if (statActive) statActive.textContent = state.stats.sessions?.active || 0
+  if (statDone) statDone.textContent = state.stats.sessions?.done || 0
+  if (statRounds) statRounds.textContent = state.stats.sessions?.avgRounds || 0
+  if (statAgents) statAgents.textContent = state.agents.length || 0
+}
+
+function renderSessionCards() {
+  const container = document.getElementById('session-cards')
+  if (!container) return
+
+  if (state.sessions.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No sessions yet. Create your first one!</p>'
+    return
+  }
+
+  container.innerHTML = state.sessions.map(session => `
+    <a href="/session/${session.id}" class="card session-card">
+      <div class="session-card-header">
+        <span class="session-card-title">${escapeHtml(session.from.label || session.from.adapter)} → ${escapeHtml(session.to.label || session.to.adapter)}</span>
+        <span class="badge badge-${session.status}">${session.status}</span>
+      </div>
+      <div class="session-card-route">
+        <span>${escapeHtml(session.from.label || session.from.adapter)}</span>
+        <span class="route-arrow">→</span>
+        <span>${escapeHtml(session.to.label || session.to.adapter)}</span>
+      </div>
+      <div class="session-card-meta">
+        <span>⟳ ${session.currentRound} rounds</span>
+        <span>⏱ ${formatTime(session.updatedAt)}</span>
+      </div>
+    </a>
   `).join('')
 }
 
-function setupStatsToggle() {
-  if (!statsToggle || !statsPanel) return
-  const prefs = loadUiPrefs()
-  if (prefs.statsCollapsed !== false) {
-    statsPanel.classList.add('collapsed')
-    statsToggle.setAttribute('aria-expanded', 'false')
-    if (statsToggleIcon) statsToggleIcon.textContent = '▸'
+function renderPipelineCards() {
+  const container = document.getElementById('pipeline-cards')
+  if (!container) return
+
+  if (state.pipelines.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No pipelines yet.</p>'
+    return
   }
-  statsToggle.addEventListener('click', () => {
-    const collapsed = statsPanel.classList.toggle('collapsed')
-    statsToggle.setAttribute('aria-expanded', String(!collapsed))
-    if (statsToggleIcon) statsToggleIcon.textContent = collapsed ? '▸' : '▾'
-    saveUiPrefs({ statsCollapsed: collapsed })
-  })
-}
 
-// ── Templates ─────────────────────────────────────────────────────────────────
-async function loadTemplates() {
-  try {
-    templates = await api('/api/templates')
-    renderTemplateSelector()
-  } catch { /* server might be down */ }
-}
-
-function renderTemplateSelector() {
-  const container = document.getElementById('template-selector')
-  if (!container || !templates.length) return
-  container.innerHTML =
-    `<div class="template-card selected" data-template="">
-      <div class="template-name">Custom</div>
-      <div class="template-desc">Configure session parameters from scratch</div>
-    </div>` +
-    templates.map(t => `
-      <div class="template-card" data-template="${t.id}">
-        <div class="template-name">${escHtml(t.name)}</div>
-        <div class="template-desc">${escHtml(t.description)}</div>
+  container.innerHTML = state.pipelines.map(pipeline => `
+    <a href="/pipeline/${pipeline.id}" class="card pipeline-card">
+      <div class="flex-between mb-8">
+        <span style="font-weight: 600;">${escapeHtml(pipeline.name)}</span>
+        <span class="badge badge-${pipeline.status}">${pipeline.status}</span>
       </div>
-    `).join('')
-
-  container.querySelectorAll('.template-card').forEach(card => {
-    card.addEventListener('click', () => {
-      container.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'))
-      card.classList.add('selected')
-      applyTemplate(card.dataset.template)
-    })
-  })
+      <p style="font-size: 0.82rem; color: var(--text-muted);">${pipeline.sessions.length} sessions</p>
+    </a>
+  `).join('')
 }
 
-function applyTemplate(templateId) {
-  const modeSelect = document.getElementById('mode-select')
-  const promptEl = document.getElementById('modal-prompt')
-  if (!templateId) {
-    // Custom — reset to defaults
-    modeSelect.value = appConfig?.defaults?.mode || 'collaborate'
-    promptEl.value = ''
-    promptEl.placeholder = 'Describe the task…'
-    return
-  }
-  const tpl = templates.find(t => t.id === templateId)
-  if (!tpl) return
-  modeSelect.value = tpl.mode
-  if (tpl.promptPrefix) {
-    promptEl.value = tpl.promptPrefix
-    promptEl.setSelectionRange(tpl.promptPrefix.length, tpl.promptPrefix.length)
+window.switchDashboardView = function(view) {
+  const sessionsView = document.getElementById('view-sessions')
+  const pipelinesView = document.getElementById('view-pipelines')
+  const btns = document.querySelectorAll('.view-toggle button')
+
+  if (view === 'pipelines') {
+    sessionsView.style.display = 'none'
+    pipelinesView.style.display = 'block'
+    btns[0].classList.remove('active')
+    btns[1].classList.add('active')
   } else {
-    promptEl.value = ''
+    sessionsView.style.display = 'block'
+    pipelinesView.style.display = 'none'
+    btns[0].classList.add('active')
+    btns[1].classList.remove('active')
   }
-  promptEl.placeholder = tpl.description
-  promptEl.focus()
 }
 
-// ── Sessions ──────────────────────────────────────────────────────────────────
-function renderPipelineList() {
-  if (!pipelineList) return
-  if (!pipelines.length) {
-    pipelineList.innerHTML = '<div class="session-empty">No pipelines</div>'
+async function renderSession(id) {
+  state.currentSessionId = id
+
+  // Load session data
+  let session = null
+  try {
+    session = await api(`/api/sessions/${id}`)
+  } catch (err) {
+    document.body.innerHTML = '<div>Session not found</div>'
+    return
+  }
+  state.currentSession = session
+
+  document.body.innerHTML = `
+    <div class="app-layout">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="logo-icon">T</div>
+          <span>Turing Cloud</span>
+        </div>
+        <nav class="sidebar-nav">
+          <a href="/dashboard">
+            <span class="nav-icon">◉</span> Sessions
+          </a>
+          <a href="/dashboard">
+            <span class="nav-icon">⧫</span> Pipelines
+          </a>
+          <a href="/settings">
+            <span class="nav-icon">⬡</span> Agents
+          </a>
+          <a href="/settings">
+            <span class="nav-icon">⚙</span> Settings
+          </a>
+        </nav>
+        <div class="sidebar-footer">
+          Turing Cloud v0.1.0
+        </div>
+      </aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-left">
+            <a href="/dashboard" class="btn btn-ghost btn-sm">← Back</a>
+            <h2>${escapeHtml(session.from.label || session.from.adapter)} → ${escapeHtml(session.to.label || session.to.adapter)}</h2>
+            <span class="badge badge-${session.status}">${session.status}</span>
+          </div>
+          <div class="topbar-right">
+            <button class="btn btn-secondary btn-sm" onclick="window.exportCurrentSession()">Export</button>
+            ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.extendSessionTimeout()">+5m</button>' : ''}
+            ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.pauseSession()">⏸ Pause</button>' : ''}
+            ${session.status === 'paused' ? '<button class="btn btn-primary btn-sm" onclick="window.resumeSession()">▶ Resume</button>' : ''}
+            ${session.status !== 'done' ? '<button class="btn btn-danger btn-sm" onclick="window.stopSession()">■ Stop</button>' : ''}
+            <button class="btn btn-ghost btn-sm" onclick="window.deleteCurrentSession()">Delete</button>
+            <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
+            ${renderUserMenu()}
+          </div>
+        </header>
+
+        <div class="session-layout">
+          <div class="session-chat">
+            <div class="session-chat-messages" id="messages-container">
+              <div class="chat-stream" id="messages"></div>
+            </div>
+            <div class="session-chat-input">
+              <div class="inject-bar">
+                <input type="text" class="input" id="inject-input" placeholder="Inject a message into this session…">
+                <button class="btn btn-primary btn-sm" onclick="window.injectMessage()">Send</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="session-panel" id="session-panel-content"></div>
+        </div>
+      </div>
+    </div>
+  `
+
+  state.currentMessages = session.messages || []
+  renderSessionMessages()
+  renderSessionPanel(session)
+  updateThemeButton()
+}
+
+function renderSessionPanel(session) {
+  const panel = document.getElementById('session-panel-content')
+  if (!panel || !session) return
+  const progress = session.maxRounds ? Math.min(100, session.currentRound / session.maxRounds * 100) : 0
+  panel.innerHTML = `
+    <div class="panel-section">
+      <div class="label mb-16">Session Info</div>
+      <div class="panel-kv">
+        <div class="panel-kv-row">
+          <span class="kv-label">Session ID</span>
+          <span class="kv-value mono" style="font-size: 0.78rem;">${escapeHtml(session.id.slice(0, 12))}</span>
+        </div>
+        <div class="panel-kv-row">
+          <span class="kv-label">From Agent</span>
+          <span class="kv-value">${escapeHtml(agentLabel(session.from))}</span>
+        </div>
+        <div class="panel-kv-row">
+          <span class="kv-label">To Agent</span>
+          <span class="kv-value">${escapeHtml(agentLabel(session.to))}</span>
+        </div>
+        <div class="panel-kv-row">
+          <span class="kv-label">Mode</span>
+          <span class="kv-value">${escapeHtml(session.mode)}</span>
+        </div>
+        <div class="panel-kv-row">
+          <span class="kv-label">Rounds</span>
+          <span class="kv-value">${session.currentRound} / ${session.maxRounds}</span>
+        </div>
+        <div class="panel-kv-row">
+          <span class="kv-label">Status</span>
+          <span class="badge badge-${session.status}" style="margin: 0;">${session.status}</span>
+        </div>
+        <div class="panel-kv-row">
+          <span class="kv-label">Created</span>
+          <span class="kv-value">${new Date(session.createdAt).toLocaleString()}</span>
+        </div>
+        ${session.cwd ? `<div class="panel-kv-row"><span class="kv-label">CWD</span><span class="kv-value mono">${escapeHtml(session.cwd)}</span></div>` : ''}
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="panel-section">
+      <div class="label mb-8">Progress</div>
+      <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 8px;">Round ${session.currentRound} of ${session.maxRounds}</p>
+      <div class="progress-bar">
+        <div class="progress-bar-fill" style="width: ${progress}%;"></div>
+      </div>
+    </div>
+
+    ${session.errorMessage ? `
+      <div class="divider"></div>
+      <div class="error-box">
+        <div class="error-title">${escapeHtml(session.errorType || 'Session error')}</div>
+        <div class="error-detail">${escapeHtml(session.errorMessage)}</div>
+      </div>
+    ` : ''}
+
+    ${session.lastAgentOutput ? `
+      <div class="divider"></div>
+      <div class="panel-section">
+        <div class="label mb-8">Last Agent Output</div>
+        <pre class="code-block">${escapeHtml(session.lastAgentOutput)}</pre>
+      </div>
+    ` : ''}
+  `
+}
+
+function renderSessionMessages() {
+  const container = document.getElementById('messages')
+  if (!container) return
+
+  if (state.currentMessages.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No messages yet</p>'
     return
   }
 
-  pipelineList.innerHTML = pipelines.map((pipeline) => {
-    const doneCount = pipeline.sessions.filter((step) => step.status === 'done').length
+  container.innerHTML = state.currentMessages.map(msg => {
+    const isFrom = msg.from !== 'human'
+    const avatar = isFrom ? (msg.from.charAt(0).toUpperCase()) : 'H'
     return `
-      <div class="pipeline-item ${pipeline.id === activePipelineId ? 'active' : ''}" data-id="${pipeline.id}">
-        <div class="pipeline-item-header">
-          <span class="pipeline-item-name">${escHtml(pipeline.name)}</span>
-          <span class="badge ${pipeline.status}">${escHtml(pipeline.status)}</span>
+      <div class="chat-msg ${isFrom ? 'from' : 'to'}">
+        <div class="chat-avatar">${avatar}</div>
+        <div>
+          <div class="chat-bubble">${renderMarkdown(msg.content)}</div>
+          <div class="chat-meta">
+            <span>${escapeHtml(msg.from)} · Round ${msg.round} · ${new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+          <button class="msg-copy-btn" onclick="window.copyMessage(${jsString(msg.id)})" title="Copy">Copy</button>
+          </div>
         </div>
-        <div class="pipeline-item-sub">${doneCount}/${pipeline.sessions.length} steps · ${timeAgo(pipeline.updatedAt)}</div>
       </div>
     `
   }).join('')
 
-  pipelineList.querySelectorAll('.pipeline-item').forEach((el) => {
-    el.addEventListener('click', () => {
-      selectPipeline(el.dataset.id)
-      closeMobileMenu()
-    })
-  })
-}
-
-async function loadSessions() {
-  try {
-    sessions = await api('/api/sessions')
-    renderSessionList()
-  } catch { /* server might be down */ }
-}
-
-function filteredSessions() {
-  if (sessionFilter === 'all') return sessions
-  return sessions.filter(s => s.status === sessionFilter)
-}
-
-function renderSessionList() {
-  const visible = filteredSessions()
-  if (!visible.length) {
-    sessionList.innerHTML = '<div class="session-empty">No sessions</div>'
-    return
+  // Scroll to bottom
+  const messagesContainer = document.getElementById('messages-container')
+  if (messagesContainer) {
+    messagesContainer.scrollTop = messagesContainer.scrollHeight
   }
-  sessionList.innerHTML = visible.map(s => {
-    const firstMsg = s.messages?.[0]?.content || s.initialPrompt || ''
-    const preview = firstMsg.slice(0, 60) + (firstMsg.length > 60 ? '…' : '')
-    const hb = heartbeats.get(s.id)
-    const running = s.status === 'active'
-    const progress = running && hb
-      ? `<div class="session-progress-line">${escHtml(hb.agent)} · ${formatDuration(currentHeartbeatElapsed(hb))}${hb.lastOutput ? ` · ${escHtml(hb.lastOutput)}` : ''}</div>`
-      : ''
-    return `
-    <div class="session-item ${s.id === activeSessionId ? 'active' : ''} ${running ? 'running' : ''}" data-id="${s.id}">
-      <div class="session-agents">${agentLabel(s.from)} → ${agentLabel(s.to)}</div>
-      ${preview ? `<div class="session-preview">${escHtml(preview)}</div>` : ''}
-      ${progress}
-      <div class="session-meta">
-        <span class="badge ${s.status}">${s.status}</span>
-        ${s.mode && s.mode !== 'freeform' ? `<span class="mode-chip">${s.mode}</span>` : ''}
-        <span class="rounds-chip">R${s.currentRound}/${s.maxRounds}</span>
-        <span class="time-chip">${timeAgo(s.updatedAt)}</span>
+}
+
+window.pauseSession = async function() {
+  if (!state.currentSessionId) return
+  try {
+    await api(`/api/sessions/${state.currentSessionId}/pause`, 'POST')
+    renderSession(state.currentSessionId)
+  } catch (err) {
+    alert(err.message)
+  }
+}
+
+window.resumeSession = async function() {
+  if (!state.currentSessionId) return
+  try {
+    await api(`/api/sessions/${state.currentSessionId}/resume`, 'POST')
+    renderSession(state.currentSessionId)
+  } catch (err) {
+    alert(err.message)
+  }
+}
+
+window.stopSession = async function() {
+  if (!state.currentSessionId) return
+  if (!confirm('Are you sure you want to stop this session?')) return
+  try {
+    await api(`/api/sessions/${state.currentSessionId}/stop`, 'POST')
+    navigate('/dashboard')
+  } catch (err) {
+    alert(err.message)
+  }
+}
+
+window.injectMessage = async function() {
+  if (!state.currentSessionId) return
+  const input = document.getElementById('inject-input')
+  if (!input || !input.value.trim()) return
+
+  try {
+    await api(`/api/sessions/${state.currentSessionId}/message`, 'POST', {
+      content: input.value.trim()
+    })
+    input.value = ''
+    loadSessionDetail(state.currentSessionId)
+  } catch (err) {
+    alert(err.message)
+  }
+}
+
+window.extendSessionTimeout = async function() {
+  if (!state.currentSessionId) return
+  try {
+    const result = await api(`/api/sessions/${state.currentSessionId}/extend-timeout`, 'POST')
+    alert(`Timeout extended +${Math.round(result.extensionMs / 60000)}m`)
+  } catch (err) {
+    alert(err.message)
+  }
+}
+
+window.deleteCurrentSession = async function() {
+  if (!state.currentSessionId) return
+  if (!confirm('Delete this session?')) return
+  try {
+    await api(`/api/sessions/${state.currentSessionId}`, 'DELETE')
+    navigate('/dashboard')
+  } catch (err) {
+    alert(err.message)
+  }
+}
+
+window.copyMessage = async function(id) {
+  const msg = state.currentMessages.find(item => item.id === id)
+  if (!msg) return
+  await copyText(msg.content || '')
+}
+
+window.exportCurrentSession = function() {
+  if (!state.currentSession) return
+  const content = buildSessionExport(state.currentSession, state.currentMessages)
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `turing-session-${state.currentSession.id}.md`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function renderPipeline(id) {
+  state.currentPipelineId = id
+  document.body.innerHTML = `
+    <div class="app-layout">
+      <aside class="sidebar">
+        <div class="sidebar-brand"><div class="logo-icon">T</div><span>Turing Cloud</span></div>
+        <nav class="sidebar-nav">
+          <a href="/dashboard"><span class="nav-icon">◉</span> Sessions</a>
+          <a href="/dashboard" onclick="window.switchDashboardView('pipelines'); return false;" class="active"><span class="nav-icon">⧫</span> Pipelines</a>
+          <a href="/settings"><span class="nav-icon">⚙</span> Settings</a>
+        </nav>
+      </aside>
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-left"><a href="/dashboard" class="btn btn-ghost btn-sm">← Back</a><h2>Pipeline</h2></div>
+          <div class="topbar-right"><button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>${renderUserMenu()}</div>
+        </header>
+        <div class="content" id="pipeline-detail"><p style="color: var(--text-muted);">Loading pipeline...</p></div>
       </div>
-      <button class="session-delete-btn" data-id="${s.id}" title="Delete session">🗑</button>
-    </div>
-  `}).join('')
-
-  sessionList.querySelectorAll('.session-item').forEach(el => {
-    el.addEventListener('click', (e) => {
-      // Don't select if clicking delete button
-      if (e.target.classList.contains('session-delete-btn')) return
-      selectSession(el.dataset.id)
-      closeMobileMenu()
-    })
-  })
-
-  sessionList.querySelectorAll('.session-delete-btn').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation()
-      const id = btn.dataset.id
-      if (!confirm('Delete this session?')) return
-      try {
-        await api(`/api/sessions/${id}`, 'DELETE')
-        sessions = sessions.filter(s => s.id !== id)
-        if (activeSessionId === id) {
-          activeSessionId = null
-          if (emptyState) emptyState.classList.remove('hidden')
-          if (sessionView) sessionView.classList.add('hidden')
-        }
-        renderSessionList()
-      } catch (err) {
-        showToast(err.message, 'error')
-      }
-    })
-  })
-
-  if (!activeSessionId && !activePipelineId) {
-    renderSessionView(null)
-  }
-}
-
-function agentLabel(ref) {
-  return ref?.label || ref?.adapter || '?'
-}
-
-async function selectSession(id) {
-  activeSessionId = id
-  activePipelineId = null
-  activePipeline = null
-  renderSessionList()
-  renderPipelineList()
-  try {
-    const [data, logs, snapshots] = await Promise.all([
-      api(`/api/sessions/${id}`),
-      api(`/api/sessions/${id}/logs`),
-      api(`/api/sessions/${id}/snapshots`),
-    ])
-    if (activeSessionId !== id) return
-    activeSession = data
-    currentMessages = data.messages || []
-    currentSnapshots = snapshots || []
-    replaceLogEntries(logs || [])
-    renderSessionView(data)
-  } catch (e) {
-    console.error('Failed to load session', e)
-  }
-}
-
-async function selectPipeline(id, renderList = true) {
-  activePipelineId = id
-  activeSessionId = null
-  activeSession = null
-  currentMessages = []
-  currentSnapshots = []
-  replaceLogEntries([])
-  if (renderList) {
-    renderPipelineList()
-    renderSessionList()
-  }
-  try {
-    const pipeline = await api(`/api/pipelines/${id}`)
-    if (activePipelineId !== id) return
-    activePipeline = pipeline
-    renderPipelineView(pipeline)
-  } catch (e) {
-    console.error('Failed to load pipeline', e)
-  }
-}
-
-function renderSessionView(session) {
-  if (!session) {
-    if (pipelineView) pipelineView.classList.add('hidden')
-    if (emptyState) emptyState.classList.remove('hidden')
-    if (sessionView) sessionView.classList.add('hidden')
-    if (sessionProgress) sessionProgress.classList.add('hidden')
-    if (errorBanner) errorBanner.classList.add('hidden')
-    if (errorDetail) errorDetail.classList.add('hidden')
-    if (changesSection) changesSection.classList.add('hidden')
-    replaceLogEntries([])
-    return
-  }
-
-  if (emptyState) {
-    emptyState.classList.add('hidden')
-  }
-  if (pipelineView) {
-    pipelineView.classList.add('hidden')
-  }
-  if (sessionView) {
-    sessionView.classList.remove('hidden')
-  }
-
-  sessionTitle.textContent = `${agentLabel(session.from)} → ${agentLabel(session.to)}`
-  sessionBadge.className   = `badge ${session.status}`
-  sessionBadge.textContent = session.status
-  sessionRounds.textContent = `R${session.currentRound}/${session.maxRounds}`
-
-  updateToolbar(session)
-  updateProgressIndicator()
-  renderMessages(currentMessages, session)
-  renderChanges(currentSnapshots)
-}
-
-function renderPipelineView(pipeline) {
-  if (!pipeline) {
-    if (pipelineView) pipelineView.classList.add('hidden')
-    if (emptyState) emptyState.classList.remove('hidden')
-    return
-  }
-
-  if (emptyState) emptyState.classList.add('hidden')
-  if (sessionView) sessionView.classList.add('hidden')
-  if (pipelineView) pipelineView.classList.remove('hidden')
-
-  const doneCount = pipeline.sessions.filter((step) => step.status === 'done').length
-  pipelineTitle.textContent = pipeline.name
-  pipelineBadge.className = `badge ${pipeline.status}`
-  pipelineBadge.textContent = pipeline.status
-  pipelineProgress.textContent = `${doneCount}/${pipeline.sessions.length} steps`
-
-  document.getElementById('btn-pipeline-pause').classList.toggle('hidden', pipeline.status !== 'active')
-  document.getElementById('btn-pipeline-resume').classList.toggle('hidden', pipeline.status !== 'paused' && pipeline.status !== 'error')
-
-  const sessionMap = new Map((pipeline.sessionDetails || []).map((session) => [session.id, session]))
-  pipelineDetail.innerHTML = `
-    <div class="pipeline-detail-header">
-      <div class="pipeline-detail-grid">
-        <div class="pipeline-detail-card">
-          <span>Status</span>
-          <strong>${escHtml(pipeline.status)}</strong>
-        </div>
-        <div class="pipeline-detail-card">
-          <span>Steps</span>
-          <strong>${escHtml(String(pipeline.sessions.length))}</strong>
-        </div>
-        <div class="pipeline-detail-card">
-          <span>Finished</span>
-          <strong>${escHtml(String(doneCount))}</strong>
-        </div>
-        <div class="pipeline-detail-card">
-          <span>Updated</span>
-          <strong>${escHtml(timeAgo(pipeline.updatedAt))}</strong>
-        </div>
-      </div>
-    </div>
-    <div class="pipeline-steps">
-      ${pipeline.sessions.map((step, index) => {
-        const session = sessionMap.get(step.sessionId)
-        const prompt = session?.messages?.[0]?.content || ''
-        const dependsOn = (step.dependsOn || [])
-          .map((id) => pipeline.sessions.findIndex((item) => item.sessionId === id) + 1)
-          .filter((n) => n > 0)
-        return `
-          <div class="pipeline-step-card">
-            <div class="pipeline-step-head">
-              <div>
-                <div class="pipeline-step-index">Step ${index + 1}</div>
-                <div class="pipeline-step-title">${escHtml(agentLabel(session?.from))} → ${escHtml(agentLabel(session?.to))}</div>
-              </div>
-              <span class="badge ${step.status === 'pending' ? 'paused' : step.status === 'active' ? 'active' : step.status === 'done' ? 'done' : 'error'}">${escHtml(step.status)}</span>
-            </div>
-            <div class="pipeline-step-body">
-              <div class="pipeline-step-meta">
-                <span>${escHtml(session?.mode || 'freeform')}</span>
-                <span>R${escHtml(String(session?.currentRound || 0))}/${escHtml(String(session?.maxRounds || 0))}</span>
-              </div>
-              ${dependsOn.length ? `<div class="pipeline-step-meta"><span>Depends on</span><span>Step ${dependsOn.join(', Step ')}</span></div>` : ''}
-              ${prompt ? `<div style="margin-top:8px;">${escHtml(prompt.slice(0, 220))}${prompt.length > 220 ? '…' : ''}</div>` : ''}
-            </div>
-            <div class="pipeline-step-actions">
-              <button type="button" class="pipeline-open-btn" data-session-id="${step.sessionId}">Open session</button>
-            </div>
-          </div>
-        `
-      }).join('')}
     </div>
   `
-
-  pipelineDetail.querySelectorAll('[data-session-id]').forEach((btn) => {
-    btn.addEventListener('click', () => selectSession(btn.dataset.sessionId))
-  })
+  updateThemeButton()
+  loadPipelineDetail(id)
 }
 
-function updateToolbar(session) {
-  const isError   = session.status === 'error'
-  const isDone    = session.status === 'done'
-  const isActive  = session.status === 'active'
-  const isPaused  = session.status === 'paused'
-
-  document.getElementById('btn-pause').classList.toggle('hidden', !isActive)
-  document.getElementById('btn-extend-timeout').classList.toggle('hidden', !isActive)
-  document.getElementById('btn-resume').classList.toggle('hidden', !isPaused)
-  document.getElementById('btn-stop').classList.toggle('hidden', isDone || isError)
-
-  // Check if paused because of round limit
-  if (isPaused && session.currentRound >= session.maxRounds) {
-    roundsBannerMsg.textContent = `⚠ Reached ${session.maxRounds}-round limit`
-    roundsBanner.classList.remove('hidden')
-  } else {
-    roundsBanner.classList.add('hidden')
-  }
-
-  if (isError) {
-    const round = session.errorRound ? `Round ${session.errorRound}: ` : ''
-    errorBannerMsg.textContent = `${round}${session.errorMessage || 'Session failed'}`
-    errorBanner.classList.remove('hidden')
-    renderErrorDetail(session)
-  } else {
-    errorBanner.classList.add('hidden')
-    errorDetail.classList.add('hidden')
-  }
-
-  // Allow inject for done sessions (triggers reopen), disable only for error
-  injectInput.disabled = isError
-  document.getElementById('inject-btn').disabled = isError
-
-  // Update placeholder to hint reopen behavior
-  if (isDone) {
-    injectInput.placeholder = 'Send a message to reopen...'
-  } else {
-    injectInput.placeholder = 'Inject a message… (⌘+Enter to send)'
-  }
-}
-
-function renderErrorDetail(session) {
-  if (!errorDetail) return
-  const fields = [
-    ['Type', session.errorType || 'unknown'],
-    ['Round', session.errorRound ?? 'unknown'],
-    ['Message', session.errorMessage || 'Session failed'],
-  ]
-  const lastOutput = session.lastAgentOutput
-    ? `<pre>${escHtml(session.lastAgentOutput)}</pre>`
-    : '<div class="error-empty">No partial output captured</div>'
-  errorDetail.innerHTML = `
-    <div class="error-detail-grid">
-      ${fields.map(([label, value]) => `
-        <div class="error-detail-field">
-          <span>${escHtml(label)}</span>
-          <strong>${escHtml(value)}</strong>
-        </div>
+function renderPipelineBody(pipeline) {
+  const container = document.getElementById('pipeline-detail')
+  if (!container || !pipeline) return
+  const sessions = pipeline.sessionDetails || []
+  container.innerHTML = `
+    <div class="flex-between mb-24">
+      <div>
+        <h2>${escapeHtml(pipeline.name)}</h2>
+        <p style="color: var(--text-muted); font-size: 0.86rem;">${sessions.length} sessions · ${new Date(pipeline.createdAt).toLocaleString()}</p>
+      </div>
+      <span class="badge badge-${pipeline.status}">${pipeline.status}</span>
+    </div>
+    <div class="session-cards">
+      ${sessions.map(session => `
+        <a href="/session/${session.id}" class="card session-card">
+          <div class="session-card-header">
+            <span class="session-card-title">${escapeHtml(agentLabel(session.from))} → ${escapeHtml(agentLabel(session.to))}</span>
+            <span class="badge badge-${session.status}">${session.status}</span>
+          </div>
+          <div class="session-card-meta">
+            <span>⟳ ${session.currentRound}/${session.maxRounds}</span>
+            <span>⏱ ${formatTime(session.updatedAt)}</span>
+          </div>
+        </a>
       `).join('')}
     </div>
-    <div class="error-last-output">
-      <span>Last output</span>
-      ${lastOutput}
+  `
+}
+
+async function renderSettings() {
+  await loadConfig()
+  await loadAgents()
+  await loadApiKeys()
+
+  document.body.innerHTML = `
+    <div class="app-layout">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="logo-icon">T</div>
+          <span>Turing Cloud</span>
+        </div>
+        <nav class="sidebar-nav">
+          <a href="/dashboard">
+            <span class="nav-icon">◉</span> Sessions
+          </a>
+          <a href="/dashboard">
+            <span class="nav-icon">⧫</span> Pipelines
+          </a>
+          <a href="/settings" class="active">
+            <span class="nav-icon">⬡</span> Agents
+          </a>
+          <a href="/settings">
+            <span class="nav-icon">⚙</span> Settings
+          </a>
+          <a href="/settings">
+            <span class="nav-icon">🔑</span> API Keys
+          </a>
+        </nav>
+        <div class="sidebar-footer">
+          Turing Cloud v0.1.0
+        </div>
+      </aside>
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-left">
+            <h2>Settings</h2>
+          </div>
+          <div class="topbar-right">
+            <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
+            ${renderUserMenu()}
+          </div>
+        </header>
+
+        <div class="content">
+          <div style="max-width: 860px;">
+            <div class="tabs">
+              <button class="tab-btn active" onclick="window.switchSettingsTab('agents')">Agents</button>
+              <button class="tab-btn" onclick="window.switchSettingsTab('apikeys')">API Keys</button>
+              <button class="tab-btn" onclick="window.switchSettingsTab('general')">General</button>
+            </div>
+
+            <div id="tab-agents" class="tab-panel active">
+              <div class="flex-between mb-24">
+                <div>
+                  <h3>Configured Agents</h3>
+                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage your AI model connections</p>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="window.showAgentModal()">+ Add Agent</button>
+              </div>
+
+              <div class="agent-list" id="agents-list"></div>
+            </div>
+
+            <div id="tab-apikeys" class="tab-panel">
+              <div class="flex-between mb-24">
+                <div>
+                  <h3>API Keys</h3>
+                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage your API keys for different providers</p>
+                </div>
+                <button class="btn btn-primary btn-sm" onclick="window.showApiKeyModal()">+ Add Key</button>
+              </div>
+              <div class="agent-list" id="api-keys-list"></div>
+            </div>
+
+            <div id="tab-general" class="tab-panel">
+              <h3 class="mb-24">General Settings</h3>
+
+              <div class="form-group">
+                <label>Default Max Rounds</label>
+                <input type="number" class="input" value="${state.config?.defaults?.maxRounds || 20}" id="max-rounds-input">
+              </div>
+
+              <div class="form-group">
+                <label>Default Mode</label>
+                <select class="input" id="mode-input">
+                  <option value="collaborate" ${state.config?.defaults?.mode === 'collaborate' ? 'selected' : ''}>Collaborate</option>
+                  <option value="discuss" ${state.config?.defaults?.mode === 'discuss' ? 'selected' : ''}>Discuss</option>
+                  <option value="review" ${state.config?.defaults?.mode === 'review' ? 'selected' : ''}>Review</option>
+                  <option value="freeform" ${state.config?.defaults?.mode === 'freeform' ? 'selected' : ''}>Freeform</option>
+                </select>
+              </div>
+
+              <button class="btn btn-primary" onclick="window.saveGeneralSettings()">Save Settings</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   `
-  errorDetail.classList.remove('hidden')
+
+  renderAgentsList()
+  renderApiKeysList()
+  updateThemeButton()
 }
 
-function updateProgressIndicator() {
-  if (!activeSession || activeSession.status !== 'active') {
-    sessionProgress.classList.add('hidden')
+function renderAgentsList() {
+  const container = document.getElementById('agents-list')
+  if (!container) return
+
+  if (state.agents.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No agents configured</p>'
     return
   }
-  const hb = heartbeats.get(activeSession.id)
-  if (!hb) {
-    sessionProgress.classList.add('hidden')
-    return
-  }
 
-  progressAgent.textContent = hb.agent
-  progressElapsed.textContent = formatDuration(currentHeartbeatElapsed(hb))
-  progressOutput.textContent = hb.lastOutput || 'Running...'
-  sessionProgress.classList.remove('hidden')
-}
+  container.innerHTML = state.agents.map(agent => {
+    const colors = ['#6366f1', '#22c55e', '#f59e0b', '#3b82f6', '#8b5cf6']
+    const color = colors[Math.floor(Math.random() * colors.length)]
+    const initial = agent.name.charAt(0).toUpperCase()
 
-function tickProgressIndicators() {
-  updateProgressIndicator()
-  if (sessions.some(s => s.status === 'active')) {
-    renderSessionList()
-  }
-}
-
-function currentHeartbeatElapsed(hb) {
-  return hb.elapsed + Math.max(0, Date.now() - hb.receivedAt)
-}
-
-function renderMessages(msgs, session) {
-  let lastRound = -1
-  messagesEl.innerHTML = msgs.map(m => {
-    const divider = m.round !== lastRound && m.round > 0
-      ? `<div class="round-divider"><span>Round ${m.round}</span></div>`
-      : ''
-    lastRound = m.round
-    return divider + buildMessageMarkup(m, session, { noAnimate: true })
+    return `
+      <div class="agent-item">
+        <div class="agent-icon" style="background: linear-gradient(135deg, ${color}, ${color}dd);">${initial}</div>
+        <div class="agent-info">
+          <div class="agent-name">${escapeHtml(agent.name)}</div>
+          <div class="agent-model">${escapeHtml(agent.provider)} · ${escapeHtml(agent.model || agent.adapter)}${agent.keyMasked ? ` · ${escapeHtml(agent.keyMasked)}` : ''}</div>
+        </div>
+        <span class="badge badge-${agent.status === 'ready' ? 'active' : agent.status === 'no_key' ? 'paused' : 'error'}">${escapeHtml(agent.status)}</span>
+        <div class="agent-actions">
+          <button class="btn btn-ghost btn-sm" onclick="window.showAgentModal(${jsString(agent.name)})">Edit</button>
+          <button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick="window.deleteAgent(${jsString(agent.name)})">Delete</button>
+        </div>
+      </div>
+    `
   }).join('')
-  scrollToBottom()
-  updateScrollToBottomButton()
 }
 
-function scrollToBottom() {
-  messagesEl.scrollTop = messagesEl.scrollHeight
+function renderApiKeysList() {
+  const container = document.getElementById('api-keys-list')
+  if (!container) return
+
+  if (state.apiKeys.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No API keys stored</p>'
+    return
+  }
+
+  container.innerHTML = state.apiKeys.map(key => `
+    <div class="agent-item">
+      <div class="agent-icon">${escapeHtml(providerIcon(key.provider))}</div>
+      <div class="agent-info">
+        <div class="agent-name">${escapeHtml(key.name)}</div>
+        <div class="agent-model">${escapeHtml(providerLabel(key.provider))} · <span class="key-masked">${escapeHtml(key.maskedKey)}</span></div>
+      </div>
+      <button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick="window.deleteApiKey(${jsString(key.id)})">Delete</button>
+    </div>
+  `).join('')
 }
 
-function isScrolledToBottom() {
-  const threshold = 100
-  return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < threshold
-}
-
-function setupScrollToBottom() {
-  messagesEl.addEventListener('scroll', updateScrollToBottomButton)
-
-  scrollToBottomBtn.addEventListener('click', () => {
-    scrollToBottom()
-    updateScrollToBottomButton()
+window.switchSettingsTab = function(tab) {
+  document.querySelectorAll('.tab-btn').forEach((btn, i) => {
+    const tabs = ['agents', 'apikeys', 'general']
+    btn.classList.toggle('active', tabs[i] === tab)
+  })
+  document.querySelectorAll('.tab-panel').forEach((panel, i) => {
+    const tabs = ['agents', 'apikeys', 'general']
+    panel.classList.toggle('active', tabs[i] === tab)
   })
 }
 
-function updateScrollToBottomButton() {
-  scrollToBottomBtn.classList.toggle('hidden', isScrolledToBottom())
-}
+window.saveGeneralSettings = async function() {
+  const maxRounds = parseInt(document.getElementById('max-rounds-input').value)
+  const mode = document.getElementById('mode-input').value
 
-// ── Session controls ──────────────────────────────────────────────────────────
-document.getElementById('btn-pause').addEventListener('click', async () => {
-  if (!activeSessionId) return
-  const btn = document.getElementById('btn-pause')
-  const originalText = btn.textContent
-  btn.disabled = true
-  btn.textContent = '⏸ Pausing...'
   try {
-    await api(`/api/sessions/${activeSessionId}/pause`, 'POST')
-  } catch (err) {
-    showToast(err.message, 'error')
-  } finally {
-    btn.disabled = false
-    btn.textContent = originalText
-  }
-})
-
-document.getElementById('btn-resume').addEventListener('click', async () => {
-  if (!activeSessionId) return
-  const btn = document.getElementById('btn-resume')
-  const originalText = btn.textContent
-  btn.disabled = true
-  btn.textContent = '▶ Resuming...'
-  try {
-    await api(`/api/sessions/${activeSessionId}/resume`, 'POST')
-  } catch (err) {
-    showToast(err.message, 'error')
-  } finally {
-    btn.disabled = false
-    btn.textContent = originalText
-  }
-})
-
-document.getElementById('btn-extend-timeout').addEventListener('click', async () => {
-  if (!activeSessionId) return
-  const btn = document.getElementById('btn-extend-timeout')
-  const originalText = btn.textContent
-  btn.disabled = true
-  btn.textContent = '+5m…'
-  try {
-    const result = await api(`/api/sessions/${activeSessionId}/extend-timeout`, 'POST')
-    showToast(`Timeout extended +${Math.round(result.extensionMs / 60000)}m`, 'success')
-  } catch (err) {
-    showToast(err.message, 'error')
-  } finally {
-    btn.disabled = false
-    btn.textContent = originalText
-  }
-})
-
-document.getElementById('btn-error-resume').addEventListener('click', async () => {
-  if (!activeSessionId) return
-  const btn = document.getElementById('btn-error-resume')
-  const originalText = btn.textContent
-  btn.disabled = true
-  btn.textContent = 'Resuming...'
-  try {
-    const session = await api(`/api/sessions/${activeSessionId}/resume`, 'POST')
-    activeSession = { ...activeSession, ...session }
-    upsertSession(session)
-    updateToolbar(activeSession)
-  } catch (err) {
-    showToast(err.message, 'error')
-  } finally {
-    btn.disabled = false
-    btn.textContent = originalText
-  }
-})
-
-document.getElementById('btn-stop').addEventListener('click', async () => {
-  if (!activeSessionId) return
-  if (!confirm('Stop this session permanently?')) return
-  const btn = document.getElementById('btn-stop')
-  const originalText = btn.textContent
-  btn.disabled = true
-  btn.textContent = '⏹ Stopping...'
-  try {
-    await api(`/api/sessions/${activeSessionId}/stop`, 'POST')
-  } catch (err) {
-    showToast(err.message, 'error')
-  } finally {
-    btn.disabled = false
-    btn.textContent = originalText
-  }
-})
-
-document.getElementById('btn-export').addEventListener('click', () => {
-  exportSession()
-})
-
-// Rounds banner buttons
-document.getElementById('btn-continue-10').addEventListener('click', async () => {
-  if (!activeSessionId) return
-  try {
-    await api(`/api/sessions/${activeSessionId}/resume`, 'POST', { extraRounds: 10 })
-    roundsBanner.classList.add('hidden')
-  } catch (err) {
-    showToast(err.message, 'error')
-  }
-})
-
-document.getElementById('btn-continue-custom').addEventListener('click', () => {
-  resumeModalOv.classList.remove('hidden')
-})
-
-document.getElementById('btn-end-session').addEventListener('click', async () => {
-  if (!activeSessionId) return
-  try {
-    await api(`/api/sessions/${activeSessionId}/stop`, 'POST')
-    roundsBanner.classList.add('hidden')
-  } catch (err) {
-    showToast(err.message, 'error')
-  }
-})
-
-// Resume +N modal
-document.getElementById('resume-modal-cancel').addEventListener('click', () => {
-  closeResumeModal()
-})
-
-function closeResumeModal() {
-  resumeModalOv.classList.add('hidden')
-}
-
-document.getElementById('resume-modal-ok').addEventListener('click', async () => {
-  const n = parseInt(document.getElementById('resume-rounds-input').value)
-  if (!n || n < 1) return
-  const btn = document.getElementById('resume-modal-ok')
-  const originalText = btn.textContent
-  btn.disabled = true
-  btn.textContent = 'Continuing...'
-  try {
-    if (!activeSessionId) return
-    await api(`/api/sessions/${activeSessionId}/resume`, 'POST', { extraRounds: n })
-    roundsBanner.classList.add('hidden')
-    closeResumeModal()
-  } catch (err) {
-    showToast(err.message, 'error')
-  } finally {
-    btn.disabled = false
-    btn.textContent = originalText
-  }
-})
-
-// Inject message
-document.getElementById('inject-btn').addEventListener('click', doInject)
-injectInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) doInject()
-})
-
-async function doInject() {
-  const content = injectInput.value.trim()
-  if (!content || !activeSessionId) return
-  const wasDone = activeSession && activeSession.status === 'done'
-  const btn = document.getElementById('inject-btn')
-  const originalText = btn.textContent
-  injectInput.value = ''
-  injectInput.disabled = true
-  btn.disabled = true
-  btn.textContent = 'Sending...'
-  try {
-    await api(`/api/sessions/${activeSessionId}/message`, 'POST', { content })
-    // If session was done, refresh to pick up reopened state
-    if (wasDone) {
-      await selectSession(activeSessionId)
-    }
-  } catch (err) {
-    showToast(err.message, 'error')
-  } finally {
-    injectInput.disabled = false
-    btn.disabled = false
-    btn.textContent = originalText
-  }
-}
-
-// ── Filter bar ────────────────────────────────────────────────────────────────
-function setupFilterBtns() {
-  document.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      sessionFilter = btn.dataset.filter
-      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'))
-      btn.classList.add('active')
-      renderSessionList()
+    await api('/api/config', 'PUT', {
+      defaults: { maxRounds, mode }
     })
-  })
-}
-
-// ── New session modal ─────────────────────────────────────────────────────────
-document.getElementById('new-btn').addEventListener('click', () => {
-  populateAgentSelects()
-  applyConfigDefaultsToNewSession()
-  // Reset template selection to "custom"
-  const container = document.getElementById('template-selector')
-  if (container) {
-    container.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'))
-    const customCard = container.querySelector('[data-template=""]')
-    if (customCard) customCard.classList.add('selected')
+    alert('Settings saved successfully')
+  } catch (err) {
+    alert(err.message)
   }
-  modalOverlay.classList.remove('hidden')
-  setTimeout(() => document.getElementById('modal-prompt').focus(), 50)
-})
-
-document.getElementById('modal-cancel').addEventListener('click', closeModal)
-document.getElementById('modal-close').addEventListener('click', closeModal)
-
-modalOverlay.addEventListener('click', e => {
-  if (e.target === modalOverlay) closeModal()
-})
-
-document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape') return
-  if (!modalOverlay.classList.contains('hidden')) closeModal()
-  if (!resumeModalOv.classList.contains('hidden')) closeResumeModal()
-  if (!settingsPanel.classList.contains('hidden')) closeSettingsPanel()
-})
-
-function closeModal() {
-  modalOverlay.classList.add('hidden')
 }
 
-document.getElementById('modal-form').addEventListener('submit', async e => {
+window.showNewSessionModal = async function() {
+  if (!state.agents.length) await loadAgents()
+  const readyAgents = state.agents.filter(agent => agent.status === 'ready')
+  const agents = readyAgents.length ? readyAgents : state.agents
+  const options = agents.map(agent => `<option value="${escapeAttr(agent.name)}">${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
+
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3>New Session</h3>
+          <p>Create an agent-to-agent conversation.</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+      </div>
+      <form onsubmit="window.createSession(event)">
+        <div class="form-row">
+          <div class="form-group">
+            <label>From</label>
+            <select class="input" name="from" required>${options}</select>
+          </div>
+          <div class="form-group">
+            <label>To</label>
+            <select class="input" name="to" required>${options}</select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Mode</label>
+            <select class="input" name="mode">
+              <option value="collaborate">Collaborate</option>
+              <option value="discuss">Discuss</option>
+              <option value="review">Review</option>
+              <option value="freeform">Freeform</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Max Rounds</label>
+            <input class="input" type="number" name="maxRounds" min="1" value="${state.config?.defaults?.maxRounds || 5}">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Working Directory</label>
+          <input class="input" name="cwd" placeholder="/path/to/project">
+        </div>
+        <div class="form-group">
+          <label>Prompt</label>
+          <textarea class="input" name="prompt" rows="5" required placeholder="Describe the task..."></textarea>
+        </div>
+        <details class="context-details">
+          <summary>Context</summary>
+          <div class="form-group">
+            <label>Rules / Constraints</label>
+            <textarea class="input" name="contextRules" rows="3"></textarea>
+          </div>
+          <div class="form-group">
+            <label>Background</label>
+            <textarea class="input" name="contextText" rows="3"></textarea>
+          </div>
+          <div class="form-group">
+            <label>Files</label>
+            <textarea class="input" name="contextFiles" rows="2" placeholder="src/web/app.js, src/web/style.css"></textarea>
+          </div>
+        </details>
+        <label class="check-row">
+          <input type="checkbox" name="approveMode">
+          <span>Approve mode</span>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create</button>
+        </div>
+      </form>
+    </div>
+  `)
+}
+
+window.createSession = async function(e) {
   e.preventDefault()
   const fd = new FormData(e.target)
-
-  // Build context object if any fields are filled
-  const contextRules = fd.get('contextRules')?.trim()
-  const contextText = fd.get('contextText')?.trim()
-  const contextFilesRaw = fd.get('contextFiles')?.trim()
-  const contextFiles = contextFilesRaw
-    ? contextFilesRaw.split(/[\n,]/).map(f => f.trim()).filter(Boolean)
-    : []
-
-  let context = undefined
-  if (contextRules || contextText || contextFiles.length > 0) {
-    context = {}
-    if (contextRules) context.rules = contextRules
-    if (contextText) context.text = contextText
-    if (contextFiles.length > 0) context.files = contextFiles
-  }
-
+  const context = buildContextFromForm(fd)
   const body = {
     from: { adapter: fd.get('from') },
-    to:   { adapter: fd.get('to') },
-    initialPrompt: fd.get('prompt'),
-    mode: fd.get('mode') || appConfig?.defaults?.mode || 'freeform',
-    context,
-    maxRounds: parseInt(fd.get('maxRounds')) || appConfig?.defaults?.maxRounds || 20,
+    to: { adapter: fd.get('to') },
+    initialPrompt: String(fd.get('prompt') || '').trim(),
+    mode: fd.get('mode') || state.config?.defaults?.mode || 'collaborate',
+    maxRounds: parseInt(fd.get('maxRounds')) || state.config?.defaults?.maxRounds || 5,
     approveMode: fd.get('approveMode') === 'on',
-    cwd: fd.get('cwd') || undefined,
+    cwd: String(fd.get('cwd') || '').trim() || undefined,
+    context,
   }
-
-  const submitBtn = e.target.querySelector('.modal-submit')
-  const originalText = submitBtn.textContent
-  submitBtn.disabled = true
-  submitBtn.textContent = 'Creating...'
 
   try {
     const session = await api('/api/sessions', 'POST', body)
-    sessions.unshift(session)
-    renderSessionList()
-    await selectSession(session.id)
     closeModal()
-    e.target.reset()
+    navigate(`/session/${session.id}`)
   } catch (err) {
-    showToast(err.message, 'error')
-  } finally {
-    submitBtn.disabled = false
-    submitBtn.textContent = originalText
+    alert(err.message)
   }
-})
-
-function populateAgentSelects() {
-  const names = availableAgentNames()
-  ;['from-select', 'to-select'].forEach((id, idx) => {
-    const el = document.getElementById(id)
-    if (!el) return
-    const current = el.value
-    el.innerHTML = names.length
-      ? names.map(n => `<option value="${n}">${n}</option>`).join('')
-      : '<option value="">— no agents registered —</option>'
-    if (current && names.includes(current)) el.value = current
-    else if (names[idx]) el.value = names[idx]
-  })
 }
 
-function applyConfigDefaultsToNewSession() {
-  if (!appConfig?.defaults) return
-  const modeSelect = document.getElementById('mode-select')
-  const maxRoundsInput = document.querySelector('input[name="maxRounds"]')
-  if (modeSelect) modeSelect.value = appConfig.defaults.mode
-  if (maxRoundsInput) maxRoundsInput.value = appConfig.defaults.maxRounds
-}
-
-function setupPipelineUi() {
-  document.getElementById('new-pipeline-btn').addEventListener('click', openPipelineModal)
-  document.getElementById('pipeline-modal-cancel').addEventListener('click', closePipelineModal)
-  document.getElementById('pipeline-modal-close').addEventListener('click', closePipelineModal)
-  document.getElementById('pipeline-add-step').addEventListener('click', () => addPipelineStepEditor())
-  pipelineModalOverlay.addEventListener('click', (event) => {
-    if (event.target === pipelineModalOverlay) closePipelineModal()
-  })
-  document.getElementById('pipeline-form').addEventListener('submit', submitPipelineForm)
-
-  document.getElementById('btn-pipeline-pause').addEventListener('click', async () => {
-    if (!activePipelineId) return
-    try {
-      await api(`/api/pipelines/${activePipelineId}/pause`, 'POST')
-    } catch (err) {
-      showToast(err.message, 'error')
-    }
-  })
-  document.getElementById('btn-pipeline-resume').addEventListener('click', async () => {
-    if (!activePipelineId) return
-    try {
-      await api(`/api/pipelines/${activePipelineId}/resume`, 'POST')
-    } catch (err) {
-      showToast(err.message, 'error')
-    }
-  })
-  document.getElementById('btn-pipeline-delete').addEventListener('click', async () => {
-    if (!activePipelineId || !confirm('Delete this pipeline?')) return
-    try {
-      await api(`/api/pipelines/${activePipelineId}`, 'DELETE')
-      pipelines = pipelines.filter((item) => item.id !== activePipelineId)
-      activePipelineId = null
-      activePipeline = null
-      renderPipelineList()
-      renderSessionView(null)
-    } catch (err) {
-      showToast(err.message, 'error')
-    }
-  })
-}
-
-function openPipelineModal() {
-  document.getElementById('pipeline-form').reset()
-  pipelineStepList.innerHTML = ''
-  addPipelineStepEditor()
-  addPipelineStepEditor()
-  pipelineModalOverlay.classList.remove('hidden')
-}
-
-function closePipelineModal() {
-  pipelineModalOverlay.classList.add('hidden')
-}
-
-function addPipelineStepEditor() {
-  const stepIndex = pipelineStepList.children.length
-  const names = availableAgentNames()
-  const defaultFrom = names[0] || ''
-  const defaultTo = names[1] || names[0] || ''
-  const defaultMode = appConfig?.defaults?.mode || 'collaborate'
-  const wrap = document.createElement('div')
-  wrap.className = 'pipeline-step-editor'
-  wrap.innerHTML = `
-    <div class="pipeline-step-head">
-      <div>
-        <div class="pipeline-step-index">Step ${stepIndex + 1}</div>
+window.showAgentModal = function(name) {
+  const existing = state.agents.find(agent => agent.name === name)
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3>${existing ? 'Edit Agent' : 'Add Agent'}</h3>
+          <p>Configure an API-backed model.</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
       </div>
-      <button type="button" class="pipeline-open-btn" data-step-remove>Remove</button>
+      <form onsubmit="window.saveAgent(event, ${existing ? jsString(existing.name) : 'null'})">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Name</label>
+            <input class="input" name="name" required value="${escapeAttr(existing?.name || '')}">
+          </div>
+          <div class="form-group">
+            <label>Adapter</label>
+            <select class="input" name="adapter" required>
+              ${adapterOption('anthropic-api', existing?.adapter)}
+              ${adapterOption('openai-api', existing?.adapter)}
+              ${adapterOption('zhipu-api', existing?.adapter)}
+              ${adapterOption('custom-api', existing?.adapter)}
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Model</label>
+          <input class="input" name="model" value="${escapeAttr(existing?.model || '')}" placeholder="claude-sonnet-4-20250514">
+        </div>
+        <div class="form-group">
+          <label>Base URL</label>
+          <input class="input" name="baseUrl" value="${escapeAttr(existing?.baseUrl || '')}" placeholder="Optional">
+        </div>
+        <div class="form-group">
+          <label>API Key ${existing?.hasKey ? '(leave blank to keep existing)' : ''}</label>
+          <input class="input" name="apiKey" type="password" autocomplete="new-password">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Timeout (ms)</label>
+            <input class="input" name="timeout" type="number" min="1" value="">
+          </div>
+          <div></div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
     </div>
-    <div class="form-row-inline">
-      <div class="form-row half">
-        <label>From</label>
-        <select name="from">${names.map(name => `<option value="${name}" ${name === defaultFrom ? 'selected' : ''}>${name}</option>`).join('')}</select>
-      </div>
-      <div class="form-row half">
-        <label>To</label>
-        <select name="to">${names.map(name => `<option value="${name}" ${name === defaultTo ? 'selected' : ''}>${name}</option>`).join('')}</select>
-      </div>
-    </div>
-    <div class="form-row-inline">
-      <div class="form-row half">
-        <label>Mode</label>
-        <select name="mode">
-          <option value="collaborate" ${defaultMode === 'collaborate' ? 'selected' : ''}>collaborate</option>
-          <option value="discuss" ${defaultMode === 'discuss' ? 'selected' : ''}>discuss</option>
-          <option value="review" ${defaultMode === 'review' ? 'selected' : ''}>review</option>
-          <option value="freeform" ${defaultMode === 'freeform' ? 'selected' : ''}>freeform</option>
-        </select>
-      </div>
-      <div class="form-row half">
-        <label>Depends on</label>
-        <input name="dependsOn" type="text" placeholder="e.g. 1,2" />
-      </div>
-    </div>
-    <div class="form-row">
-      <label>Initial prompt</label>
-      <textarea name="initialPrompt" required placeholder="Describe this step..."></textarea>
-    </div>
-    <div class="form-row">
-      <label>Working directory</label>
-      <input name="cwd" type="text" placeholder="/abs/path or leave blank" />
-    </div>
-  `
-  wrap.querySelector('[data-step-remove]').addEventListener('click', () => {
-    wrap.remove()
-    refreshPipelineStepLabels()
+  `)
+}
+
+window.saveAgent = async function(e, originalName) {
+  e.preventDefault()
+  const fd = new FormData(e.target)
+  const body = compactObject({
+    name: String(fd.get('name') || '').trim(),
+    adapter: fd.get('adapter'),
+    model: String(fd.get('model') || '').trim() || undefined,
+    baseUrl: String(fd.get('baseUrl') || '').trim() || undefined,
+    apiKey: String(fd.get('apiKey') || '').trim() || undefined,
+    timeout: parseInt(fd.get('timeout')) || undefined,
   })
-  pipelineStepList.appendChild(wrap)
-  refreshPipelineStepLabels()
+
+  try {
+    state.agents = await api(originalName ? `/api/agents/${encodeURIComponent(originalName)}` : '/api/agents', originalName ? 'PUT' : 'POST', body)
+    closeModal()
+    renderAgentsList()
+  } catch (err) {
+    alert(err.message)
+  }
 }
 
-function availableAgentNames() {
-  return [...new Set((agents || []).filter(a => a.status === 'ready').map(a => a.name))]
+window.deleteAgent = async function(name) {
+  if (!confirm(`Delete agent "${name}"?`)) return
+  try {
+    state.agents = await api(`/api/agents/${encodeURIComponent(name)}`, 'DELETE')
+    renderAgentsList()
+  } catch (err) {
+    alert(err.message)
+  }
 }
 
-function refreshPipelineStepLabels() {
-  Array.from(pipelineStepList.children).forEach((child, index) => {
-    const label = child.querySelector('.pipeline-step-index')
-    if (label) label.textContent = `Step ${index + 1}`
-  })
+window.showApiKeyModal = function() {
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3>Add API Key</h3>
+          <p>Stored encrypted in the local key vault.</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+      </div>
+      <form onsubmit="window.saveApiKey(event)">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Provider</label>
+            <select class="input" name="provider">
+              <option value="anthropic">Anthropic</option>
+              <option value="openai">OpenAI</option>
+              <option value="zhipu">Zhipu</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Name</label>
+            <input class="input" name="name" placeholder="Work key">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>API Key</label>
+          <input class="input" name="key" type="password" required autocomplete="new-password">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  `)
 }
 
-async function submitPipelineForm(event) {
-  event.preventDefault()
-  const rows = Array.from(pipelineStepList.querySelectorAll('.pipeline-step-editor'))
-  if (!rows.length) return
+window.saveApiKey = async function(e) {
+  e.preventDefault()
+  const fd = new FormData(e.target)
+  try {
+    const key = await api('/api/keys', 'POST', {
+      provider: fd.get('provider'),
+      name: String(fd.get('name') || '').trim() || undefined,
+      key: String(fd.get('key') || '').trim(),
+    })
+    state.apiKeys.unshift(key)
+    closeModal()
+    renderApiKeysList()
+  } catch (err) {
+    alert(err.message)
+  }
+}
 
-  const steps = rows.map((row, index) => {
+window.deleteApiKey = async function(id) {
+  if (!confirm('Delete this API key?')) return
+  try {
+    await api(`/api/keys/${encodeURIComponent(id)}`, 'DELETE')
+    state.apiKeys = state.apiKeys.filter(key => key.id !== id)
+    renderApiKeysList()
+  } catch (err) {
+    alert(err.message)
+  }
+}
+
+window.showNewPipelineModal = function() {
+  const options = state.agents.map(agent => `<option value="${escapeAttr(agent.name)}">${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3>New Pipeline</h3>
+          <p>Run multiple sessions with optional dependencies.</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+      </div>
+      <form onsubmit="window.createPipeline(event)">
+        <div class="form-group">
+          <label>Name</label>
+          <input class="input" name="name" required placeholder="Frontend review pipeline">
+        </div>
+        <div id="pipeline-steps-form">
+          ${pipelineStepForm(0, options)}
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="window.addPipelineStep()">+ Add Step</button>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create Pipeline</button>
+        </div>
+      </form>
+    </div>
+  `)
+}
+
+window.addPipelineStep = function() {
+  const container = document.getElementById('pipeline-steps-form')
+  if (!container) return
+  const index = container.querySelectorAll('.pipeline-step-form').length
+  const options = state.agents.map(agent => `<option value="${escapeAttr(agent.name)}">${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
+  container.insertAdjacentHTML('beforeend', pipelineStepForm(index, options))
+}
+
+window.removePipelineStep = function(button) {
+  const rows = document.querySelectorAll('.pipeline-step-form')
+  if (rows.length <= 1) return
+  button.closest('.pipeline-step-form')?.remove()
+}
+
+window.createPipeline = async function(e) {
+  e.preventDefault()
+  const form = e.target
+  const steps = [...form.querySelectorAll('.pipeline-step-form')].map((row) => {
     const dependsRaw = row.querySelector('[name="dependsOn"]').value.trim()
-    const dependsOn = dependsRaw
-      ? dependsRaw.split(',').map(item => Number(item.trim()) - 1).filter(Number.isInteger).filter(n => n >= 0 && n < rows.length && n !== index)
-      : undefined
-    return {
+    const context = buildContextFromStep(row)
+    return compactObject({
       from: { adapter: row.querySelector('[name="from"]').value },
       to: { adapter: row.querySelector('[name="to"]').value },
+      initialPrompt: row.querySelector('[name="prompt"]').value.trim(),
       mode: row.querySelector('[name="mode"]').value,
-      initialPrompt: row.querySelector('[name="initialPrompt"]').value.trim(),
+      maxRounds: parseInt(row.querySelector('[name="maxRounds"]').value) || undefined,
       cwd: row.querySelector('[name="cwd"]').value.trim() || undefined,
-      ...(dependsOn && dependsOn.length ? { dependsOn } : {}),
-    }
+      context,
+      dependsOn: dependsRaw ? dependsRaw.split(',').map(item => Number(item.trim())).filter(Number.isInteger) : undefined,
+    })
   })
 
-  const body = {
-    name: document.getElementById('pipeline-name-input').value.trim(),
-    steps,
-  }
-
-  const submitBtn = event.target.querySelector('.modal-submit')
-  const originalText = submitBtn.textContent
-  submitBtn.disabled = true
-  submitBtn.textContent = 'Creating...'
   try {
-    const pipeline = await api('/api/pipelines', 'POST', body)
-    pipelines.unshift(pipeline)
-    renderPipelineList()
-    closePipelineModal()
-    await selectPipeline(pipeline.id)
+    const pipeline = await api('/api/pipelines', 'POST', {
+      name: new FormData(form).get('name'),
+      steps,
+    })
+    closeModal()
+    navigate(`/pipeline/${pipeline.id}`)
   } catch (err) {
-    showToast(err.message, 'error')
-  } finally {
-    submitBtn.disabled = false
-    submitBtn.textContent = originalText
+    alert(err.message)
   }
-}
-
-function setupPipelineToggle() {
-  if (!pipelineToggle || !pipelineSidebarSection) return
-  const prefs = loadUiPrefs()
-  if (prefs.pipelinesCollapsed !== false) {
-    pipelineSidebarSection.classList.add('collapsed')
-    pipelineToggle.setAttribute('aria-expanded', 'false')
-    if (pipelineToggleIcon) pipelineToggleIcon.textContent = '▸'
-  }
-  pipelineToggle.addEventListener('click', () => {
-    const collapsed = pipelineSidebarSection.classList.toggle('collapsed')
-    pipelineToggle.setAttribute('aria-expanded', String(!collapsed))
-    if (pipelineToggleIcon) pipelineToggleIcon.textContent = collapsed ? '▸' : '▾'
-    saveUiPrefs({ pipelinesCollapsed: collapsed })
-  })
-}
-
-function loadUiPrefs() {
-  try {
-    return JSON.parse(localStorage.getItem(UI_PREFS_KEY) || '{}')
-  } catch {
-    return {}
-  }
-}
-
-function saveUiPrefs(partial) {
-  try {
-    localStorage.setItem(UI_PREFS_KEY, JSON.stringify({
-      ...loadUiPrefs(),
-      ...partial,
-    }))
-  } catch {
-    // Ignore storage failures.
-  }
-}
-
-// ── WebSocket ─────────────────────────────────────────────────────────────────
-let wsRetryTimer = null
-let wsRetryDelay = 1000
-let wsRetryCount = 0
-const WS_BASE_DELAY = 1000
-const WS_MAX_DELAY = 15000
-
-function connectWs() {
-  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return
-  if (wsRetryTimer) {
-    clearTimeout(wsRetryTimer)
-    wsRetryTimer = null
-  }
-
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  const token = getAuthToken()
-  const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : ''
-  const socket = new WebSocket(`${proto}://${location.host}/ws${tokenQuery}`)
-  ws = socket
-
-  socket.addEventListener('open', () => {
-    if (socket !== ws) return
-    wsStatusEl.textContent = 'live'
-    wsStatusEl.className = 'ws-badge connected'
-    document.getElementById('server-dot').className = 'dot green'
-    wsRetryDelay = WS_BASE_DELAY
-    wsRetryCount = 0
-  })
-
-  socket.addEventListener('message', ({ data }) => {
-    if (socket !== ws) return
-    try {
-      handleWsEvent(JSON.parse(data))
-    } catch {
-      showToast('Received invalid WebSocket message', 'error')
-    }
-  })
-
-  socket.addEventListener('close', () => {
-    if (socket !== ws) return
-    wsRetryCount++
-    const delay = wsRetryDelay
-    wsStatusEl.textContent = `reconnecting #${wsRetryCount} (${Math.ceil(delay / 1000)}s)`
-    wsStatusEl.className = 'ws-badge disconnected'
-    document.getElementById('server-dot').className = 'dot red'
-
-    wsRetryTimer = setTimeout(connectWs, delay)
-    wsRetryDelay = Math.min(wsRetryDelay * 2, WS_MAX_DELAY)
-  })
-
-  socket.addEventListener('error', () => {
-    if (socket !== ws) return
-    wsStatusEl.textContent = 'error'
-    wsStatusEl.className = 'ws-badge disconnected'
-  })
-}
-
-function handleWsEvent(evt) {
-  switch (evt.type) {
-    case 'init':
-      sessions = evt.payload
-      renderSessionList()
-      break
-
-    case 'session:created': {
-      if (!sessions.find(s => s.id === evt.payload.id)) {
-        sessions.unshift(evt.payload)
-      }
-      renderSessionList()
-      loadStats()
-      break
-    }
-
-    case 'session:updated':
-    case 'session:done':
-    case 'session:error':
-    case 'session:paused': {
-      const s = evt.payload?.session ?? evt.payload
-      if (s.status !== 'active') heartbeats.delete(s.id)
-      upsertSession(s)
-      if (s.id === activeSessionId) {
-        activeSession = { ...activeSession, ...s }
-        // Re-render toolbar + banner without re-fetching messages
-        sessionBadge.className   = `badge ${s.status}`
-        sessionBadge.textContent = s.status
-        sessionRounds.textContent = `R${s.currentRound}/${s.maxRounds}`
-        updateToolbar(s)
-        updateProgressIndicator()
-      }
-      loadStats()
-      break
-    }
-
-    case 'heartbeat': {
-      const hb = { ...evt, receivedAt: Date.now() }
-      heartbeats.set(hb.sessionId, hb)
-      upsertSessionField(hb.sessionId, 'updatedAt', Date.now())
-      if (hb.sessionId === activeSessionId) {
-        updateProgressIndicator()
-      }
-      renderSessionList()
-      break
-    }
-
-    case 'message:new': {
-      const msg = evt.payload
-      if (msg.sessionId === activeSessionId) {
-        currentMessages.push(msg)
-        appendMessage(msg)
-      }
-      upsertSessionField(msg.sessionId, 'currentRound', msg.round)
-      renderSessionList()
-      break
-    }
-
-    case 'snapshot:new': {
-      const snapshot = evt.payload
-      if (snapshot.sessionId === activeSessionId) {
-        currentSnapshots.push(snapshot)
-        renderChanges(currentSnapshots)
-      }
-      break
-    }
-
-    case 'session:deleted': {
-      const id = evt.payload?.id
-      sessions = sessions.filter(s => s.id !== id)
-      heartbeats.delete(id)
-      if (id === activeSessionId) {
-        activeSessionId = null
-        activeSession = null
-        currentMessages = []
-        replaceLogEntries([])
-        if (sessionView) sessionView.classList.add('hidden')
-        if (emptyState) emptyState.classList.remove('hidden')
-      }
-      renderSessionList()
-      loadStats()
-      break
-    }
-
-    case 'pipeline:created':
-    case 'pipeline:updated':
-    case 'pipeline:done':
-    case 'pipeline:error': {
-      const pipeline = evt.payload
-      if (pipeline?.deleted) {
-        pipelines = pipelines.filter((item) => item.id !== pipeline.id)
-        if (activePipelineId === pipeline.id) {
-          activePipelineId = null
-          activePipeline = null
-          renderSessionView(null)
-        }
-      } else {
-        const index = pipelines.findIndex((item) => item.id === pipeline.id)
-        if (index >= 0) pipelines[index] = { ...pipelines[index], ...pipeline }
-        else pipelines.unshift(pipeline)
-        if (activePipelineId === pipeline.id) {
-          selectPipeline(pipeline.id, false)
-        }
-      }
-      renderPipelineList()
-      loadStats()
-      break
-    }
-
-    case 'log': {
-      if (evt.payload?.sessionId === activeSessionId) {
-        handleLogEvent(evt.payload)
-      }
-      break
-    }
-  }
-}
-
-// Append a single new message without re-rendering all (performance)
-function appendMessage(msg) {
-  const wasAtBottom = isScrolledToBottom()
-
-  // Insert round divider if needed
-  const prevMsg = currentMessages[currentMessages.length - 2]
-  if (!prevMsg || prevMsg.round !== msg.round) {
-    const div = document.createElement('div')
-    div.className = 'round-divider'
-    div.innerHTML = `<span>Round ${msg.round}</span>`
-    messagesEl.appendChild(div)
-  }
-
-  const temp = document.createElement('div')
-  temp.innerHTML = buildMessageMarkup(msg, activeSession)
-  messagesEl.appendChild(temp.firstElementChild)
-
-  // Auto-scroll only if already at bottom
-  if (wasAtBottom) {
-    scrollToBottom()
-  }
-  updateScrollToBottomButton()
-
-  // Update rounds label
-  sessionRounds.textContent = `R${msg.round}/${activeSession?.maxRounds ?? '?'}`
-}
-
-function upsertSession(updated) {
-  const idx = sessions.findIndex(s => s.id === updated.id)
-  if (idx >= 0) sessions[idx] = { ...sessions[idx], ...updated }
-  else sessions.unshift(updated)
-  renderSessionList()
-}
-
-function upsertSessionField(id, field, value) {
-  const s = sessions.find(s => s.id === id)
-  if (s) s[field] = value
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
-function escHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-}
-
-function buildMessageMarkup(msg, session, opts = {}) {
-  const { side, bubbleClass, senderLabel } = getMessagePresentation(msg, session)
-  const animationClass = opts.noAnimate ? ' no-animate' : ''
-  const avatarInitial = senderLabel.charAt(0).toUpperCase()
-  const renderedContent = renderMarkdown(msg.content)
-  return `<div class="msg-wrapper ${side}${animationClass}">
-    <div class="msg ${bubbleClass}">
-      <div class="msg-header">
-        <div class="msg-avatar">${escHtml(avatarInitial)}</div>
-        <span class="msg-sender">${escHtml(senderLabel)}</span>
+function pipelineStepForm(index, options) {
+  return `
+    <div class="pipeline-step-form">
+      <div class="flex-between mb-16">
+        <strong>Step ${index}</strong>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="window.removePipelineStep(this)">Remove</button>
       </div>
-      <div class="msg-bubble">${renderedContent}</div>
-      <div class="msg-footer">
-        <span class="msg-time">${formatMessageTime(msg.timestamp)}</span>
-        <button
-          class="msg-copy-btn"
-          type="button"
-          data-message-id="${msg.id}"
-          title="Copy"
-          aria-label="Copy message"
-        >
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <rect x="5" y="2.5" width="8" height="10" rx="2"></rect>
-            <rect x="2.5" y="5.5" width="8" height="8" rx="2"></rect>
-          </svg>
-        </button>
+      <div class="form-row">
+        <div class="form-group">
+          <label>From</label>
+          <select class="input" name="from" required>${options}</select>
+        </div>
+        <div class="form-group">
+          <label>To</label>
+          <select class="input" name="to" required>${options}</select>
+        </div>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Mode</label>
+          <select class="input" name="mode">
+            <option value="collaborate">Collaborate</option>
+            <option value="discuss">Discuss</option>
+            <option value="review">Review</option>
+            <option value="freeform">Freeform</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Max Rounds</label>
+          <input class="input" name="maxRounds" type="number" min="1" value="${state.config?.defaults?.maxRounds || 5}">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Prompt</label>
+        <textarea class="input" name="prompt" rows="3" required></textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Depends On</label>
+          <input class="input" name="dependsOn" placeholder="0,1">
+        </div>
+        <div class="form-group">
+          <label>Working Directory</label>
+          <input class="input" name="cwd" placeholder="/path/to/project">
+        </div>
+      </div>
+      <details class="context-details">
+        <summary>Context</summary>
+        <div class="form-group"><label>Rules</label><textarea class="input" name="contextRules" rows="2"></textarea></div>
+        <div class="form-group"><label>Background</label><textarea class="input" name="contextText" rows="2"></textarea></div>
+        <div class="form-group"><label>Files</label><textarea class="input" name="contextFiles" rows="2"></textarea></div>
+      </details>
     </div>
-  </div>`
+  `
 }
 
-function getMessagePresentation(msg, session) {
-  const fromName = agentLabel(session?.from)
-  const toName = agentLabel(session?.to)
-  const isHuman = msg.from === 'human'
-  const isFrom = msg.from === (session?.from?.adapter ?? '')
-  const isTo = msg.from === (session?.to?.adapter ?? '')
+function buildContextFromStep(row) {
+  const fd = new FormData()
+  fd.set('contextRules', row.querySelector('[name="contextRules"]').value)
+  fd.set('contextText', row.querySelector('[name="contextText"]').value)
+  fd.set('contextFiles', row.querySelector('[name="contextFiles"]').value)
+  return buildContextFromForm(fd)
+}
 
-  if (isHuman) {
-    return { side: 'center', bubbleClass: 'msg-human', senderLabel: 'you' }
-  }
-  if (isTo) {
-    return { side: 'right', bubbleClass: 'msg-to', senderLabel: toName }
-  }
-  if (isFrom) {
-    return { side: 'left', bubbleClass: 'msg-from', senderLabel: fromName }
-  }
-  return { side: 'left', bubbleClass: 'msg-from', senderLabel: msg.from }
+function showModal(html) {
+  closeModal()
+  const overlay = document.createElement('div')
+  overlay.className = 'modal-overlay'
+  overlay.id = 'modal-overlay'
+  overlay.innerHTML = html
+  overlay.addEventListener('click', event => {
+    if (event.target === overlay) closeModal()
+  })
+  document.body.appendChild(overlay)
+}
+
+function closeModal() {
+  const overlay = document.getElementById('modal-overlay')
+  if (overlay) overlay.remove()
+}
+
+window.closeModal = closeModal
+
+function buildContextFromForm(fd) {
+  const rules = String(fd.get('contextRules') || '').trim()
+  const text = String(fd.get('contextText') || '').trim()
+  const filesRaw = String(fd.get('contextFiles') || '').trim()
+  const files = filesRaw.split(/[\n,]/).map(item => item.trim()).filter(Boolean)
+  const context = {}
+  if (rules) context.rules = rules
+  if (text) context.text = text
+  if (files.length) context.files = files
+  return Object.keys(context).length ? context : undefined
 }
 
 function renderMarkdown(content) {
   if (typeof marked === 'undefined') {
-    return `<pre>${escHtml(content)}</pre>`
+    return `<pre>${escapeHtml(content)}</pre>`
   }
   try {
-    const html = marked.parse(content)
-    return `<div class="markdown-content">${sanitizeRenderedHtml(html, content)}</div>`
-  } catch (e) {
-    return `<pre>${escHtml(content)}</pre>`
+    return `<div class="markdown-content">${sanitizeRenderedHtml(marked.parse(content), content)}</div>`
+  } catch {
+    return `<pre>${escapeHtml(content)}</pre>`
   }
 }
 
-function timeAgo(ts) {
-  const diff = Date.now() - ts
-  if (diff < 60_000)     return 'just now'
-  if (diff < 3_600_000)  return `${Math.floor(diff / 60_000)}m ago`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
-  return new Date(ts).toLocaleDateString()
-}
+function sanitizeRenderedHtml(html, fallbackText) {
+  const template = document.createElement('template')
+  template.innerHTML = html
+  const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META'])
+  let unsafeUrl = false
 
-function formatDuration(ms) {
-  const total = Math.max(0, Math.floor(ms / 1000))
-  const minutes = Math.floor(total / 60)
-  const seconds = total % 60
-  return `${minutes}:${String(seconds).padStart(2, '0')}`
-}
-
-function renderChanges(snapshots) {
-  if (!changesSection || !changesList || !changesCount) return
-  if (!snapshots.length) {
-    changesSection.classList.add('hidden')
-    changesList.innerHTML = ''
-    changesCount.textContent = ''
-    return
+  for (const node of template.content.querySelectorAll('*')) {
+    if (blockedTags.has(node.tagName)) {
+      node.remove()
+      continue
+    }
+    for (const attr of [...node.attributes]) {
+      const name = attr.name.toLowerCase()
+      const value = attr.value.trim()
+      if (name.startsWith('on')) {
+        node.removeAttribute(attr.name)
+        continue
+      }
+      if ((name === 'href' || name === 'src') && !isSafeUrl(value)) {
+        unsafeUrl = true
+        break
+      }
+      if (name === 'href') {
+        node.setAttribute('target', '_blank')
+        node.setAttribute('rel', 'noopener noreferrer nofollow')
+      }
+    }
+    if (unsafeUrl) break
   }
 
-  changesCount.textContent = `${snapshots.length} snapshot${snapshots.length === 1 ? '' : 's'}`
-  changesList.innerHTML = snapshots.map(snapshot => {
-    const stat = snapshot.diffStat || 'No changes'
-    const full = snapshot.diffFull || 'No diff'
-    return `<details class="change-snapshot">
-      <summary>
-        <span>Round ${escHtml(snapshot.round)}</span>
-        <time>${formatMessageTime(snapshot.timestamp)}</time>
-      </summary>
-      <div class="change-block">
-        <div class="change-label">Stat</div>
-        <pre>${escHtml(stat)}</pre>
-      </div>
-      <div class="change-block">
-        <div class="change-label">Diff</div>
-        <pre>${escHtml(full)}</pre>
-      </div>
-    </details>`
-  }).join('')
-  changesSection.classList.remove('hidden')
+  return unsafeUrl ? `<pre>${escapeHtml(fallbackText)}</pre>` : template.innerHTML
 }
 
-function formatMessageTime(ts) {
-  return new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-}
-
-function setupMessageActions() {
-  messagesEl.addEventListener('click', async (event) => {
-    const btn = event.target.closest('.msg-copy-btn')
-    if (!btn) return
-    const messageId = btn.dataset.messageId
-    const msg = currentMessages.find(item => item.id === messageId)
-    if (!msg) return
-    const ok = await copyText(msg.content)
-    btn.classList.toggle('copied', ok)
-    btn.title = ok ? 'Copied' : 'Copy failed'
-    setTimeout(() => {
-      btn.classList.remove('copied')
-      btn.title = 'Copy'
-    }, 1200)
-  })
+function isSafeUrl(value) {
+  if (!value) return false
+  if (value.startsWith('#')) return true
+  try {
+    const url = new URL(value, window.location.origin)
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)
+  } catch {
+    return false
+  }
 }
 
 async function copyText(content) {
@@ -1671,23 +1787,9 @@ async function copyText(content) {
     document.body.appendChild(input)
     input.select()
     const ok = document.execCommand('copy')
-    document.body.removeChild(input)
+    input.remove()
     return ok
   }
-}
-
-function exportSession() {
-  if (!activeSession) return
-  const content = buildSessionExport(activeSession, currentMessages)
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `turing-session-${activeSession.id}.md`
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
 }
 
 function buildSessionExport(session, messages) {
@@ -1705,525 +1807,90 @@ function buildSessionExport(session, messages) {
   let lastRound = null
   for (const msg of messages) {
     if (msg.round !== lastRound) {
-      lines.push(`## Round ${msg.round}`)
-      lines.push('')
+      lines.push(`## Round ${msg.round}`, '')
       lastRound = msg.round
     }
-    const sender = msg.from === 'human'
-      ? 'you'
-      : msg.from === session.from.adapter
-        ? agentLabel(session.from)
-        : msg.from === session.to.adapter
-          ? agentLabel(session.to)
-          : msg.from
-    lines.push(`### ${sender} · ${formatMessageTime(msg.timestamp)}`)
-    lines.push('')
-    lines.push(msg.content || '_empty_')
-    lines.push('')
+    lines.push(`### ${msg.from === 'human' ? 'you' : msg.from} · ${new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`, '')
+    lines.push(msg.content || '_empty_', '')
   }
-
   return lines.join('\n')
 }
 
-function sanitizeRenderedHtml(html, fallbackText) {
-  const template = document.createElement('template')
-  template.innerHTML = html
-  const blockedTags = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META'])
-  let unsafeLinkFound = false
-
-  for (const node of template.content.querySelectorAll('*')) {
-    if (blockedTags.has(node.tagName)) {
-      node.remove()
-      continue
-    }
-    for (const attr of [...node.attributes]) {
-      const name = attr.name.toLowerCase()
-      const value = attr.value.trim()
-      if (name.startsWith('on')) {
-        node.removeAttribute(attr.name)
-        continue
-      }
-      if (name === 'href' || name === 'src') {
-        if (!isSafeUrl(value)) {
-          unsafeLinkFound = true
-          break
-        }
-        if (name === 'href') {
-          node.setAttribute('rel', 'noopener noreferrer nofollow')
-          node.setAttribute('target', '_blank')
-        }
-      }
-    }
-    if (unsafeLinkFound) break
-  }
-
-  if (unsafeLinkFound) {
-    return `<pre>${escHtml(fallbackText)}</pre>`
-  }
-  return template.innerHTML
+function agentLabel(agent) {
+  return agent?.label || agent?.adapter || ''
 }
 
-function isSafeUrl(value) {
-  if (!value) return false
-  if (value.startsWith('#')) return true
-  try {
-    const url = new URL(value, window.location.origin)
-    return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)
-  } catch {
-    return false
-  }
+function compactObject(obj) {
+  return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined && value !== ''))
 }
 
-// ── Mobile menu ───────────────────────────────────────────────────────────────
-function setupMobileMenu() {
-  const menuBtn = document.getElementById('mobile-menu-btn')
-  const sidebar = document.getElementById('sidebar')
-  const overlay = document.getElementById('mobile-overlay')
-
-  menuBtn.addEventListener('click', () => {
-    sidebar.classList.add('mobile-open')
-    overlay.classList.add('active')
-  })
-
-  overlay.addEventListener('click', closeMobileMenu)
-}
-
-function closeMobileMenu() {
-  const sidebar = document.getElementById('sidebar')
-  const overlay = document.getElementById('mobile-overlay')
-  sidebar.classList.remove('mobile-open')
-  overlay.classList.remove('active')
-}
-
-// ── Settings ─────────────────────────────────────────────────────────────────
-function setupSettingsPanel() {
-  settingsToggle.addEventListener('click', openSettingsPanel)
-  settingsClose.addEventListener('click', closeSettingsPanel)
-  settingsPanel.querySelector('.settings-overlay').addEventListener('click', closeSettingsPanel)
-  addAgentBtn.addEventListener('click', () => showAgentForm())
-  saveGlobalBtn.addEventListener('click', saveGlobalSettings)
-  apiKeyForm.addEventListener('submit', saveApiKey)
-
-  agentsConfigList.addEventListener('click', async (event) => {
-    const editBtn = event.target.closest('[data-agent-edit]')
-    const deleteBtn = event.target.closest('[data-agent-delete]')
-    if (editBtn) {
-      showAgentForm(editBtn.dataset.agentEdit)
-      return
-    }
-    if (deleteBtn) {
-      await deleteAgent(deleteBtn.dataset.agentDelete)
-    }
-  })
-
-  apiKeysList.addEventListener('click', async (event) => {
-    const deleteBtn = event.target.closest('[data-key-delete]')
-    if (deleteBtn) await deleteApiKey(deleteBtn.dataset.keyDelete)
-  })
-}
-
-async function openSettingsPanel() {
-  await loadAppConfig()
-  await loadAgents()
-  await loadApiKeys()
-  renderSettingsPanel()
-  settingsPanel.classList.remove('hidden')
-  settingsToggle.classList.add('active')
-}
-
-function closeSettingsPanel() {
-  settingsPanel.classList.add('hidden')
-  settingsToggle.classList.remove('active')
-  editingAgentName = null
-  agentFormSlot.innerHTML = ''
-  addAgentBtn.classList.remove('hidden')
-}
-
-function renderSettingsPanel() {
-  if (!appConfig) return
-  document.getElementById('global-max-rounds').value = appConfig.defaults?.maxRounds ?? 20
-  document.getElementById('global-port').value = appConfig.server?.port ?? 4590
-  document.getElementById('global-mode').value = appConfig.defaults?.mode ?? 'collaborate'
-  renderAgentConfigList()
-  renderApiKeys()
-}
-
-function renderAgentConfigList() {
-  const entries = agents || []
-  if (!entries.length) {
-    agentsConfigList.innerHTML = '<div class="settings-empty">No API model configs</div>'
-    return
-  }
-
-  agentsConfigList.innerHTML = entries.map((cfg) => {
-    const provider = providerMeta(cfg.adapter)
-    return `<div class="agent-config-item">
-      <div class="agent-config-header">
-        <div class="agent-config-name"><span class="provider-dot" style="background:${provider.color}"></span>${escHtml(cfg.name)}</div>
-        <div class="agent-config-actions">
-          <button class="agent-config-btn" data-agent-edit="${escHtml(cfg.name)}">Edit</button>
-          <button class="agent-config-btn danger" data-agent-delete="${escHtml(cfg.name)}">Delete</button>
-        </div>
-      </div>
-      <div class="agent-config-details">
-        <div><span class="agent-config-label">Provider</span><span class="agent-config-value">${escHtml(cfg.provider)}</span></div>
-        <div><span class="agent-config-label">Model</span><span class="agent-config-value">${escHtml(cfg.model || '')}</span></div>
-        <div><span class="agent-config-label">Key</span><span class="agent-config-value">${cfg.hasKey ? escHtml(cfg.keyMasked || '') : 'none'}</span></div>
-      </div>
-    </div>`
-  }).join('')
-}
-
-function showAgentForm(agentName) {
-  editingAgentName = agentName || null
-  const cfg = editingAgentName ? (agents || []).find(a => a.name === editingAgentName) : null
-  const selectedAdapter = cfg?.adapter || 'anthropic-api'
-  const modelOptions = providerMeta(selectedAdapter).models
-  const isCustom = selectedAdapter === 'custom-api'
-  addAgentBtn.classList.add('hidden')
-  agentFormSlot.innerHTML = `<form class="agent-config-form" id="agent-config-form">
-    <div class="form-row">
-      <label>Name</label>
-      <input name="name" type="text" required value="${escHtml(editingAgentName || '')}" placeholder="claude-api" />
-    </div>
-    <div class="form-row">
-      <label>Provider</label>
-      <select name="adapter">
-        ${Object.entries(PROVIDER_OPTIONS).map(([adapter, option]) => `
-          <option value="${adapter}" ${selectedAdapter === adapter ? 'selected' : ''}>${escHtml(option.label)}</option>
-        `).join('')}
-      </select>
-    </div>
-    <div class="form-row" id="model-row">
-      <label>Model</label>
-      ${isCustom
-        ? `<input name="model" type="text" required value="${escHtml(cfg?.model || '')}" placeholder="model name" />`
-        : `<select name="model">${modelOptions.map(model => `<option value="${model}" ${cfg?.model === model ? 'selected' : ''}>${model}</option>`).join('')}</select>`}
-    </div>
-    <div class="form-row">
-      <label>API Key</label>
-      <input name="apiKey" type="password" ${editingAgentName ? '' : 'required'} placeholder="${editingAgentName ? 'Leave blank to keep existing key' : 'Paste API key'}" />
-    </div>
-    <div class="form-row">
-      <label>Base URL</label>
-      <input name="baseUrl" type="text" ${isCustom ? 'required' : ''} value="${escHtml(cfg?.baseUrl || '')}" placeholder="${escHtml(DEFAULT_BASE_URLS[selectedAdapter] || 'https://example.com/v1/chat/completions')}" />
-    </div>
-    <div class="agent-form-actions">
-      <button type="button" class="settings-btn" id="agent-form-cancel">Cancel</button>
-      <button type="submit" class="settings-btn primary">${editingAgentName ? 'Save Agent' : 'Create Agent'}</button>
-    </div>
-  </form>`
-
-  const form = document.getElementById('agent-config-form')
-  const adapterSelect = form.querySelector('select[name="adapter"]')
-  form.addEventListener('submit', saveAgent)
-  adapterSelect.addEventListener('change', () => {
-    refreshAgentModelField(form)
-  })
-  form.querySelector('#agent-form-cancel').addEventListener('click', clearAgentForm)
-  form.querySelector('input[name="name"]').focus()
-}
-
-function refreshAgentModelField(form) {
-  const adapter = form.querySelector('select[name="adapter"]').value
-  const row = form.querySelector('#model-row')
-  const models = providerMeta(adapter).models
-  row.innerHTML = `<label>Model</label>${adapter === 'custom-api'
-    ? '<input name="model" type="text" required placeholder="model name" />'
-    : `<select name="model">${models.map(model => `<option value="${model}">${model}</option>`).join('')}</select>`}`
-  const baseUrl = form.querySelector('input[name="baseUrl"]')
-  baseUrl.required = adapter === 'custom-api'
-  baseUrl.placeholder = DEFAULT_BASE_URLS[adapter] || 'https://example.com/v1/chat/completions'
-}
-
-function envRowMarkup(key = '', value = '') {
-  return `<div class="env-var-row">
-    <input name="envKey" type="text" placeholder="KEY" value="${escHtml(key)}" />
-    <input name="envValue" type="text" placeholder="value" value="${escHtml(value)}" />
-    <button type="button" class="env-var-remove" title="Remove">✕</button>
-  </div>`
-}
-
-function clearAgentForm() {
-  editingAgentName = null
-  agentFormSlot.innerHTML = ''
-  addAgentBtn.classList.remove('hidden')
-}
-
-function collectEnv(form) {
-  const env = {}
-  form.querySelectorAll('.env-var-row').forEach(row => {
-    const key = row.querySelector('input[name="envKey"]').value.trim()
-    const value = row.querySelector('input[name="envValue"]').value
-    if (key && value) env[key] = value
-  })
-  return env
-}
-
-async function saveAgent(event) {
-  event.preventDefault()
-  const form = event.target
-  const fd = new FormData(form)
-  const body = {
-    name: String(fd.get('name') || '').trim(),
-    adapter: fd.get('adapter'),
-    apiKey: String(fd.get('apiKey') || '').trim() || undefined,
-    model: String(fd.get('model') || '').trim(),
-    baseUrl: String(fd.get('baseUrl') || '').trim() || undefined,
-  }
-  const path = editingAgentName
-    ? `/api/agents/${encodeURIComponent(editingAgentName)}`
-    : '/api/agents'
-  const method = editingAgentName ? 'PUT' : 'POST'
-
-  try {
-    agents = await api(path, method, body)
-    await loadAgents()
-    clearAgentForm()
-    renderSettingsPanel()
-    showToast('Agent saved', 'success')
-  } catch (err) {
-    showToast(err.message, 'error')
-  }
-}
-
-async function deleteAgent(name) {
-  if (!name || !confirm(`Delete agent "${name}"?`)) return
-  try {
-    agents = await api(`/api/agents/${encodeURIComponent(name)}`, 'DELETE')
-    await loadAgents()
-    clearAgentForm()
-    renderSettingsPanel()
-    showToast('Agent deleted', 'success')
-  } catch (err) {
-    showToast(err.message, 'error')
-  }
-}
-
-async function saveGlobalSettings() {
-  const maxRounds = parseInt(document.getElementById('global-max-rounds').value)
-  const port = parseInt(document.getElementById('global-port').value)
-  const mode = document.getElementById('global-mode').value
-  try {
-    appConfig = await api('/api/config', 'PUT', {
-      defaults: { maxRounds, mode },
-      server: { port },
-    })
-    applyConfigDefaultsToNewSession()
-    renderSettingsPanel()
-    showToast('Settings saved. Restart required for port changes.', 'success')
-  } catch (err) {
-    showToast(err.message, 'error')
-  }
-}
-
-async function loadApiKeys() {
-  try {
-    apiKeys = await api('/api/keys')
-  } catch (err) {
-    apiKeys = []
-    showToast(err.message, 'error')
-  }
-}
-
-function renderApiKeys() {
-  if (!apiKeysList) return
-  if (!apiKeys.length) {
-    apiKeysList.innerHTML = '<div class="settings-empty">No API keys stored</div>'
-    return
-  }
-  apiKeysList.innerHTML = apiKeys.map((key) => `
-    <div class="api-key-item">
-      <div class="api-key-provider">${providerIcon(key.provider)}</div>
-      <div class="api-key-meta">
-        <div class="api-key-name">${escHtml(key.name)}</div>
-        <div class="api-key-detail">${escHtml(providerLabel(key.provider))} · ${escHtml(key.maskedKey)}</div>
-      </div>
-      <button type="button" class="agent-config-btn danger" data-key-delete="${escHtml(key.id)}">Delete</button>
-    </div>
-  `).join('')
+function adapterOption(value, selected) {
+  return `<option value="${escapeAttr(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(value)}</option>`
 }
 
 function providerIcon(provider) {
-  const icons = {
-    anthropic: 'A',
-    openai: 'O',
-    zhipu: 'Z',
-  }
-  return icons[provider] || '?'
+  return ({ anthropic: 'A', openai: 'O', zhipu: 'Z' })[provider] || '?'
 }
 
 function providerLabel(provider) {
-  const labels = {
-    anthropic: 'Anthropic',
-    openai: 'OpenAI',
-    zhipu: 'Zhipu',
-  }
-  return labels[provider] || provider
+  return ({ anthropic: 'Anthropic', openai: 'OpenAI', zhipu: 'Zhipu' })[provider] || provider
 }
 
-async function saveApiKey(event) {
-  event.preventDefault()
-  const fd = new FormData(event.target)
-  const body = {
-    provider: fd.get('provider'),
-    name: String(fd.get('name') || '').trim(),
-    key: String(fd.get('key') || '').trim(),
-  }
-  try {
-    const saved = await api('/api/keys', 'POST', body)
-    apiKeys.unshift(saved)
-    event.target.reset()
-    renderApiKeys()
-    showToast('API key saved', 'success')
-  } catch (err) {
-    showToast(err.message, 'error')
-  }
+function initialsFromEmail(email) {
+  const name = String(email).split('@')[0] || 'U'
+  return name.split(/[._-]/).filter(Boolean).slice(0, 2).map(part => part[0]).join('').toUpperCase() || 'U'
 }
 
-async function deleteApiKey(id) {
-  if (!id || !confirm('Delete this API key?')) return
-  try {
-    await api(`/api/keys/${encodeURIComponent(id)}`, 'DELETE')
-    apiKeys = apiKeys.filter((key) => key.id !== id)
-    renderApiKeys()
-    showToast('API key deleted', 'success')
-  } catch (err) {
-    showToast(err.message, 'error')
-  }
+function jsString(value) {
+  return JSON.stringify(String(value))
 }
 
-// ── Log panel ─────────────────────────────────────────────────────────────────
-const LOG_MAX = 500
-const logEntries = []
-let logPanelOpen = false
-let logHasUnseenError = false
-
-const logToggle    = document.getElementById('log-toggle')
-const logPanel     = document.getElementById('log-panel')
-const logEntriesEl = document.getElementById('log-entries')
-const logErrorDot  = document.getElementById('log-error-dot')
-const logClearBtn  = document.getElementById('log-clear-btn')
-const logCloseBtn  = document.getElementById('log-close-btn')
-const logResize    = document.getElementById('log-panel-resize')
-
-logToggle.addEventListener('click', () => {
-  logPanelOpen = !logPanelOpen
-  logPanel.classList.toggle('hidden', !logPanelOpen)
-  logToggle.classList.toggle('active', logPanelOpen)
-  if (logPanelOpen) {
-    logHasUnseenError = false
-    logErrorDot.classList.add('hidden')
-    renderLogEntries()
-  }
-})
-
-logCloseBtn.addEventListener('click', () => {
-  logPanelOpen = false
-  logPanel.classList.add('hidden')
-  logToggle.classList.remove('active')
-})
-
-logClearBtn.addEventListener('click', () => {
-  logEntries.length = 0
-  logHasUnseenError = false
-  logErrorDot.classList.add('hidden')
-  renderLogEntries()
-})
-
-// Resize by drag
-let logResizing = false
-logResize.addEventListener('mousedown', (e) => {
-  e.preventDefault()
-  logResizing = true
-  const startY = e.clientY
-  const startH = logPanel.offsetHeight
-
-  function onMove(ev) {
-    if (!logResizing) return
-    const delta = startY - ev.clientY
-    const newH = Math.max(100, Math.min(window.innerHeight * 0.7, startH + delta))
-    logPanel.style.height = newH + 'px'
-  }
-  function onUp() {
-    logResizing = false
-    document.removeEventListener('mousemove', onMove)
-    document.removeEventListener('mouseup', onUp)
-  }
-  document.addEventListener('mousemove', onMove)
-  document.addEventListener('mouseup', onUp)
-})
-
-function handleLogEvent(payload) {
-  const entry = {
-    sessionId: payload.sessionId,
-    timestamp: payload.timestamp,
-    level: payload.level,
-    message: payload.message,
-  }
-  logEntries.push(entry)
-  while (logEntries.length > LOG_MAX) logEntries.shift()
-
-  if (entry.level === 'error' && !logPanelOpen) {
-    logHasUnseenError = true
-    logErrorDot.classList.remove('hidden')
-  }
-
-  if (logPanelOpen) {
-    appendLogEntry(entry)
-    scrollLogToBottom()
-  }
+function escapeAttr(str) {
+  return escapeHtml(str).replace(/"/g, '&quot;')
 }
 
-function replaceLogEntries(entries) {
-  logEntries.length = 0
-  for (const entry of entries.slice(-LOG_MAX)) {
-    logEntries.push(entry)
-  }
-  logHasUnseenError = false
-  logErrorDot.classList.add('hidden')
-  if (logPanelOpen) {
-    renderLogEntries()
-  }
-}
-
-function renderLogEntries() {
-  if (!activeSessionId) {
-    logEntriesEl.innerHTML = '<div class="log-empty">Select a session to view logs</div>'
-    return
-  }
-  if (!logEntries.length) {
-    logEntriesEl.innerHTML = '<div class="log-empty">No log entries yet</div>'
-    return
-  }
-  logEntriesEl.innerHTML = logEntries.map(formatLogEntry).join('')
-  scrollLogToBottom()
-}
-
-function appendLogEntry(entry) {
-  // Remove empty placeholder if present
-  const empty = logEntriesEl.querySelector('.log-empty')
-  if (empty) empty.remove()
-
+function escapeHtml(str) {
   const div = document.createElement('div')
-  div.innerHTML = formatLogEntry(entry)
-  logEntriesEl.appendChild(div.firstElementChild)
+  div.textContent = str == null ? '' : String(str)
+  return div.innerHTML
 }
 
-function formatLogEntry(entry) {
-  const ts = new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  return `<div class="log-entry ${escHtml(entry.level)}">
-    <span class="log-ts">${ts}</span>
-    <span class="log-level ${escHtml(entry.level)}">${escHtml(entry.level)}</span>
-    <span class="log-msg">${escHtml(entry.message)}</span>
-  </div>`
+function formatTime(timestamp) {
+  const now = Date.now()
+  const diff = now - timestamp
+  const seconds = Math.floor(diff / 1000)
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+  const days = Math.floor(hours / 24)
+
+  if (seconds < 60) return 'just now'
+  if (minutes < 60) return `${minutes} min ago`
+  if (hours < 24) return `${hours} hr ago`
+  return `${days} day${days > 1 ? 's' : ''} ago`
 }
 
-function scrollLogToBottom() {
-  requestAnimationFrame(() => {
-    logEntriesEl.scrollTop = logEntriesEl.scrollHeight
-  })
+// ── Init ──────────────────────────────────────────────────────────────────────
+window.toggleTheme = toggleTheme
+window.navigate = navigate
+window.toggleUserMenu = function() {
+  document.getElementById('user-menu-popover')?.classList.toggle('open')
+}
+window.logout = function() {
+  clearAuthToken()
+  navigate('/login')
 }
 
-// ── Boot ──────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', init)
+document.addEventListener('click', event => {
+  if (!event.target.closest?.('.user-menu')) {
+    document.getElementById('user-menu-popover')?.classList.remove('open')
+  }
+})
+
+document.addEventListener('DOMContentLoaded', () => {
+  initTheme()
+  render()
+
+  if (getAuthToken()) {
+    connectWs()
+  }
+})

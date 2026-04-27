@@ -2,9 +2,9 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=1440">
   <title>Dashboard — Turing Cloud</title>
-  <link rel="stylesheet" href="cloud.css">
+  <link rel="stylesheet" href="style.css">
   <style>
     .session-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
     .session-card { cursor: pointer; }
@@ -64,19 +64,19 @@
       <span>Turing Cloud</span>
     </div>
     <nav class="sidebar-nav">
-      <a href="/" class="active">
+      <a href="dashboard.html" class="active">
         <span class="nav-icon">◉</span> Sessions
       </a>
-      <a href="/" onclick="switchView('pipelines'); return false;">
+      <a href="dashboard.html" onclick="switchView('pipelines'); return false;">
         <span class="nav-icon">⧫</span> Pipelines
       </a>
-      <a href="/settings.html">
+      <a href="settings.html">
         <span class="nav-icon">⬡</span> Agents
       </a>
-      <a href="/settings.html">
+      <a href="settings.html">
         <span class="nav-icon">⚙</span> Settings
       </a>
-      <a href="/settings.html">
+      <a href="settings.html">
         <span class="nav-icon">🔑</span> API Keys
       </a>
     </nav>
@@ -98,7 +98,7 @@
         </div>
       </div>
       <div class="topbar-right">
-        <a href="/session.html" class="btn btn-primary btn-sm">+ New Session</a>
+        <a href="session.html" class="btn btn-primary btn-sm">+ New Session</a>
         <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
         <div class="avatar">JY</div>
       </div>
@@ -142,7 +142,7 @@
         <div class="session-cards">
 
           <!-- Card 1 -->
-          <a href="/session.html" class="card session-card">
+          <a href="session.html" class="card session-card">
             <div class="session-card-header">
               <span class="session-card-title">Code Review Pipeline</span>
               <span class="badge badge-active">Active</span>
@@ -159,7 +159,7 @@
           </a>
 
           <!-- Card 2 -->
-          <a href="/session.html" class="card session-card">
+          <a href="session.html" class="card session-card">
             <div class="session-card-header">
               <span class="session-card-title">Data Analysis Task</span>
               <span class="badge badge-done">Done</span>
@@ -176,7 +176,7 @@
           </a>
 
           <!-- Card 3 -->
-          <a href="/session.html" class="card session-card">
+          <a href="session.html" class="card session-card">
             <div class="session-card-header">
               <span class="session-card-title">Translation Batch</span>
               <span class="badge badge-active">Active</span>
@@ -193,7 +193,7 @@
           </a>
 
           <!-- Card 4 -->
-          <a href="/session.html" class="card session-card">
+          <a href="session.html" class="card session-card">
             <div class="session-card-header">
               <span class="session-card-title">API Spec Generator</span>
               <span class="badge badge-error">Error</span>
@@ -210,7 +210,7 @@
           </a>
 
           <!-- Card 5 -->
-          <a href="/session.html" class="card session-card">
+          <a href="session.html" class="card session-card">
             <div class="session-card-header">
               <span class="session-card-title">Creative Writing</span>
               <span class="badge badge-paused">Paused</span>
@@ -227,7 +227,7 @@
           </a>
 
           <!-- Card 6 -->
-          <a href="/session.html" class="card session-card">
+          <a href="session.html" class="card session-card">
             <div class="session-card-header">
               <span class="session-card-title">Security Audit</span>
               <span class="badge badge-done">Done</span>
