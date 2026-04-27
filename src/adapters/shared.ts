@@ -10,6 +10,7 @@ interface RunCommandOptions {
   timeout: number
   stdinMode?: 'ignore' | 'pipe'
   onOutput?: (line: string) => void
+  getTimeoutExtensionMs?: () => number
 }
 
 export function buildPrompt(message: string, opts?: AdapterSendOpts): string {
@@ -38,6 +39,7 @@ export function runCommand({
   timeout,
   stdinMode = 'pipe',
   onOutput,
+  getTimeoutExtensionMs,
 }: RunCommandOptions): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn(command, args, {
@@ -55,6 +57,9 @@ export function runCommand({
     let stdoutBuffer = ''
     let stderrBuffer = ''
     let lastOutput = ''
+    const startedAt = Date.now()
+    let settled = false
+    let timer: NodeJS.Timeout | undefined
 
     const capture = (chunk: Buffer, stream: 'stdout' | 'stderr') => {
       const text = chunk.toString()
@@ -76,13 +81,23 @@ export function runCommand({
     proc.stdout!.on('data', (d: Buffer) => { capture(d, 'stdout') })
     proc.stderr!.on('data', (d: Buffer) => { capture(d, 'stderr') })
 
-    const timer = setTimeout(() => {
+    const scheduleTimeout = () => {
+      const totalTimeout = timeout + Math.max(0, getTimeoutExtensionMs?.() ?? 0)
+      const remaining = startedAt + totalTimeout - Date.now()
+      if (remaining > 0) {
+        timer = setTimeout(scheduleTimeout, remaining)
+        return
+      }
       proc.kill('SIGTERM')
-      reject(withLastOutput(new Error(`[${adapterName}] timed out after ${timeout}ms`), lastOutput))
-    }, timeout)
+      settled = true
+      reject(withLastOutput(new Error(`[${adapterName}] timed out after ${totalTimeout}ms`), lastOutput))
+    }
+    scheduleTimeout()
 
     proc.on('close', (code) => {
-      clearTimeout(timer)
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
       const finalStdout = flushLine(stdoutBuffer, onOutput)
       const finalStderr = flushLine(stderrBuffer, onOutput)
       lastOutput = finalStderr || finalStdout || lastOutput
@@ -94,7 +109,9 @@ export function runCommand({
     })
 
     proc.on('error', (err) => {
-      clearTimeout(timer)
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
       reject(withLastOutput(new Error(`[${adapterName}] spawn error: ${err.message}`), lastOutput))
     })
   })

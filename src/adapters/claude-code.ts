@@ -53,6 +53,7 @@ export class ClaudeCodeAdapter implements Adapter {
       timeout: this.timeout,
       stdinMode: 'ignore',
       onOutput: opts?.onOutput,
+      getTimeoutExtensionMs: opts?.getTimeoutExtensionMs,
     })
     return this.extractText(raw)
   }

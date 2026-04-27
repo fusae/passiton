@@ -31,6 +31,7 @@ export class Router extends EventEmitter {
   // Track in-flight sessions so runSession loops can be cancelled
   private runningLoops = new Set<string>()
   private runEpochs = new Map<string, number>()
+  private timeoutExtensions = new Map<string, number>()
 
   constructor(policy: Partial<PolicyConfig> = {}) {
     super()
@@ -137,6 +138,7 @@ export class Router extends EventEmitter {
 
   async pauseSession(id: string): Promise<Session> {
     this.runningLoops.delete(id)
+    this.timeoutExtensions.delete(id)
     this.nextRunEpoch(id)
     const session = state.updateSession(id, { status: 'paused' })
     this.emit('event', { type: 'session:paused', payload: session } satisfies WsEvent)
@@ -200,11 +202,28 @@ export class Router extends EventEmitter {
 
   async stopSession(id: string): Promise<Session> {
     this.runningLoops.delete(id)
+    this.timeoutExtensions.delete(id)
     const session = state.updateSession(id, { status: 'done' })
     this.emit('event', { type: 'session:done', payload: session } satisfies WsEvent)
     this.emitLog('info', `Session stopped [${id.slice(0, 8)}]`, id)
     this.handlePipelineSessionFinished(id, 'done')
     return session
+  }
+
+  extendSessionTimeout(id: string, extensionMs = 5 * 60 * 1000): { session: Session; extensionMs: number; totalExtensionMs: number } {
+    const session = state.getSession(id)
+    if (!session) throw new Error(`Session ${id} not found`)
+    if (session.status !== 'active' || !this.runningLoops.has(id)) {
+      throw new Error(`Session ${id} is not running`)
+    }
+    const totalExtensionMs = (this.timeoutExtensions.get(id) ?? 0) + extensionMs
+    this.timeoutExtensions.set(id, totalExtensionMs)
+    this.emitLog('info', `Session timeout extended by ${Math.round(extensionMs / 1000)}s [${id.slice(0, 8)}] total=${Math.round(totalExtensionMs / 1000)}s`, id)
+    this.emit('event', {
+      type: 'session:updated',
+      payload: { ...session, timeoutExtensionMs: totalExtensionMs },
+    } satisfies WsEvent)
+    return { session, extensionMs, totalExtensionMs }
   }
 
   async pausePipeline(id: string): Promise<Pipeline> {
@@ -433,6 +452,7 @@ export class Router extends EventEmitter {
       throw err
     } finally {
       clearInterval(heartbeat)
+      this.timeoutExtensions.delete(sessionId)
     }
     if (this.runEpochs.get(sessionId) !== epoch || !this.runningLoops.has(sessionId)) {
       return { done: false, nextMessage: message }
@@ -486,6 +506,7 @@ export class Router extends EventEmitter {
     }
 
     const opts: AdapterSendOpts = { systemPrompt, history }
+    opts.getTimeoutExtensionMs = () => this.timeoutExtensions.get(session.id) ?? 0
     const keyId = typeof adapter.config.keyId === 'string' ? adapter.config.keyId : undefined
     if (keyId && session.userId) {
       opts.apiKey = decryptKey(session.userId, keyId).key

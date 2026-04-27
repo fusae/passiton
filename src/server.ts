@@ -925,6 +925,13 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return json(res, 200, session)
       }
 
+      // POST /api/sessions/:id/extend-timeout
+      const extendTimeoutMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/extend-timeout$/)
+      if (extendTimeoutMatch && method === 'POST') {
+        if (!state.getSession(extendTimeoutMatch[1], authUser!.userId)) return json(res, 404, { error: 'Not found' })
+        return json(res, 200, router.extendSessionTimeout(extendTimeoutMatch[1], 5 * 60 * 1000))
+      }
+
       // POST /api/sessions/:id/stop
       const stopMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/stop$/)
       if (stopMatch && method === 'POST') {

@@ -173,6 +173,7 @@ export interface AdapterSendOpts {
   apiKey?: string
   env?: Record<string, string>
   onOutput?: (line: string) => void
+  getTimeoutExtensionMs?: () => number
 }
 
 export interface HeartbeatPayload {

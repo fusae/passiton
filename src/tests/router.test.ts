@@ -143,6 +143,35 @@ test('history passed to adapters is capped at 20 messages', async () => {
   })
 })
 
+test('extendSessionTimeout exposes extra time to the running adapter call', async () => {
+  await withTempDb(async () => {
+    let extensionMs = -1
+    let release!: () => void
+    let markStarted!: () => void
+    const adapterStarted = new Promise<void>((resolve) => { markStarted = resolve })
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+    router.registerAdapter(new StubAdapter('claude-code', async (_session, _message, opts) => {
+      markStarted()
+      await new Promise<void>((done) => { release = done })
+      extensionMs = opts?.getTimeoutExtensionMs?.() ?? 0
+      return '[DONE]'
+    }))
+
+    const session = router.startSession({
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      initialPrompt: 'test timeout extension',
+    })
+
+    await adapterStarted
+    router.extendSessionTimeout(session.id)
+    release()
+    await waitFor(() => extensionMs === 5 * 60 * 1000)
+    assert.equal(extensionMs, 5 * 60 * 1000)
+  })
+})
+
 test('discuss mode ignores early done and waits for convergence', async () => {
   await withTempDb(async () => {
     let toCalls = 0

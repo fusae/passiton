@@ -717,6 +717,7 @@ function updateToolbar(session) {
   const isPaused  = session.status === 'paused'
 
   document.getElementById('btn-pause').classList.toggle('hidden', !isActive)
+  document.getElementById('btn-extend-timeout').classList.toggle('hidden', !isActive)
   document.getElementById('btn-resume').classList.toggle('hidden', !isPaused)
   document.getElementById('btn-stop').classList.toggle('hidden', isDone || isError)
 
@@ -865,6 +866,23 @@ document.getElementById('btn-resume').addEventListener('click', async () => {
   btn.textContent = '▶ Resuming...'
   try {
     await api(`/api/sessions/${activeSessionId}/resume`, 'POST')
+  } catch (err) {
+    showToast(err.message, 'error')
+  } finally {
+    btn.disabled = false
+    btn.textContent = originalText
+  }
+})
+
+document.getElementById('btn-extend-timeout').addEventListener('click', async () => {
+  if (!activeSessionId) return
+  const btn = document.getElementById('btn-extend-timeout')
+  const originalText = btn.textContent
+  btn.disabled = true
+  btn.textContent = '+5m…'
+  try {
+    const result = await api(`/api/sessions/${activeSessionId}/extend-timeout`, 'POST')
+    showToast(`Timeout extended +${Math.round(result.extensionMs / 60000)}m`, 'success')
   } catch (err) {
     showToast(err.message, 'error')
   } finally {

@@ -53,6 +53,7 @@ export class OpenCodeAdapter implements Adapter {
       timeout: this.timeout,
       stdinMode: 'pipe',
       onOutput: opts?.onOutput,
+      getTimeoutExtensionMs: opts?.getTimeoutExtensionMs,
     })
     return this.extractText(raw)
   }

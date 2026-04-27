@@ -92,7 +92,18 @@ export abstract class ApiAdapter implements Adapter {
 
   protected async fetchOnce(request: ApiRequest, opts?: AdapterSendOpts): Promise<unknown> {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), this.timeout)
+    const startedAt = Date.now()
+    let timer: NodeJS.Timeout | undefined
+    const scheduleTimeout = () => {
+      const totalTimeout = this.timeout + Math.max(0, opts?.getTimeoutExtensionMs?.() ?? 0)
+      const remaining = startedAt + totalTimeout - Date.now()
+      if (remaining > 0) {
+        timer = setTimeout(scheduleTimeout, remaining)
+        return
+      }
+      controller.abort()
+    }
+    scheduleTimeout()
     try {
       const response = await fetch(`${this.baseUrl}${request.path ?? ''}`, {
         method: 'POST',
@@ -115,11 +126,11 @@ export abstract class ApiAdapter implements Adapter {
       return response.json()
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new Error(`[${this.name}] API request timed out after ${this.timeout}ms`)
+        throw new Error(`[${this.name}] API request timed out after ${this.timeout + Math.max(0, opts?.getTimeoutExtensionMs?.() ?? 0)}ms`)
       }
       throw err
     } finally {
-      clearTimeout(timer)
+      if (timer) clearTimeout(timer)
     }
   }
 
