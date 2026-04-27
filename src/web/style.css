@@ -326,10 +326,15 @@ textarea.input { resize: vertical; min-height: 80px; }
 .stat-card {
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius-card); padding: 20px 24px;
+  min-width: 0;
 }
 .stat-card .label { margin-bottom: 6px; }
 .stat-card .stat-value {
   font-size: 2rem; font-weight: 700;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .stat-card .stat-sub {
   font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;

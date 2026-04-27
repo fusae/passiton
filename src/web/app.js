@@ -727,7 +727,7 @@ function renderDashboardStats() {
 
   if (statActive) statActive.textContent = state.stats.sessions?.active || 0
   if (statDone) statDone.textContent = state.stats.sessions?.done || 0
-  if (statRounds) statRounds.textContent = state.stats.sessions?.avgRounds || 0
+  if (statRounds) statRounds.textContent = formatStatNumber(state.stats.sessions?.avgRounds || 0)
   if (statAgents) statAgents.textContent = state.agents.length || 0
 }
 
@@ -757,6 +757,13 @@ function renderSessionCards() {
       </div>
     </a>
   `).join('')
+}
+
+function formatStatNumber(value) {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return '0'
+  if (Number.isInteger(number)) return String(number)
+  return number.toFixed(1)
 }
 
 function renderPipelineCards() {
@@ -968,7 +975,7 @@ function renderSessionMessages() {
           <div class="chat-bubble">${renderMarkdown(msg.content)}</div>
           <div class="chat-meta">
             <span>${escapeHtml(msg.from)} · Turn ${msg.round} · ${new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
-          <button class="msg-copy-btn" onclick="window.copyMessage(${jsString(msg.id)})" title="Copy">Copy</button>
+          <button class="msg-copy-btn" onclick='window.copyMessage(${jsString(msg.id)})' title="Copy">Copy</button>
           </div>
         </div>
       </div>
@@ -1254,8 +1261,8 @@ function renderAgentsList() {
         </div>
         <span class="badge badge-${agent.status === 'ready' ? 'active' : agent.status === 'no_key' ? 'paused' : 'error'}">${escapeHtml(agent.status)}</span>
         <div class="agent-actions">
-          <button class="btn btn-ghost btn-sm" onclick="window.showAgentModal(${jsString(agent.name)})">Edit</button>
-          <button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick="window.deleteAgent(${jsString(agent.name)})">Delete</button>
+          <button class="btn btn-ghost btn-sm" onclick='window.showAgentModal(${jsString(agent.name)})'>Edit</button>
+          <button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteAgent(${jsString(agent.name)})'>Delete</button>
         </div>
       </div>
     `
@@ -1278,7 +1285,7 @@ function renderApiKeysList() {
         <div class="agent-name">${escapeHtml(key.name)}</div>
         <div class="agent-model">${escapeHtml(providerLabel(key.provider))} · <span class="key-masked">${escapeHtml(key.maskedKey)}</span></div>
       </div>
-      <button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick="window.deleteApiKey(${jsString(key.id)})">Delete</button>
+      <button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteApiKey(${jsString(key.id)})'>Delete</button>
     </div>
   `).join('')
 }
@@ -1336,7 +1343,7 @@ window.showTemplateGalleryModal = async function() {
       ${agentNotice}
       <div class="template-grid">
         ${templates.map(template => `
-          <button class="card template-card" type="button" onclick="window.showNewSessionModal(${jsString(template.id)})">
+          <button class="card template-card" type="button" onclick='window.showNewSessionModal(${jsString(template.id)})'>
             <div class="template-icon">${escapeHtml(template.icon || '⚙️')}</div>
             <div class="template-body">
               <div class="template-title">${escapeHtml(template.nameEn || template.name)}</div>
@@ -1498,7 +1505,7 @@ window.showAgentModal = function(name) {
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
       </div>
-      <form onsubmit="window.saveAgent(event, ${existing ? jsString(existing.name) : 'null'})">
+      <form onsubmit='window.saveAgent(event, ${existing ? jsString(existing.name) : 'null'})'>
         <div class="form-row">
           <div class="form-group">
             <label>Name</label>
