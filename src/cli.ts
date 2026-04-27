@@ -644,11 +644,7 @@ async function listAgents() {
     die(`Cannot reach server at ${BASE}`)
   }
 
-  const payload = r!.data as {
-    api?: Array<{ name: string; adapter: string; model?: string; provider: string; status: string }>
-    local?: Array<{ name: string; healthy: boolean; adapter: string; version?: string; status: string }>
-  }
-  const agents = [...(payload.api ?? []), ...(payload.local ?? [])]
+  const agents = r!.data as Array<{ name: string; adapter: string; model?: string; provider: string; status: string }>
   if (!agents.length) { console.log('No agents registered.'); return }
 
   console.log()
@@ -658,9 +654,6 @@ async function listAgents() {
     const status = ok ? `\x1b[32m${a.status}\x1b[0m` : `\x1b[90m${a.status}\x1b[0m`
     const model = 'model' in a && a.model ? ` ${a.model}` : ''
     console.log(`  ${dot}  ${a.name.padEnd(18)} ${status}  ${a.adapter.padEnd(14)}${model}`)
-    if ('version' in a && a.version) {
-      console.log(`      version: ${a.version}`)
-    }
   }
   console.log()
 }
@@ -675,11 +668,7 @@ async function health() {
     process.exit(1)
   }
 
-  const payload = r!.data as {
-    api?: Array<{ name: string; status: string }>
-    local?: Array<{ name: string; status: string }>
-  }
-  const agents = [...(payload.api ?? []), ...(payload.local ?? [])]
+  const agents = r!.data as Array<{ name: string; status: string }>
   let allHealthy = true
   console.log()
   for (const a of agents) {

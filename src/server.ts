@@ -33,7 +33,6 @@ const MAX_BODY_SIZE = 1024 * 1024
 const WS_HEARTBEAT_MS = 30_000
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const API_ADAPTERS = new Set(['anthropic-api', 'openai-api', 'zhipu-api', 'custom-api'])
-const LOCAL_ADAPTERS = new Set(['claude-code', 'codex', 'opencode'])
 const PROVIDER_BY_ADAPTER: Record<string, string> = {
   'anthropic-api': 'Anthropic',
   'openai-api': 'OpenAI',
@@ -335,30 +334,17 @@ function reloadUserAgents(router: Router, userId: string): void {
   registerUserConfiguredAdapters(router, userId, userAgentConfigs(userId))
 }
 
-async function listAgentModels(agentCatalog: AgentCatalog, userId: string): Promise<AgentListResponse> {
+async function listAgentModels(userId: string): Promise<AgentListResponse> {
   const current = loadConfig()
   const globalApi = Object.entries(current.agents)
     .filter(([, cfg]) => API_ADAPTERS.has(cfg.adapter))
     .map(([name, cfg]) => apiAgentInfoFromConfig(name, cfg))
   const userApi = state.listUserAgents(userId).map(apiAgentInfoFromRecord)
   const userNames = new Set(userApi.map((agent) => agent.name))
-  const api = [
+  return [
     ...userApi,
     ...globalApi.filter((agent) => !userNames.has(agent.name)),
   ]
-
-  const local = (await agentCatalog.listAgents())
-    .filter((agent) => LOCAL_ADAPTERS.has(agent.adapter))
-    .filter((agent) => !userNames.has(agent.name))
-    .map((agent) => ({
-      name: agent.name,
-      adapter: agent.adapter,
-      healthy: agent.healthy,
-      version: agent.version,
-      status: agent.healthy ? 'online' as const : 'offline' as const,
-    }))
-
-  return { api, local }
 }
 
 function apiAgentInfoFromConfig(name: string, cfg: AgentConfig): ApiAgentInfo {
@@ -663,7 +649,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // GET /api/agents
       if (pathname === '/api/agents' && method === 'GET') {
-        const agents = await listAgentModels(agentCatalog, authUser!.userId)
+        const agents = await listAgentModels(authUser!.userId)
         return json(res, 200, agents)
       }
 
@@ -689,7 +675,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           throw err
         }
         reloadUserAgents(router, authUser!.userId)
-        return json(res, 201, await listAgentModels(agentCatalog, authUser!.userId))
+        return json(res, 201, await listAgentModels(authUser!.userId))
       }
 
       const userAgentMatch = pathname.match(/^\/api\/agents\/([^/]+)$/)
@@ -714,7 +700,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           throw err
         }
         reloadUserAgents(router, authUser!.userId)
-        return json(res, 200, await listAgentModels(agentCatalog, authUser!.userId))
+        return json(res, 200, await listAgentModels(authUser!.userId))
       }
 
       if (userAgentMatch && method === 'DELETE') {
@@ -722,7 +708,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           return json(res, 404, { error: 'Not found' })
         }
         reloadUserAgents(router, authUser!.userId)
-        return json(res, 200, await listAgentModels(agentCatalog, authUser!.userId))
+        return json(res, 200, await listAgentModels(authUser!.userId))
       }
 
       // GET /api/templates

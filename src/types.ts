@@ -217,18 +217,7 @@ export interface ApiAgentInfo {
   status: 'ready' | 'no_key' | 'invalid'
 }
 
-export interface LocalAgentInfo {
-  name: string
-  adapter: string
-  healthy: boolean
-  version?: string
-  status: 'online' | 'offline'
-}
-
-export interface AgentListResponse {
-  api: ApiAgentInfo[]
-  local: LocalAgentInfo[]
-}
+export type AgentListResponse = ApiAgentInfo[]
 
 export interface DefaultsConfig {
   maxRounds: number

@@ -97,10 +97,10 @@ test('agent CRUD stores user API model configs', async () => {
       }),
     })
     assert.equal(create.status, 201)
-    const created = await create.json() as { api: Array<{ name: string; status: string; keyMasked: string }> }
-    assert.equal(created.api[0].name, 'claude-api')
-    assert.equal(created.api[0].status, 'ready')
-    assert.equal(created.api[0].keyMasked, 'sk-...1234')
+    const created = await create.json() as Array<{ name: string; status: string; keyMasked: string }>
+    assert.equal(created[0].name, 'claude-api')
+    assert.equal(created[0].status, 'ready')
+    assert.equal(created[0].keyMasked, 'sk-...1234')
     assert.notEqual(state.getUserAgent(auth.userId, 'claude-api')?.encryptedKey, 'sk-ant-test1234')
 
     const remove = await fetch(`${baseUrl}/api/agents/claude-api`, {

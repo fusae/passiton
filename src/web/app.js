@@ -6,7 +6,7 @@ const AUTH_TOKEN_KEY = 'turing-jwt'
 // ── State ─────────────────────────────────────────────────────────────────────
 let sessions = []
 let pipelines = []
-let agents = { api: [], local: [] }
+let agents = []
 let apiKeys = []
 let templates = []
 let stats = null
@@ -21,11 +21,6 @@ let sessionFilter = 'all'
 let appConfig = null
 let editingAgentName = null
 const heartbeats = new Map()
-const AGENT_COMMAND_DEFAULTS = {
-  'claude-code': 'claude',
-  codex: 'codex',
-  opencode: 'opencode',
-}
 const UI_PREFS_KEY = 'turing-ui-prefs'
 const PROVIDER_OPTIONS = {
   'anthropic-api': { label: 'Anthropic', color: '#D97706', models: ['claude-sonnet-4-20250514', 'claude-3.5-haiku'] },
@@ -266,23 +261,17 @@ async function loadAgents() {
 }
 
 function renderAgents() {
-  const apiAgents = agents.api || []
-  const localAgents = agents.local || []
-  if (!apiAgents.length && !localAgents.length) {
+  const apiAgents = agents || []
+  if (!apiAgents.length) {
     agentsList.innerHTML = '<span class="no-agents">No agents registered</span>'
     return
   }
   const apiSection = `
     <div class="agent-section">
-      <div class="agent-section-title">API Models</div>
+      <div class="agent-section-title">Models</div>
       ${apiAgents.length ? apiAgents.map(renderApiAgentRow).join('') : '<span class="no-agents">No API models</span>'}
     </div>`
-  const localSection = localAgents.length ? `
-    <details class="agent-section local-agent-section">
-      <summary class="agent-section-title">Local Agents</summary>
-      ${localAgents.map(renderLocalAgentRow).join('')}
-    </details>` : ''
-  agentsList.innerHTML = `${apiSection}${localSection}<button type="button" class="add-agent-sidebar-btn" id="sidebar-add-agent-btn">+ Add Agent</button>`
+  agentsList.innerHTML = `${apiSection}<button type="button" class="add-agent-sidebar-btn" id="sidebar-add-agent-btn">+ Add Agent</button>`
   agentsList.querySelectorAll('[data-agent-edit]').forEach((row) => {
     row.addEventListener('click', () => openAgentEditor(row.dataset.agentEdit))
   })
@@ -308,22 +297,6 @@ function renderApiAgentRow(agent) {
       </span>
     </span>
   </button>`
-}
-
-function renderLocalAgentRow(agent) {
-  return `<div class="agent-row">
-    <span class="agent-dot ${agent.status === 'online' ? 'ok' : 'off'}"></span>
-    <div class="agent-meta">
-      <div class="agent-line">
-        <span class="agent-name">${escHtml(agent.name)}</span>
-        ${statusBadge(agent.status)}
-      </div>
-      <div class="agent-subline">
-        <span class="agent-kind">${escHtml(agent.adapter)}</span>
-        ${agent.version ? `<span class="agent-version">${escHtml(agent.version)}</span>` : ''}
-      </div>
-    </div>
-  </div>`
 }
 
 function statusBadge(status) {
@@ -1245,9 +1218,7 @@ function addPipelineStepEditor() {
 }
 
 function availableAgentNames() {
-  const apiNames = (agents.api || []).filter(a => a.status === 'ready').map(a => a.name)
-  const localNames = (agents.local || []).filter(a => a.status === 'online').map(a => a.name)
-  return [...new Set([...apiNames, ...localNames])]
+  return [...new Set((agents || []).filter(a => a.status === 'ready').map(a => a.name))]
 }
 
 function refreshPipelineStepLabels() {
@@ -1878,7 +1849,7 @@ function renderSettingsPanel() {
 }
 
 function renderAgentConfigList() {
-  const entries = agents.api || []
+  const entries = agents || []
   if (!entries.length) {
     agentsConfigList.innerHTML = '<div class="settings-empty">No API model configs</div>'
     return
@@ -1905,7 +1876,7 @@ function renderAgentConfigList() {
 
 function showAgentForm(agentName) {
   editingAgentName = agentName || null
-  const cfg = editingAgentName ? (agents.api || []).find(a => a.name === editingAgentName) : null
+  const cfg = editingAgentName ? (agents || []).find(a => a.name === editingAgentName) : null
   const selectedAdapter = cfg?.adapter || 'anthropic-api'
   const modelOptions = providerMeta(selectedAdapter).models
   const isCustom = selectedAdapter === 'custom-api'
