@@ -11,6 +11,7 @@ const state = {
   sessions: [],
   pipelines: [],
   agents: [],
+  templates: [],
   apiKeys: [],
   stats: null,
   config: null,
@@ -300,6 +301,15 @@ async function loadAgents() {
     state.agents = await api('/api/agents')
   } catch (err) {
     console.error('Failed to load agents:', err)
+  }
+}
+
+async function loadTemplates() {
+  try {
+    state.templates = await api('/api/templates')
+  } catch (err) {
+    console.error('Failed to load templates:', err)
+    state.templates = []
   }
 }
 
@@ -640,7 +650,7 @@ function renderDashboard() {
             </div>
           </div>
           <div class="topbar-right">
-            <button class="btn btn-primary btn-sm" onclick="window.showNewSessionModal()">+ New Session</button>
+            <button class="btn btn-primary btn-sm" onclick="window.showTemplateGalleryModal()">+ New Task</button>
             <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
             ${renderUserMenu()}
           </div>
@@ -894,6 +904,7 @@ function renderSessionPanel(session) {
           <span class="kv-label">Mode</span>
           <span class="kv-value">${escapeHtml(session.mode)}</span>
         </div>
+        ${session.templateId ? `<div class="panel-kv-row"><span class="kv-label">Template</span><span class="kv-value">${escapeHtml(session.templateId)}</span></div>` : ''}
         <div class="panel-kv-row">
           <span class="kv-label">Rounds</span>
           <span class="kv-value">${session.currentRound} / ${session.maxRounds}</span>
@@ -1297,45 +1308,117 @@ window.saveGeneralSettings = async function() {
   }
 }
 
-window.showNewSessionModal = async function() {
+window.showTemplateGalleryModal = async function() {
+  if (!state.templates.length) await loadTemplates()
   if (!state.agents.length) await loadAgents()
+
+  const templates = [...state.templates].sort((a, b) => {
+    if (a.id === 'custom') return 1
+    if (b.id === 'custom') return -1
+    return 0
+  })
+  const agentNotice = state.agents.length ? '' : `
+    <div class="template-empty-agents">
+      <span>No assistants configured yet.</span>
+      <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
+    </div>
+  `
+
+  showModal(`
+    <div class="modal-card template-modal">
+      <div class="modal-head">
+        <div>
+          <h3>New Task</h3>
+          <p>Choose a scenario preset.</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+      </div>
+      ${agentNotice}
+      <div class="template-grid">
+        ${templates.map(template => `
+          <button class="card template-card" type="button" onclick="window.showNewSessionModal(${jsString(template.id)})">
+            <div class="template-icon">${escapeHtml(template.icon || '⚙️')}</div>
+            <div class="template-body">
+              <div class="template-title">${escapeHtml(template.nameEn || template.name)}</div>
+              <p>${escapeHtml(template.description || '')}</p>
+              <div class="template-tags">${(template.tags || template.config?.tags || []).map(tag => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
+            </div>
+          </button>
+        `).join('')}
+      </div>
+    </div>
+  `)
+}
+
+window.showNewSessionModal = async function(templateId = 'custom') {
+  if (!state.templates.length) await loadTemplates()
+  if (!state.agents.length) await loadAgents()
+  const template = state.templates.find(item => item.id === templateId) || state.templates.find(item => item.id === 'custom')
   const readyAgents = state.agents.filter(agent => agent.status === 'ready')
   const agents = readyAgents.length ? readyAgents : state.agents
   const options = agents.map(agent => `<option value="${escapeAttr(agent.name)}">${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
+  const defaultFrom = preferredAgentName(agents, template?.config?.preferredAdapters?.from)
+  const defaultTo = preferredAgentName(agents, template?.config?.preferredAdapters?.to, defaultFrom)
+  const optionHtml = (selected) => agents.map(agent => `<option value="${escapeAttr(agent.name)}" ${agent.name === selected ? 'selected' : ''}>${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
+  const mode = template?.config?.mode || state.config?.defaults?.mode || 'collaborate'
+  const maxRounds = template?.config?.maxRounds || state.config?.defaults?.maxRounds || 5
+  const prompts = template?.config?.systemPrompts || { from: '', to: '' }
+  const templateBadge = template && template.id !== 'custom'
+    ? `<div class="template-selected-badge">Template: ${escapeHtml(template.nameEn || template.name)}</div>`
+    : ''
+  const noAgents = state.agents.length === 0
 
   showModal(`
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>New Session</h3>
+          <h3>New Task</h3>
           <p>Create an agent-to-agent conversation.</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
       </div>
+      ${templateBadge}
+      ${noAgents ? `
+        <div class="template-empty-agents" style="margin-bottom: 20px;">
+          <span>No assistants configured yet.</span>
+          <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
+        </div>
+      ` : ''}
       <form onsubmit="window.createSession(event)">
+        <input type="hidden" name="templateId" value="${escapeAttr(template?.id || 'custom')}">
         <div class="form-row">
           <div class="form-group">
             <label>From</label>
-            <select class="input" name="from" required>${options}</select>
+            <select class="input" name="from" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultFrom) || options}</select>
           </div>
           <div class="form-group">
             <label>To</label>
-            <select class="input" name="to" required>${options}</select>
+            <select class="input" name="to" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultTo) || options}</select>
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
             <label>Mode</label>
             <select class="input" name="mode">
-              <option value="collaborate">Collaborate</option>
-              <option value="discuss">Discuss</option>
-              <option value="review">Review</option>
-              <option value="freeform">Freeform</option>
+              <option value="collaborate" ${mode === 'collaborate' ? 'selected' : ''}>Collaborate</option>
+              <option value="discuss" ${mode === 'discuss' ? 'selected' : ''}>Discuss</option>
+              <option value="review" ${mode === 'review' ? 'selected' : ''}>Review</option>
+              <option value="freeform" ${mode === 'freeform' ? 'selected' : ''}>Freeform</option>
             </select>
           </div>
           <div class="form-group">
             <label>Max Rounds</label>
-            <input class="input" type="number" name="maxRounds" min="1" value="${state.config?.defaults?.maxRounds || 5}">
+            <input class="input" type="number" name="maxRounds" min="1" value="${maxRounds}">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>From System Prompt</label>
+            <textarea class="input" name="systemPromptFrom" rows="4">${escapeHtml(prompts.from)}</textarea>
+          </div>
+          <div class="form-group">
+            <label>To System Prompt</label>
+            <textarea class="input" name="systemPromptTo" rows="4">${escapeHtml(prompts.to)}</textarea>
           </div>
         </div>
         <div class="form-group">
@@ -1366,8 +1449,8 @@ window.showNewSessionModal = async function() {
           <span>Approve mode</span>
         </label>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">Create</button>
+          <button type="button" class="btn btn-secondary" onclick="window.showTemplateGalleryModal()">Back</button>
+          <button type="submit" class="btn btn-primary" ${noAgents ? 'disabled' : ''}>Create</button>
         </div>
       </form>
     </div>
@@ -1378,15 +1461,21 @@ window.createSession = async function(e) {
   e.preventDefault()
   const fd = new FormData(e.target)
   const context = buildContextFromForm(fd)
+  const systemPromptFrom = String(fd.get('systemPromptFrom') || '').trim()
+  const systemPromptTo = String(fd.get('systemPromptTo') || '').trim()
   const body = {
     from: { adapter: fd.get('from') },
     to: { adapter: fd.get('to') },
     initialPrompt: String(fd.get('prompt') || '').trim(),
+    template_id: String(fd.get('templateId') || '').trim() || undefined,
     mode: fd.get('mode') || state.config?.defaults?.mode || 'collaborate',
     maxRounds: parseInt(fd.get('maxRounds')) || state.config?.defaults?.maxRounds || 5,
     approveMode: fd.get('approveMode') === 'on',
     cwd: String(fd.get('cwd') || '').trim() || undefined,
     context,
+  }
+  if (systemPromptFrom && systemPromptTo) {
+    body.systemPrompts = { from: systemPromptFrom, to: systemPromptTo }
   }
 
   try {
@@ -1826,6 +1915,14 @@ function compactObject(obj) {
 
 function adapterOption(value, selected) {
   return `<option value="${escapeAttr(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(value)}</option>`
+}
+
+function preferredAgentName(agents, preferredAdapter, avoidName) {
+  if (!agents.length) return ''
+  const preferred = preferredAdapter ? agents.find(agent => agent.adapter === preferredAdapter && agent.name !== avoidName) : null
+  if (preferred) return preferred.name
+  const firstDifferent = agents.find(agent => agent.name !== avoidName)
+  return (firstDifferent || agents[0]).name
 }
 
 function providerIcon(provider) {

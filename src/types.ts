@@ -62,6 +62,7 @@ export interface Session {
     from: string
     to: string
   }
+  templateId?: string
   errorType?: SessionErrorType
   errorMessage?: string
   lastAgentOutput?: string

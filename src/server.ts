@@ -441,6 +441,17 @@ function parseSessionContext(value: unknown, field: string): SessionContextInput
   return Object.keys(result).length > 0 ? result : undefined
 }
 
+function parseSystemPrompts(value: unknown): { from: string; to: string } | undefined {
+  if (value === undefined || value === null) {
+    return undefined
+  }
+  const prompts = requireRecord(value, 'systemPrompts')
+  return {
+    from: requireNonEmptyString(prompts.from, 'systemPrompts.from'),
+    to: requireNonEmptyString(prompts.to, 'systemPrompts.to'),
+  }
+}
+
 function resolveSessionContext(context: SessionContextInput | undefined, cwd?: string): SessionContext | undefined {
   if (!context) return undefined
 
@@ -477,12 +488,15 @@ function resolveSessionContext(context: SessionContextInput | undefined, cwd?: s
 
 function parseSessionBody(body: unknown) {
   const data = requireRecord(body, 'body')
+  const templateId = optionalString(data.template_id ?? data.templateId, 'template_id')
 
   return {
     from: parseAgentRef(data.from, 'from'),
     to: parseAgentRef(data.to, 'to'),
     initialPrompt: requireNonEmptyString(data.initialPrompt, 'initialPrompt'),
     mode: parseSessionMode(data.mode),
+    systemPrompts: parseSystemPrompts(data.systemPrompts),
+    templateId,
     context: parseSessionContext(data.context, 'context'),
     maxRounds: optionalPositiveInt(data.maxRounds, 'maxRounds'),
     approveMode: optionalBoolean(data.approveMode, 'approveMode'),
@@ -856,12 +870,18 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       if (pathname === '/api/sessions' && method === 'POST') {
         const defaults = loadConfig().defaults
         const params = parseSessionBody(await parseBody(req))
+        const template = params.templateId ? templates.find((item) => item.id === params.templateId) : undefined
+        if (params.templateId && !template) {
+          throw new HttpError(400, 'Unknown template_id')
+        }
+        const templateConfig = template?.config
         const session = router.startSession({
           userId: authUser!.userId,
           ...params,
           context: resolveSessionContext(params.context, params.cwd),
-          mode: params.mode ?? defaults.mode,
-          maxRounds: params.maxRounds ?? defaults.maxRounds,
+          systemPrompts: params.systemPrompts ?? templateConfig?.systemPrompts,
+          mode: params.mode ?? templateConfig?.mode ?? defaults.mode,
+          maxRounds: params.maxRounds ?? templateConfig?.maxRounds ?? defaults.maxRounds,
         })
         return json(res, 201, session)
       }

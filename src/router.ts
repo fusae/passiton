@@ -75,6 +75,8 @@ export class Router extends EventEmitter {
     initialPrompt: string
     mode?: SessionMode
     context?: SessionContext
+    systemPrompts?: { from: string; to: string }
+    templateId?: string
     maxRounds?: number
     approveMode?: boolean
     cwd?: string
@@ -581,12 +583,14 @@ export class Router extends EventEmitter {
     initialPrompt: string
     mode?: SessionMode
     context?: SessionContext
+    systemPrompts?: { from: string; to: string }
+    templateId?: string
     maxRounds?: number
     approveMode?: boolean
     cwd?: string
   }, initialStatus: 'active' | 'paused'): Session {
     const mode = params.mode ?? 'freeform'
-    const systemPrompts = generateSystemPrompts(
+    const systemPrompts = params.systemPrompts ?? generateSystemPrompts(
       mode,
       params.from,
       params.to,
@@ -602,6 +606,7 @@ export class Router extends EventEmitter {
       mode,
       context: params.context,
       systemPrompts,
+      templateId: params.templateId,
       nextTurn: 'to',
       maxRounds: params.maxRounds ?? this.policy.maxRounds,
       approveMode: params.approveMode ?? false,

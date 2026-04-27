@@ -157,6 +157,7 @@ function createTables(): void {
       cwd          TEXT,
       context      TEXT,
       system_prompts TEXT,
+      template_id  TEXT,
       error_type   TEXT,
       error_round  INTEGER,
       error_message TEXT,
@@ -228,6 +229,9 @@ function createTables(): void {
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE sessions ADD COLUMN system_prompts TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN template_id TEXT`)
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE sessions ADD COLUMN next_turn TEXT NOT NULL DEFAULT 'to'`)
@@ -508,6 +512,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     cwd: row.cwd as string | undefined,
     context,
     systemPrompts,
+    templateId: row.template_id as string | undefined,
     errorType: row.error_type as Session['errorType'] | undefined,
     errorRound: row.error_round as number | undefined,
     errorMessage: row.error_message as string | undefined,
@@ -526,6 +531,7 @@ export function createSession(params: {
   mode?: SessionMode
   context?: SessionContext
   systemPrompts?: { from: string; to: string }
+  templateId?: string
   nextTurn?: 'from' | 'to'
   maxRounds?: number
   approveMode?: boolean
@@ -534,9 +540,9 @@ export function createSession(params: {
   const now = Date.now()
   const stmt = db.prepare(`
     INSERT INTO sessions (id, user_id, from_adapter, from_label, to_adapter, to_label,
-      status, mode, next_turn, max_rounds, current_round, approve_mode, cwd, context, system_prompts,
+      status, mode, next_turn, max_rounds, current_round, approve_mode, cwd, context, system_prompts, template_id,
       created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
   `)
   stmt.run(
     params.id,
@@ -552,6 +558,7 @@ export function createSession(params: {
     params.cwd ?? null,
     params.context ? JSON.stringify(params.context) : null,
     params.systemPrompts ? JSON.stringify(params.systemPrompts) : null,
+    params.templateId ?? null,
     now,
     now
   )
