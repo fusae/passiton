@@ -1,10 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { AnthropicApiAdapter } from '../adapters/api/anthropic.js'
 import { OpenAIApiAdapter } from '../adapters/api/openai.js'
 import { ZhipuApiAdapter } from '../adapters/api/zhipu.js'
 import { createAdapter } from '../adapters/factory.js'
-import type { Session } from '../types.js'
+import { Router } from '../router.js'
+import * as state from '../state.js'
+import type { Adapter, AdapterResponse, AdapterSendOpts, Session } from '../types.js'
 
 const session = { id: 'api-test', cwd: process.cwd() } as Session
 const originalFetch = globalThis.fetch
@@ -56,6 +61,25 @@ test('Anthropic API adapter formats streaming requests', async () => {
   assert.equal(result.metadata?.tokenEstimate, 7)
 })
 
+test('API adapters call onOutput for streaming deltas', async () => {
+  const chunks: string[] = []
+
+  mockFetch(async () => streamResponse([
+    { choices: [{ delta: { content: 'Hel' } }] },
+    { choices: [{ delta: { content: 'lo' } }] },
+    { choices: [], usage: { total_tokens: 3 } },
+  ]))
+
+  const adapter = new OpenAIApiAdapter({ apiKey: 'sk-openai-test' })
+  const result = await adapter.send(session, 'Current', {
+    onOutput: (line) => chunks.push(line),
+  })
+
+  assert.deepEqual(chunks, ['Hel', 'lo'])
+  assert.equal(result.content, 'Hello')
+  assert.equal(result.metadata?.tokenEstimate, 3)
+})
+
 test('OpenAI API adapter formats chat completion requests', async () => {
   let capturedHeaders = new Headers()
   let capturedBody: Record<string, unknown> = {}
@@ -71,11 +95,12 @@ test('OpenAI API adapter formats chat completion requests', async () => {
 
   const adapter = new OpenAIApiAdapter({ apiKey: 'sk-openai-test', model: 'gpt-4o-mini' })
   const result = await adapter.send(session, 'Current', {
+    apiKey: 'sk-openai-request',
     systemPrompt: 'System prompt',
     history: [{ role: 'assistant', content: 'Previous assistant' }],
   })
 
-  assert.equal(capturedHeaders.get('authorization'), 'Bearer sk-openai-test')
+  assert.equal(capturedHeaders.get('authorization'), 'Bearer sk-openai-request')
   assert.equal(capturedBody.model, 'gpt-4o-mini')
   assert.equal(capturedBody.stream, true)
   assert.deepEqual(capturedBody.messages, [
@@ -138,6 +163,59 @@ test('Zhipu API adapter uses OpenAI-compatible request format', async () => {
   assert.equal(result.content, 'GLM')
 })
 
+test('Zhipu API adapter retries only retryable Zhipu error codes', async () => {
+  let retryableCalls = 0
+  mockFetch(async () => {
+    retryableCalls += 1
+    if (retryableCalls === 1) {
+      return new Response(JSON.stringify({ error: { code: 1001, message: 'rate limit' } }), { status: 429 })
+    }
+    return streamResponse([{ choices: [{ delta: { content: 'Recovered' } }] }])
+  })
+
+  const retryable = new ZhipuApiAdapter({ apiKey: 'zhipu-test' })
+  Object.assign(retryable as unknown as { retryDelayMs: number }, { retryDelayMs: 1 })
+  const result = await retryable.send(session, 'Current')
+
+  assert.equal(retryableCalls, 2)
+  assert.equal(result.content, 'Recovered')
+
+  let badRequestCalls = 0
+  mockFetch(async () => {
+    badRequestCalls += 1
+    return new Response(JSON.stringify({ error: { code: 1002, message: 'bad request' } }), { status: 500 })
+  })
+
+  const nonRetryable = new ZhipuApiAdapter({ apiKey: 'zhipu-test' })
+  Object.assign(nonRetryable as unknown as { retryDelayMs: number }, { retryDelayMs: 1 })
+  await assert.rejects(nonRetryable.send(session, 'Current'), /1002/)
+  assert.equal(badRequestCalls, 1)
+})
+
+test('Router stores adapter tokenEstimate in round metadata', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('planner', async () => '[DONE]'))
+    router.registerAdapter(new StubAdapter('executor', async () => ({
+      content: 'executor response',
+      metadata: { tokenEstimate: 42 },
+    })))
+
+    const active = router.startSession({
+      from: { adapter: 'planner' },
+      to: { adapter: 'executor' },
+      initialPrompt: 'run',
+      maxRounds: 1,
+    })
+
+    await waitFor(() => state.getMessages(active.id).some((msg) => msg.from === 'executor'))
+    const executorMessage = state.getMessages(active.id).find((msg) => msg.from === 'executor')
+
+    assert.equal(executorMessage?.metadata?.tokenEstimate, 42)
+    assert.equal(typeof executorMessage?.metadata?.duration, 'number')
+  })
+})
+
 test('factory requires apiKey for API adapters', () => {
   assert.throws(
     () => createAdapter({ adapter: 'openai-api' }),
@@ -151,9 +229,55 @@ function mockFetch(handler: (input: Parameters<typeof fetch>[0], init?: Paramete
 }
 
 function streamResponse(events: unknown[]): Response {
-  const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('') + 'data: [DONE]\n\n'
+  const encoder = new TextEncoder()
+  const chunks = events.map((event) => `data: ${JSON.stringify(event)}\n\n`)
+  chunks.push('data: [DONE]\n\n')
+  const body = new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(encoder.encode(chunk))
+      }
+      controller.close()
+    },
+  })
   return new Response(body, {
     status: 200,
     headers: { 'content-type': 'text/event-stream' },
+  })
+}
+
+class StubAdapter implements Adapter {
+  readonly config: Record<string, unknown> = {}
+
+  constructor(
+    readonly name: string,
+    private readonly handler: (session: Session, message: string, opts?: AdapterSendOpts) => Promise<string | AdapterResponse>
+  ) {}
+
+  send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string | AdapterResponse> {
+    return this.handler(session, message, opts)
+  }
+
+  async healthCheck(): Promise<boolean> {
+    return true
+  }
+}
+
+async function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const startedAt = Date.now()
+  while (!check()) {
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error('Timed out waiting for condition')
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
+function withTempDb(fn: () => Promise<void>): Promise<void> {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-api-test-'))
+  state.initDb(join(dir, 'turing.db'))
+  return fn().finally(() => {
+    state.closeDb()
+    rmSync(dir, { recursive: true, force: true })
   })
 }

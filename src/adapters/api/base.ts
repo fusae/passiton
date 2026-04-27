@@ -78,7 +78,7 @@ export abstract class ApiAdapter implements Adapter {
     let lastErr: unknown
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
       try {
-        return await this.fetchOnce(request)
+        return await this.fetchOnce(request, opts)
       } catch (err) {
         lastErr = err
         if (!this.shouldRetry(err) || attempt === this.maxRetries) break
@@ -90,7 +90,7 @@ export abstract class ApiAdapter implements Adapter {
     throw lastErr
   }
 
-  protected async fetchOnce(request: ApiRequest): Promise<unknown> {
+  protected async fetchOnce(request: ApiRequest, opts?: AdapterSendOpts): Promise<unknown> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.timeout)
     try {
@@ -110,7 +110,7 @@ export abstract class ApiAdapter implements Adapter {
 
       const contentType = response.headers.get('content-type') ?? ''
       if (contentType.includes('text/event-stream')) {
-        return this.parseEventStream(await response.text())
+        return this.readEventStream(response, opts)
       }
       return response.json()
     } catch (err) {
@@ -125,18 +125,20 @@ export abstract class ApiAdapter implements Adapter {
 
   protected parseEventStream(text: string): unknown[] {
     const events: unknown[] = []
-    for (const line of text.split(/\r?\n/)) {
-      const trimmed = line.trim()
-      if (!trimmed.startsWith('data:')) continue
-      const data = trimmed.slice('data:'.length).trim()
-      if (!data || data === '[DONE]') continue
-      try {
-        events.push(JSON.parse(data))
-      } catch {
-        throw new Error(`[${this.name}] failed to parse streaming response`)
-      }
+    for (const block of text.split(/\r?\n\r?\n/)) {
+      const event = this.parseEventBlock(block)
+      if (event !== undefined) events.push(event)
     }
     return events
+  }
+
+  protected streamingOutput(event: unknown): string | undefined {
+    if (!event || typeof event !== 'object') return undefined
+    const data = event as {
+      choices?: Array<{ delta?: { content?: string } }>
+      delta?: { text?: string }
+    }
+    return data.choices?.[0]?.delta?.content ?? data.delta?.text
   }
 
   protected shouldRetry(err: unknown): boolean {
@@ -144,6 +146,65 @@ export abstract class ApiAdapter implements Adapter {
       return err.status === 429 || err.status >= 500
     }
     return err instanceof Error
+  }
+
+  private async readEventStream(response: Response, opts?: AdapterSendOpts): Promise<unknown[]> {
+    if (!response.body) {
+      return this.parseEventStream(await response.text())
+    }
+
+    const events: unknown[] = []
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      buffer = this.consumeEventBuffer(buffer, events, opts)
+    }
+
+    buffer += decoder.decode()
+    this.consumeEventBuffer(`${buffer}\n\n`, events, opts)
+    return events
+  }
+
+  private consumeEventBuffer(buffer: string, events: unknown[], opts?: AdapterSendOpts): string {
+    let remaining = buffer
+    while (true) {
+      const match = /\r?\n\r?\n/.exec(remaining)
+      if (!match) return remaining
+
+      const block = remaining.slice(0, match.index)
+      remaining = remaining.slice(match.index + match[0].length)
+      const event = this.parseEventBlock(block)
+      if (event === undefined) continue
+
+      events.push(event)
+      const output = this.streamingOutput(event)
+      if (output) opts?.onOutput?.(output)
+    }
+  }
+
+  private parseEventBlock(block: string): unknown | undefined {
+    const dataLines = block
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice('data:'.length).trim())
+
+    if (dataLines.length === 0) return undefined
+
+    const data = dataLines.join('\n').trim()
+    if (!data || data === '[DONE]') return undefined
+
+    try {
+      return JSON.parse(data)
+    } catch {
+      throw new Error(`[${this.name}] failed to parse streaming response`)
+    }
   }
 }
 
