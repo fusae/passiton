@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Turing Cloud — Assistant Workflow Platform</title>
+  <title>Turing Cloud — Agent Sessions Platform</title>
   <link rel="stylesheet" href="/style.css">
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
-    /* Task cards grid */
+    /* Session cards grid */
     .session-cards {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -46,60 +46,6 @@
       display: flex;
       align-items: center;
       gap: 4px;
-    }
-
-    /* Workflow cards */
-    .pipeline-cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-      gap: 20px;
-    }
-    .pipeline-card { cursor: pointer; }
-    .pipeline-steps {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-top: 14px;
-      flex-wrap: wrap;
-    }
-    .pipeline-step {
-      padding: 4px 12px;
-      border-radius: 6px;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid var(--border);
-      font-size: 0.75rem;
-      font-weight: 500;
-      color: var(--text-secondary);
-    }
-    .pipeline-step-arrow {
-      color: var(--text-muted);
-      font-size: 0.7rem;
-    }
-
-    .view-toggle {
-      display: flex;
-      gap: 4px;
-    }
-    .view-toggle button {
-      padding: 6px 16px;
-      border-radius: 6px;
-      font-size: 0.82rem;
-      font-weight: 500;
-      color: var(--text-muted);
-      cursor: pointer;
-      transition: var(--transition);
-      background: transparent;
-    }
-    .view-toggle button.active {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      color: var(--text-primary);
-    }
-    .view-toggle button:not(.active) {
-      border: 1px solid transparent;
-    }
-    .view-toggle button:hover:not(.active) {
-      color: var(--text-secondary);
     }
   </style>
 </head>

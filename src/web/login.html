@@ -15,7 +15,7 @@
           <span class="dot green"></span>
           <h1>Turing Cloud</h1>
         </div>
-        <p>AI assistant workflows for production teams</p>
+        <p>AI agent sessions for production teams</p>
       </div>
 
       <div class="auth-tabs" role="tablist">
@@ -106,7 +106,7 @@
         const data = await res.json().catch(() => null)
         if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
         localStorage.setItem(TOKEN_KEY, data.token)
-        window.location.href = API_BASE ? `${API_BASE}/dashboard` : '/dashboard'
+        window.location.href = API_BASE ? `${API_BASE}/sessions` : '/sessions'
       } catch (err) {
         showToast(err.message || 'Authentication failed', 'error')
       } finally {

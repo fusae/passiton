@@ -9,29 +9,27 @@ const THEME_KEY = 'turing-theme'
 const state = {
   user: null,
   sessions: [],
-  pipelines: [],
   agents: [],
   templates: [],
   apiKeys: [],
   stats: null,
   config: null,
-  currentView: 'dashboard',
+  currentView: 'sessions',
   currentSessionId: null,
-  currentPipelineId: null,
-  currentPipeline: null,
   currentSession: null,
   currentMessages: [],
   currentSnapshots: [],
   ws: null,
   heartbeats: new Map(),
+  streamDeltas: new Map(),
+  streamFrame: null,
 }
 
 // ── Router ────────────────────────────────────────────────────────────────────
 const routes = {
   '/': 'landing',
-  '/dashboard': 'dashboard',
+  '/sessions': 'sessions',
   '/session/:id': 'session',
-  '/pipeline/:id': 'pipeline',
   '/settings': 'settings',
   '/login': 'login',
 }
@@ -54,18 +52,15 @@ function render() {
     renderLanding()
   } else if (path === '/login') {
     renderLogin()
-  } else if (path === '/dashboard') {
-    renderDashboard()
+  } else if (path === '/sessions') {
+    renderSessions()
   } else if (path.startsWith('/session/')) {
     const id = path.split('/')[2]
     renderSession(id)
-  } else if (path.startsWith('/pipeline/')) {
-    const id = path.split('/')[2]
-    renderPipeline(id)
   } else if (path === '/settings') {
     renderSettings()
   } else {
-    navigate('/dashboard')
+    navigate('/sessions')
   }
 }
 
@@ -234,35 +229,138 @@ function handleWsEvent(event) {
   console.log('[ws] event:', event.type)
 
   switch (event.type) {
+    case 'init':
+      state.sessions = event.payload || []
+      renderSessionStats()
+      renderSessionCards()
+      break
     case 'session:created':
     case 'session:updated':
-      loadSessions()
-      if (state.currentSessionId === event.payload.id) {
-        loadSessionDetail(event.payload.id)
-      }
+    case 'session:error':
+    case 'session:done':
+    case 'session:paused':
+    case 'session:resumed':
+      applySessionUpdate(event.payload)
       break
     case 'session:deleted':
-      loadSessions()
+      removeSessionFromList(event.payload.id)
       if (state.currentSessionId === event.payload.id) {
-        navigate('/dashboard')
+        navigate('/sessions')
       }
+      break
+    case 'message:delta':
+      handleMessageDelta(event.payload)
       break
     case 'message:new':
       if (state.currentSessionId === event.payload.sessionId) {
-        loadSessionDetail(state.currentSessionId)
-      }
-      break
-    case 'pipeline:created':
-    case 'pipeline:updated':
-      loadPipelines()
-      if (state.currentPipelineId === event.payload.id) {
-        loadPipelineDetail(event.payload.id)
+        clearStreamingDelta(event.payload.sessionId)
+        upsertCurrentMessage(event.payload)
+        renderSessionMessages()
       }
       break
     case 'heartbeat':
       state.heartbeats.set(event.sessionId, event)
       updateHeartbeat(event)
       break
+  }
+}
+
+function applySessionUpdate(session) {
+  if (!session?.id) return
+  const index = state.sessions.findIndex(item => item.id === session.id)
+  if (index >= 0) {
+    state.sessions[index] = { ...state.sessions[index], ...session }
+  } else {
+    state.sessions.unshift(session)
+  }
+
+  if (state.currentSessionId === session.id) {
+    state.currentSession = { ...(state.currentSession || {}), ...session }
+    renderSessionHeader(state.currentSession)
+    renderSessionPanel(state.currentSession)
+  }
+
+  renderSessionStats()
+  renderSessionCards()
+}
+
+function removeSessionFromList(id) {
+  if (!id) return
+  state.sessions = state.sessions.filter(session => session.id !== id)
+  renderSessionStats()
+  renderSessionCards()
+}
+
+function handleMessageDelta(payload) {
+  if (!payload?.sessionId || !payload.content) return
+  if (state.currentSessionId !== payload.sessionId) return
+
+  const existing = state.streamDeltas.get(payload.sessionId) || {
+    sessionId: payload.sessionId,
+    content: '',
+    from: payload.from || 'assistant',
+  }
+  existing.content += payload.content
+  existing.from = payload.from || existing.from
+  state.streamDeltas.set(payload.sessionId, existing)
+  scheduleStreamingRender()
+}
+
+function scheduleStreamingRender() {
+  if (state.streamFrame) return
+  state.streamFrame = requestAnimationFrame(() => {
+    state.streamFrame = null
+    renderStreamingDelta()
+  })
+}
+
+function renderStreamingDelta() {
+  const stream = state.streamDeltas.get(state.currentSessionId)
+  if (!stream) return
+  const container = document.getElementById('messages')
+  if (!container) return
+
+  let node = document.getElementById('streaming-message')
+  if (!node) {
+    if (state.currentMessages.length === 0) container.innerHTML = ''
+    node = document.createElement('div')
+    node.id = 'streaming-message'
+    node.className = 'chat-msg from streaming'
+    node.innerHTML = `
+      <div class="chat-avatar">${escapeHtml((stream.from || 'A').charAt(0).toUpperCase())}</div>
+      <div>
+        <div class="chat-bubble"><span class="stream-content"></span><span class="stream-cursor"></span></div>
+        <div class="chat-meta"><span>${escapeHtml(stream.from)} · typing</span></div>
+      </div>
+    `
+    container.appendChild(node)
+  }
+
+  const content = node.querySelector('.stream-content')
+  const meta = node.querySelector('.chat-meta span')
+  const avatar = node.querySelector('.chat-avatar')
+  if (content) content.textContent = stream.content
+  if (meta) meta.textContent = `${stream.from} · typing`
+  if (avatar) avatar.textContent = (stream.from || 'A').charAt(0).toUpperCase()
+
+  const messagesContainer = document.getElementById('messages-container')
+  if (messagesContainer) {
+    messagesContainer.scrollTop = messagesContainer.scrollHeight
+  }
+}
+
+function clearStreamingDelta(sessionId) {
+  state.streamDeltas.delete(sessionId)
+  const node = document.getElementById('streaming-message')
+  if (node) node.remove()
+}
+
+function upsertCurrentMessage(message) {
+  const index = state.currentMessages.findIndex(item => item.id === message.id)
+  if (index >= 0) {
+    state.currentMessages[index] = message
+  } else {
+    state.currentMessages.push(message)
   }
 }
 
@@ -285,14 +383,6 @@ async function loadSessions() {
     state.sessions = await api('/api/sessions')
   } catch (err) {
     console.error('Failed to load sessions:', err)
-  }
-}
-
-async function loadPipelines() {
-  try {
-    state.pipelines = await api('/api/pipelines')
-  } catch (err) {
-    console.error('Failed to load pipelines:', err)
   }
 }
 
@@ -343,20 +433,12 @@ async function loadSessionDetail(id) {
     const session = await api(`/api/sessions/${id}`)
     state.currentSession = session
     state.currentMessages = session.messages || []
+    clearStreamingDelta(id)
     renderSessionMessages()
     renderSessionPanel(session)
+    renderSessionHeader(session)
   } catch (err) {
     console.error('Failed to load session detail:', err)
-  }
-}
-
-async function loadPipelineDetail(id) {
-  try {
-    const pipeline = await api(`/api/pipelines/${id}`)
-    state.currentPipeline = pipeline
-    renderPipelineBody(pipeline)
-  } catch (err) {
-    console.error('Failed to load pipeline detail:', err)
   }
 }
 
@@ -371,15 +453,15 @@ function renderLanding() {
       <div class="landing-nav-links">
         <a href="#features">Features</a>
         <a href="#architecture">Architecture</a>
-        <a href="/dashboard">Dashboard</a>
-        <a href="/dashboard" class="btn btn-primary btn-sm">Get Started</a>
+        <a href="/sessions">Sessions</a>
+        <a href="/sessions" class="btn btn-primary btn-sm">Get Started</a>
         <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
       </div>
     </nav>
 
     <section class="hero">
       <div class="hero-badge fade-in-up">
-        <span>✦</span> Assistant Workflow Platform
+        <span>✦</span> Agent Sessions Platform
       </div>
 
       <h1 class="fade-in-up delay-1">
@@ -392,7 +474,7 @@ function renderLanding() {
       </p>
 
       <div class="hero-cta fade-in-up delay-3">
-        <a href="/dashboard" class="btn btn-primary pulse-glow">
+        <a href="/sessions" class="btn btn-primary pulse-glow">
           Get Started
           <span>→</span>
         </a>
@@ -404,7 +486,7 @@ function renderLanding() {
 
     <section class="arch-section" id="architecture">
       <h2 class="fade-in-up">工作原理</h2>
-      <p class="section-sub fade-in-up delay-1">Assistant A ↔ Turing ↔ Assistant B —— 简洁而强大的任务编排</p>
+      <p class="section-sub fade-in-up delay-1">Agent A ↔ Turing ↔ Agent B —— 简洁而强大的任务编排</p>
 
       <div class="arch-diagram fade-in-up delay-2">
         <div class="arch-col">
@@ -493,7 +575,7 @@ function renderLanding() {
         免费开始，按需扩展。几分钟内就能创建第一个任务。
       </p>
       <div class="fade-in-up delay-2">
-        <a href="/dashboard" class="btn btn-primary" style="padding: 14px 36px; font-size: 1rem;">
+        <a href="/sessions" class="btn btn-primary" style="padding: 14px 36px; font-size: 1rem;">
           开始使用 Turing Cloud
           <span>→</span>
         </a>
@@ -516,7 +598,7 @@ function renderLogin() {
             <div class="logo-icon" style="width: 36px; height: 36px; font-size: 1rem;">T</div>
             <h2 style="margin: 0;">Turing Cloud</h2>
           </div>
-          <p style="color: var(--text-secondary); font-size: 0.9rem;">Assistant Workflow Platform</p>
+          <p style="color: var(--text-secondary); font-size: 0.9rem;">Agent Sessions Platform</p>
         </div>
 
         <div class="tabs" style="margin-bottom: 24px;">
@@ -581,7 +663,7 @@ window.handleLogin = async function(e) {
     const data = await api('/api/auth/login', 'POST', { email, password })
     setAuthToken(data.token)
     state.user = data.user
-    navigate('/dashboard')
+    navigate('/sessions')
   } catch (err) {
     showToast(err.message)
   }
@@ -604,13 +686,13 @@ window.handleRegister = async function(e) {
     const data = await api('/api/auth/register', 'POST', { email, password })
     setAuthToken(data.token)
     state.user = data.user
-    navigate('/dashboard')
+    navigate('/sessions')
   } catch (err) {
     showToast(err.message)
   }
 }
 
-function renderDashboard() {
+function renderSessions() {
   document.body.innerHTML = `
     <div class="app-layout">
       <aside class="sidebar">
@@ -619,20 +701,11 @@ function renderDashboard() {
           <span>Turing Cloud</span>
         </div>
         <nav class="sidebar-nav">
-          <a href="/dashboard" class="active">
-            <span class="nav-icon">◉</span> Tasks
-          </a>
-          <a href="/dashboard" onclick="window.switchDashboardView('pipelines'); return false;">
-            <span class="nav-icon">⧫</span> Workflows
-          </a>
-          <a href="/settings">
-            <span class="nav-icon">⬡</span> Assistants
+          <a href="/sessions" class="active">
+            <span class="nav-icon">◉</span> Sessions
           </a>
           <a href="/settings">
             <span class="nav-icon">⚙</span> Settings
-          </a>
-          <a href="/settings">
-            <span class="nav-icon">🔑</span> Provider Keys
           </a>
         </nav>
         <div class="sidebar-footer">
@@ -643,14 +716,10 @@ function renderDashboard() {
       <div class="main">
         <header class="topbar">
           <div class="topbar-left">
-            <h2>Dashboard</h2>
-            <div class="view-toggle">
-              <button class="active" onclick="window.switchDashboardView('sessions')">Tasks</button>
-              <button onclick="window.switchDashboardView('pipelines')">Workflows</button>
-            </div>
+            <h2>Sessions</h2>
           </div>
           <div class="topbar-right">
-            <button class="btn btn-primary btn-sm" onclick="window.showTemplateGalleryModal()">+ New Task</button>
+            <button class="btn btn-primary btn-sm" onclick="window.showTemplateGalleryModal()">+ New Session</button>
             <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
             ${renderUserMenu()}
           </div>
@@ -659,7 +728,7 @@ function renderDashboard() {
         <div class="content">
           <div class="stats-row">
             <div class="stat-card">
-              <div class="label">Active Tasks</div>
+              <div class="label">Active Sessions</div>
               <div class="stat-value grad-text" id="stat-active">0</div>
               <div class="stat-sub">running right now</div>
             </div>
@@ -671,10 +740,10 @@ function renderDashboard() {
             <div class="stat-card">
               <div class="label">Avg Turns</div>
               <div class="stat-value" id="stat-rounds">0</div>
-              <div class="stat-sub">across all tasks</div>
+              <div class="stat-sub">across all sessions</div>
             </div>
             <div class="stat-card">
-              <div class="label">Active Assistants</div>
+              <div class="label">Active Agents</div>
               <div class="stat-value" id="stat-agents">0</div>
               <div class="stat-sub">providers configured</div>
             </div>
@@ -682,18 +751,10 @@ function renderDashboard() {
 
           <div id="view-sessions">
             <div class="flex-between mb-24">
-              <h3>Recent Tasks</h3>
-              <input type="text" class="input" placeholder="Search tasks..." style="width: 240px;">
+              <h3>Recent Sessions</h3>
+              <input type="text" class="input" placeholder="Search sessions..." style="width: 240px;">
             </div>
             <div id="session-cards" class="session-cards"></div>
-          </div>
-
-          <div id="view-pipelines" style="display: none;">
-            <div class="flex-between mb-24">
-              <h3>Workflows</h3>
-              <button class="btn btn-primary btn-sm" onclick="window.showNewPipelineModal()">+ New Workflow</button>
-            </div>
-            <div id="pipeline-cards" class="pipeline-cards"></div>
           </div>
         </div>
       </div>
@@ -701,33 +762,34 @@ function renderDashboard() {
   `
 
   updateThemeButton()
-  loadDashboardData()
+  loadSessionsData()
 }
 
-async function loadDashboardData() {
+async function loadSessionsData() {
   await Promise.all([
     loadSessions(),
-    loadPipelines(),
     loadAgents(),
     loadStats()
   ])
 
-  renderDashboardStats()
+  renderSessionStats()
   renderSessionCards()
-  renderPipelineCards()
 }
 
-function renderDashboardStats() {
-  if (!state.stats) return
-
+function renderSessionStats() {
   const statActive = document.getElementById('stat-active')
   const statDone = document.getElementById('stat-done')
   const statRounds = document.getElementById('stat-rounds')
   const statAgents = document.getElementById('stat-agents')
+  const active = state.sessions.filter(session => session.status === 'active').length
+  const done = state.sessions.filter(session => session.status === 'done').length
+  const avgRounds = state.sessions.length
+    ? state.sessions.reduce((sum, session) => sum + (Number(session.currentRound) || 0), 0) / state.sessions.length
+    : 0
 
-  if (statActive) statActive.textContent = state.stats.sessions?.active || 0
-  if (statDone) statDone.textContent = state.stats.sessions?.done || 0
-  if (statRounds) statRounds.textContent = formatStatNumber(state.stats.sessions?.avgRounds || 0)
+  if (statActive) statActive.textContent = active
+  if (statDone) statDone.textContent = done
+  if (statRounds) statRounds.textContent = formatStatNumber(avgRounds)
   if (statAgents) statAgents.textContent = state.agents.length || 0
 }
 
@@ -736,7 +798,7 @@ function renderSessionCards() {
   if (!container) return
 
   if (state.sessions.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No tasks yet. Create your first one!</p>'
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No sessions yet. Create your first one!</p>'
     return
   }
 
@@ -766,44 +828,6 @@ function formatStatNumber(value) {
   return number.toFixed(1)
 }
 
-function renderPipelineCards() {
-  const container = document.getElementById('pipeline-cards')
-  if (!container) return
-
-  if (state.pipelines.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No workflows yet.</p>'
-    return
-  }
-
-  container.innerHTML = state.pipelines.map(pipeline => `
-    <a href="/pipeline/${pipeline.id}" class="card pipeline-card">
-      <div class="flex-between mb-8">
-        <span style="font-weight: 600;">${escapeHtml(pipeline.name)}</span>
-        <span class="badge badge-${pipeline.status}">${pipeline.status}</span>
-      </div>
-      <p style="font-size: 0.82rem; color: var(--text-muted);">${pipeline.sessions.length} tasks</p>
-    </a>
-  `).join('')
-}
-
-window.switchDashboardView = function(view) {
-  const sessionsView = document.getElementById('view-sessions')
-  const pipelinesView = document.getElementById('view-pipelines')
-  const btns = document.querySelectorAll('.view-toggle button')
-
-  if (view === 'pipelines') {
-    sessionsView.style.display = 'none'
-    pipelinesView.style.display = 'block'
-    btns[0].classList.remove('active')
-    btns[1].classList.add('active')
-  } else {
-    sessionsView.style.display = 'block'
-    pipelinesView.style.display = 'none'
-    btns[0].classList.add('active')
-    btns[1].classList.remove('active')
-  }
-}
-
 async function renderSession(id) {
   state.currentSessionId = id
 
@@ -812,7 +836,7 @@ async function renderSession(id) {
   try {
     session = await api(`/api/sessions/${id}`)
   } catch (err) {
-    document.body.innerHTML = '<div>Task not found</div>'
+    document.body.innerHTML = '<div>Session not found</div>'
     return
   }
   state.currentSession = session
@@ -825,14 +849,8 @@ async function renderSession(id) {
           <span>Turing Cloud</span>
         </div>
         <nav class="sidebar-nav">
-          <a href="/dashboard">
-            <span class="nav-icon">◉</span> Tasks
-          </a>
-          <a href="/dashboard">
-            <span class="nav-icon">⧫</span> Workflows
-          </a>
-          <a href="/settings">
-            <span class="nav-icon">⬡</span> Assistants
+          <a href="/sessions">
+            <span class="nav-icon">◉</span> Sessions
           </a>
           <a href="/settings">
             <span class="nav-icon">⚙</span> Settings
@@ -846,16 +864,12 @@ async function renderSession(id) {
       <div class="main">
         <header class="topbar">
           <div class="topbar-left">
-            <a href="/dashboard" class="btn btn-ghost btn-sm">← Back</a>
+            <a href="/sessions" class="btn btn-ghost btn-sm">← Back</a>
             <h2>${escapeHtml(session.from.label || session.from.adapter)} → ${escapeHtml(session.to.label || session.to.adapter)}</h2>
-            <span class="badge badge-${session.status}">${session.status}</span>
+            <span id="session-status-badge" class="badge badge-${session.status}">${session.status}</span>
           </div>
-          <div class="topbar-right">
-            <button class="btn btn-secondary btn-sm" onclick="window.exportCurrentSession()">Export</button>
-            ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.extendSessionTimeout()">+5m</button>' : ''}
-            ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.pauseSession()">⏸ Pause</button>' : ''}
-            ${session.status === 'paused' ? '<button class="btn btn-primary btn-sm" onclick="window.resumeSession()">▶ Resume</button>' : ''}
-            ${session.status !== 'done' ? '<button class="btn btn-danger btn-sm" onclick="window.stopSession()">■ Stop</button>' : ''}
+          <div class="topbar-right" id="session-actions">
+            ${renderSessionActions(session)}
             <button class="btn btn-ghost btn-sm" onclick="window.deleteCurrentSession()">Delete</button>
             <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
             ${renderUserMenu()}
@@ -869,7 +883,7 @@ async function renderSession(id) {
             </div>
             <div class="session-chat-input">
               <div class="inject-bar">
-                <input type="text" class="input" id="inject-input" placeholder="Inject a message into this task…">
+                <input type="text" class="input" id="inject-input" placeholder="Inject a message into this session...">
                 <button class="btn btn-primary btn-sm" onclick="window.injectMessage()">Send</button>
               </div>
             </div>
@@ -887,24 +901,53 @@ async function renderSession(id) {
   updateThemeButton()
 }
 
+function renderSessionActions(session) {
+  return `
+    <button class="btn btn-secondary btn-sm" onclick="window.exportCurrentSession()">Export</button>
+    ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.extendSessionTimeout()">+5m</button>' : ''}
+    ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.pauseSession()">⏸ Pause</button>' : ''}
+    ${session.status === 'paused' ? '<button class="btn btn-primary btn-sm" onclick="window.resumeSession()">▶ Resume</button>' : ''}
+    ${session.status !== 'done' ? '<button class="btn btn-danger btn-sm" onclick="window.stopSession()">■ Stop</button>' : ''}
+  `
+}
+
+function renderSessionHeader(session) {
+  const badge = document.getElementById('session-status-badge')
+  if (badge) {
+    badge.className = `badge badge-${session.status}`
+    badge.textContent = session.status
+  }
+
+  const actions = document.getElementById('session-actions')
+  if (actions) {
+    actions.innerHTML = `
+      ${renderSessionActions(session)}
+      <button class="btn btn-ghost btn-sm" onclick="window.deleteCurrentSession()">Delete</button>
+      <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
+      ${renderUserMenu()}
+    `
+    updateThemeButton()
+  }
+}
+
 function renderSessionPanel(session) {
   const panel = document.getElementById('session-panel-content')
   if (!panel || !session) return
   const progress = session.maxRounds ? Math.min(100, session.currentRound / session.maxRounds * 100) : 0
   panel.innerHTML = `
     <div class="panel-section">
-      <div class="label mb-16">Task Info</div>
+      <div class="label mb-16">Session Info</div>
       <div class="panel-kv">
         <div class="panel-kv-row">
-          <span class="kv-label">Task ID</span>
+          <span class="kv-label">Session ID</span>
           <span class="kv-value mono" style="font-size: 0.78rem;">${escapeHtml(session.id.slice(0, 12))}</span>
         </div>
         <div class="panel-kv-row">
-          <span class="kv-label">Assistant A</span>
+          <span class="kv-label">Agent A</span>
           <span class="kv-value">${escapeHtml(agentLabel(session.from))}</span>
         </div>
         <div class="panel-kv-row">
-          <span class="kv-label">Assistant B</span>
+          <span class="kv-label">Agent B</span>
           <span class="kv-value">${escapeHtml(agentLabel(session.to))}</span>
         </div>
         <div class="panel-kv-row">
@@ -941,7 +984,7 @@ function renderSessionPanel(session) {
     ${session.errorMessage ? `
       <div class="divider"></div>
       <div class="error-box">
-        <div class="error-title">${escapeHtml(session.errorType || 'Task error')}</div>
+        <div class="error-title">${escapeHtml(session.errorType || 'Session error')}</div>
         <div class="error-detail">${escapeHtml(session.errorMessage)}</div>
       </div>
     ` : ''}
@@ -949,7 +992,7 @@ function renderSessionPanel(session) {
     ${session.lastAgentOutput ? `
       <div class="divider"></div>
       <div class="panel-section">
-        <div class="label mb-8">Last Assistant Output</div>
+        <div class="label mb-8">Last Agent Output</div>
         <pre class="code-block">${escapeHtml(session.lastAgentOutput)}</pre>
       </div>
     ` : ''}
@@ -982,6 +1025,8 @@ function renderSessionMessages() {
     `
   }).join('')
 
+  renderStreamingDelta()
+
   // Scroll to bottom
   const messagesContainer = document.getElementById('messages-container')
   if (messagesContainer) {
@@ -1012,14 +1057,14 @@ window.resumeSession = async function() {
 window.stopSession = async function() {
   if (!state.currentSessionId) return
   if (!await confirmAction({
-    title: 'Stop Task',
-    message: 'Stop this task now?',
+    title: 'Stop Session',
+    message: 'Stop this session now?',
     confirmText: 'Stop',
     danger: true,
   })) return
   try {
     await api(`/api/sessions/${state.currentSessionId}/stop`, 'POST')
-    navigate('/dashboard')
+    navigate('/sessions')
   } catch (err) {
     showToast(err.message)
   }
@@ -1054,14 +1099,14 @@ window.extendSessionTimeout = async function() {
 window.deleteCurrentSession = async function() {
   if (!state.currentSessionId) return
   if (!await confirmAction({
-    title: 'Delete Task',
-    message: 'Delete this task permanently?',
+    title: 'Delete Session',
+    message: 'Delete this session permanently?',
     confirmText: 'Delete',
     danger: true,
   })) return
   try {
     await api(`/api/sessions/${state.currentSessionId}`, 'DELETE')
-    navigate('/dashboard')
+    navigate('/sessions')
   } catch (err) {
     showToast(err.message)
   }
@@ -1087,60 +1132,6 @@ window.exportCurrentSession = function() {
   URL.revokeObjectURL(url)
 }
 
-function renderPipeline(id) {
-  state.currentPipelineId = id
-  document.body.innerHTML = `
-    <div class="app-layout">
-      <aside class="sidebar">
-        <div class="sidebar-brand"><div class="logo-icon">T</div><span>Turing Cloud</span></div>
-        <nav class="sidebar-nav">
-          <a href="/dashboard"><span class="nav-icon">◉</span> Tasks</a>
-          <a href="/dashboard" onclick="window.switchDashboardView('pipelines'); return false;" class="active"><span class="nav-icon">⧫</span> Workflows</a>
-          <a href="/settings"><span class="nav-icon">⚙</span> Settings</a>
-        </nav>
-      </aside>
-      <div class="main">
-        <header class="topbar">
-          <div class="topbar-left"><a href="/dashboard" class="btn btn-ghost btn-sm">← Back</a><h2>Workflow</h2></div>
-          <div class="topbar-right"><button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>${renderUserMenu()}</div>
-        </header>
-        <div class="content" id="pipeline-detail"><p style="color: var(--text-muted);">Loading workflow...</p></div>
-      </div>
-    </div>
-  `
-  updateThemeButton()
-  loadPipelineDetail(id)
-}
-
-function renderPipelineBody(pipeline) {
-  const container = document.getElementById('pipeline-detail')
-  if (!container || !pipeline) return
-  const sessions = pipeline.sessionDetails || []
-  container.innerHTML = `
-    <div class="flex-between mb-24">
-      <div>
-        <h2>${escapeHtml(pipeline.name)}</h2>
-        <p style="color: var(--text-muted); font-size: 0.86rem;">${sessions.length} tasks · ${new Date(pipeline.createdAt).toLocaleString()}</p>
-      </div>
-      <span class="badge badge-${pipeline.status}">${pipeline.status}</span>
-    </div>
-    <div class="session-cards">
-      ${sessions.map(session => `
-        <a href="/session/${session.id}" class="card session-card">
-          <div class="session-card-header">
-            <span class="session-card-title">${escapeHtml(agentLabel(session.from))} → ${escapeHtml(agentLabel(session.to))}</span>
-            <span class="badge badge-${session.status}">${session.status}</span>
-          </div>
-          <div class="session-card-meta">
-            <span>⟳ ${session.currentRound}/${session.maxRounds}</span>
-            <span>⏱ ${formatTime(session.updatedAt)}</span>
-          </div>
-        </a>
-      `).join('')}
-    </div>
-  `
-}
-
 async function renderSettings() {
   await loadConfig()
   await loadAgents()
@@ -1154,20 +1145,11 @@ async function renderSettings() {
           <span>Turing Cloud</span>
         </div>
         <nav class="sidebar-nav">
-          <a href="/dashboard">
-            <span class="nav-icon">◉</span> Tasks
-          </a>
-          <a href="/dashboard">
-            <span class="nav-icon">⧫</span> Workflows
+          <a href="/sessions">
+            <span class="nav-icon">◉</span> Sessions
           </a>
           <a href="/settings" class="active">
-            <span class="nav-icon">⬡</span> Assistants
-          </a>
-          <a href="/settings">
             <span class="nav-icon">⚙</span> Settings
-          </a>
-          <a href="/settings">
-            <span class="nav-icon">🔑</span> Provider Keys
           </a>
         </nav>
         <div class="sidebar-footer">
@@ -1189,7 +1171,7 @@ async function renderSettings() {
         <div class="content">
           <div style="max-width: 860px;">
             <div class="tabs">
-              <button class="tab-btn active" onclick="window.switchSettingsTab('agents')">Assistants</button>
+              <button class="tab-btn active" onclick="window.switchSettingsTab('agents')">Agents</button>
               <button class="tab-btn" onclick="window.switchSettingsTab('apikeys')">Provider Keys</button>
               <button class="tab-btn" onclick="window.switchSettingsTab('general')">General</button>
             </div>
@@ -1197,10 +1179,10 @@ async function renderSettings() {
             <div id="tab-agents" class="tab-panel active">
               <div class="flex-between mb-24">
                 <div>
-                  <h3>Configured Assistants</h3>
+                  <h3>Configured Agents</h3>
                   <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage your AI model connections</p>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="window.showAgentModal()">+ Add Assistant</button>
+                <button class="btn btn-primary btn-sm" onclick="window.showAgentModal()">+ Add Agent</button>
               </div>
 
               <div class="agent-list" id="agents-list"></div>
@@ -1210,7 +1192,7 @@ async function renderSettings() {
               <div class="flex-between mb-24">
                 <div>
                   <h3>Provider Keys</h3>
-                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage keys used by assistants and workflows</p>
+                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage keys used by agents and sessions</p>
                 </div>
                 <button class="btn btn-primary btn-sm" onclick="window.showApiKeyModal()">+ Add Key</button>
               </div>
@@ -1253,7 +1235,7 @@ function renderAgentsList() {
   if (!container) return
 
   if (state.agents.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No assistants configured</p>'
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No agents configured</p>'
     return
   }
 
@@ -1340,7 +1322,7 @@ window.showTemplateGalleryModal = async function() {
   })
   const agentNotice = state.agents.length ? '' : `
     <div class="template-empty-agents">
-      <span>No assistants configured yet.</span>
+      <span>No agents configured yet.</span>
       <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
     </div>
   `
@@ -1349,7 +1331,7 @@ window.showTemplateGalleryModal = async function() {
     <div class="modal-card template-modal">
       <div class="modal-head">
         <div>
-          <h3>New Task</h3>
+          <h3>New Session</h3>
           <p>Choose a scenario preset.</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
@@ -1393,15 +1375,15 @@ window.showNewSessionModal = async function(templateId = 'custom') {
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>New Task</h3>
-          <p>Create an assistant collaboration task.</p>
+          <h3>New Session</h3>
+          <p>Create an agent collaboration session.</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
       </div>
       ${templateBadge}
       ${noAgents ? `
         <div class="template-empty-agents" style="margin-bottom: 20px;">
-          <span>No assistants configured yet.</span>
+          <span>No agents configured yet.</span>
           <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
         </div>
       ` : ''}
@@ -1409,11 +1391,11 @@ window.showNewSessionModal = async function(templateId = 'custom') {
         <input type="hidden" name="templateId" value="${escapeAttr(template?.id || 'custom')}">
         <div class="form-row">
           <div class="form-group">
-            <label>Assistant A</label>
+            <label>Agent A</label>
             <select class="input" name="from" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultFrom) || options}</select>
           </div>
           <div class="form-group">
-            <label>Assistant B</label>
+            <label>Agent B</label>
             <select class="input" name="to" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultTo) || options}</select>
           </div>
         </div>
@@ -1434,11 +1416,11 @@ window.showNewSessionModal = async function(templateId = 'custom') {
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>Assistant A System Prompt</label>
+            <label>Agent A System Prompt</label>
             <textarea class="input" name="systemPromptFrom" rows="4">${escapeHtml(prompts.from)}</textarea>
           </div>
           <div class="form-group">
-            <label>Assistant B System Prompt</label>
+            <label>Agent B System Prompt</label>
             <textarea class="input" name="systemPromptTo" rows="4">${escapeHtml(prompts.to)}</textarea>
           </div>
         </div>
@@ -1448,7 +1430,7 @@ window.showNewSessionModal = async function(templateId = 'custom') {
         </div>
         <div class="form-group">
           <label>Prompt</label>
-          <textarea class="input" name="prompt" rows="5" required placeholder="Describe the task..."></textarea>
+          <textarea class="input" name="prompt" rows="5" required placeholder="Describe the session..."></textarea>
         </div>
         <details class="context-details">
           <summary>Context</summary>
@@ -1516,7 +1498,7 @@ window.showAgentModal = async function(name) {
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>${existing ? 'Edit Assistant' : 'Add Assistant'}</h3>
+          <h3>${existing ? 'Edit Agent' : 'Add Agent'}</h3>
           <p>Configure an API-backed model.</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
@@ -1597,8 +1579,8 @@ window.saveAgent = async function(e, originalName) {
 
 window.deleteAgent = async function(name) {
   if (!await confirmAction({
-    title: 'Delete Assistant',
-    message: `Delete assistant "${name}"?`,
+    title: 'Delete Agent',
+    message: `Delete agent "${name}"?`,
     confirmText: 'Delete',
     danger: true,
   })) return
@@ -1682,144 +1664,7 @@ window.deleteApiKey = async function(id) {
   }
 }
 
-window.showNewPipelineModal = function() {
-  const options = state.agents.map(agent => `<option value="${escapeAttr(agent.name)}">${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
-  showModal(`
-    <div class="modal-card">
-      <div class="modal-head">
-        <div>
-          <h3>New Workflow</h3>
-          <p>Run multiple tasks with optional dependencies.</p>
-        </div>
-        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
-      </div>
-      <form onsubmit="window.createPipeline(event)">
-        <div class="form-group">
-          <label>Name</label>
-          <input class="input" name="name" required placeholder="Frontend review workflow">
-        </div>
-        <div id="pipeline-steps-form">
-          ${pipelineStepForm(0, options)}
-        </div>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="window.addPipelineStep()">+ Add Step</button>
-        <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">Create Workflow</button>
-        </div>
-      </form>
-    </div>
-  `)
-}
-
-window.addPipelineStep = function() {
-  const container = document.getElementById('pipeline-steps-form')
-  if (!container) return
-  const index = container.querySelectorAll('.pipeline-step-form').length
-  const options = state.agents.map(agent => `<option value="${escapeAttr(agent.name)}">${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
-  container.insertAdjacentHTML('beforeend', pipelineStepForm(index, options))
-}
-
-window.removePipelineStep = function(button) {
-  const rows = document.querySelectorAll('.pipeline-step-form')
-  if (rows.length <= 1) return
-  button.closest('.pipeline-step-form')?.remove()
-}
-
-window.createPipeline = async function(e) {
-  e.preventDefault()
-  const form = e.target
-  const steps = [...form.querySelectorAll('.pipeline-step-form')].map((row) => {
-    const dependsRaw = row.querySelector('[name="dependsOn"]').value.trim()
-    const context = buildContextFromStep(row)
-    return compactObject({
-      from: { adapter: row.querySelector('[name="from"]').value },
-      to: { adapter: row.querySelector('[name="to"]').value },
-      initialPrompt: row.querySelector('[name="prompt"]').value.trim(),
-      mode: row.querySelector('[name="mode"]').value,
-      maxRounds: parseInt(row.querySelector('[name="maxRounds"]').value) || undefined,
-      cwd: row.querySelector('[name="cwd"]').value.trim() || undefined,
-      context,
-      dependsOn: dependsRaw ? dependsRaw.split(',').map(item => Number(item.trim())).filter(Number.isInteger) : undefined,
-    })
-  })
-
-  try {
-    const pipeline = await api('/api/pipelines', 'POST', {
-      name: new FormData(form).get('name'),
-      steps,
-    })
-    closeModal()
-    navigate(`/pipeline/${pipeline.id}`)
-  } catch (err) {
-    showToast(err.message)
-  }
-}
-
 // ── Utilities ─────────────────────────────────────────────────────────────────
-function pipelineStepForm(index, options) {
-  return `
-    <div class="pipeline-step-form">
-      <div class="flex-between mb-16">
-        <strong>Step ${index}</strong>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="window.removePipelineStep(this)">Remove</button>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Assistant A</label>
-          <select class="input" name="from" required>${options}</select>
-        </div>
-        <div class="form-group">
-          <label>Assistant B</label>
-          <select class="input" name="to" required>${options}</select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Mode</label>
-          <select class="input" name="mode">
-            <option value="collaborate">Collaboration</option>
-            <option value="discuss">Discuss</option>
-            <option value="review">Review</option>
-            <option value="freeform">Freeform</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Max Turns</label>
-          <input class="input" name="maxRounds" type="number" min="1" value="${state.config?.defaults?.maxRounds || 5}">
-        </div>
-      </div>
-      <div class="form-group">
-        <label>Prompt</label>
-        <textarea class="input" name="prompt" rows="3" required></textarea>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Depends On</label>
-          <input class="input" name="dependsOn" placeholder="0,1">
-        </div>
-        <div class="form-group">
-          <label>Working Directory</label>
-          <input class="input" name="cwd" placeholder="/path/to/project">
-        </div>
-      </div>
-      <details class="context-details">
-        <summary>Context</summary>
-        <div class="form-group"><label>Rules</label><textarea class="input" name="contextRules" rows="2"></textarea></div>
-        <div class="form-group"><label>Background</label><textarea class="input" name="contextText" rows="2"></textarea></div>
-        <div class="form-group"><label>Files</label><textarea class="input" name="contextFiles" rows="2"></textarea></div>
-      </details>
-    </div>
-  `
-}
-
-function buildContextFromStep(row) {
-  const fd = new FormData()
-  fd.set('contextRules', row.querySelector('[name="contextRules"]').value)
-  fd.set('contextText', row.querySelector('[name="contextText"]').value)
-  fd.set('contextFiles', row.querySelector('[name="contextFiles"]').value)
-  return buildContextFromForm(fd)
-}
-
 function showModal(html) {
   closeModal()
   const overlay = document.createElement('div')
@@ -1971,7 +1816,7 @@ function buildSessionExport(session, messages) {
   const lines = [
     `# ${agentLabel(session.from)} -> ${agentLabel(session.to)}`,
     '',
-    `- Task ID: ${session.id}`,
+    `- Session ID: ${session.id}`,
     `- Status: ${session.status}`,
     `- Mode: ${session.mode}`,
     `- Turns: ${session.currentRound}/${session.maxRounds}`,
@@ -2018,7 +1863,7 @@ function providerMatchesAdapter(provider, adapter) {
 }
 
 function keySourceLabel(source) {
-  return ({ vault: 'saved key', assistant: 'assistant key', global: 'global config' })[source] || source
+  return ({ vault: 'saved key', assistant: 'agent key', global: 'global config' })[source] || source
 }
 
 function preferredAgentName(agents, preferredAdapter, avoidName) {

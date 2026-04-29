@@ -85,7 +85,7 @@ html {
   font-size: 15px;
   transition: background-color 0.3s ease, color 0.3s ease;
 }
-body, .sidebar, .topbar, .card, .session-card, .stat-card, .pipeline-card,
+body, .sidebar, .topbar, .card, .session-card, .stat-card,
 .agent-card, .token-row, .settings-tabs button, .msg-bubble, .panel,
 .inject-bar, input, textarea, select, .badge, .btn {
   transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
@@ -422,6 +422,20 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 .chat-msg.from .chat-bubble { border-top-left-radius: 4px; }
 .chat-msg.to   .chat-bubble { border-top-right-radius: 4px; background: rgba(99,102,241,0.08); }
+.chat-msg.streaming .chat-bubble { border-color: rgba(99,102,241,0.45); }
+.stream-content { white-space: pre-wrap; }
+.stream-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  margin-left: 3px;
+  vertical-align: -0.15em;
+  background: var(--accent);
+  animation: stream-blink 1s steps(2, start) infinite;
+}
+@keyframes stream-blink {
+  50% { opacity: 0; }
+}
 .chat-meta {
   font-size: 0.7rem; color: var(--text-muted); margin-top: 4px;
 }

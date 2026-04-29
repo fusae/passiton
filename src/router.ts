@@ -162,7 +162,7 @@ export class Router extends EventEmitter {
       ...(extraRounds !== undefined ? { maxRounds: session.maxRounds + extraRounds } : {}),
     })
 
-    this.emit('event', { type: 'session:updated', payload: updated } satisfies WsEvent)
+    this.emit('event', { type: 'session:resumed', payload: updated } satisfies WsEvent)
     this.emitLog('info', `Session resumed [${id.slice(0, 8)}]${extraRounds !== undefined ? ` (+${extraRounds} rounds)` : ''}`, id)
     const epoch = this.nextRunEpoch(id)
 
@@ -187,7 +187,7 @@ export class Router extends EventEmitter {
       resumeCount: session.resumeCount + 1,
     })
 
-    this.emit('event', { type: 'session:updated', payload: updated } satisfies WsEvent)
+    this.emit('event', { type: 'session:resumed', payload: updated } satisfies WsEvent)
     this.emitLog('info', `Session checkpoint resume [${id.slice(0, 8)}] from round ${failedRound}`, id)
 
     const epoch = this.nextRunEpoch(id)
@@ -443,6 +443,14 @@ export class Router extends EventEmitter {
     const opts = this.buildSendOpts(session, recipient, adapter)
     opts.onOutput = (line) => {
       lastOutput = line
+      this.emit('event', {
+        type: 'message:delta',
+        payload: {
+          sessionId,
+          content: line,
+          from: target.adapter,
+        },
+      } satisfies WsEvent)
     }
     let response: AdapterResponse
     try {
@@ -673,7 +681,7 @@ export class Router extends EventEmitter {
         this.hydratePipelineDependencyContext(step.sessionId, step.dependsOn ?? [])
         const initialMessage = state.getMessages(step.sessionId).find((msg) => msg.from === 'human' && msg.round === 0)
         const resumed = state.updateSession(step.sessionId, { status: 'active' })
-        this.emit('event', { type: 'session:updated', payload: resumed } satisfies WsEvent)
+        this.emit('event', { type: 'session:resumed', payload: resumed } satisfies WsEvent)
         if (initialMessage) {
           this.startRunLoop(step.sessionId, initialMessage.content)
         }
