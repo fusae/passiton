@@ -272,7 +272,6 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
 function parseApiAgentConfigBody(body: unknown, existing?: state.UserAgentRecord): {
   name: string
   adapter: string
-  apiKey?: string
   keyId?: string
   model?: string
   baseUrl?: string
@@ -292,7 +291,6 @@ function parseApiAgentConfigBody(body: unknown, existing?: state.UserAgentRecord
   return {
     name,
     adapter,
-    apiKey: optionalString(data.apiKey, 'apiKey'),
     keyId: optionalString(data.keyId, 'keyId'),
     model: optionalString(data.model, 'model') ?? existing?.model,
     baseUrl,
@@ -440,11 +438,10 @@ function providerValueForAdapter(adapter: string): state.StoredApiKeyRecord['pro
   return 'openai'
 }
 
-function resolveApiKeySelection(userId: string, parsed: { apiKey?: string; keyId?: string }): string | undefined {
-  if (parsed.apiKey) return parsed.apiKey
+function resolveApiKeySelection(userId: string, parsed: { keyId?: string }): string | undefined {
   if (!parsed.keyId) return undefined
   if (parsed.keyId.startsWith('assistant:') || parsed.keyId.startsWith('global:')) {
-    throw new HttpError(400, 'Read-only keys cannot be rebound; paste a key or choose a saved Provider Key')
+    throw new HttpError(400, 'Read-only keys cannot be rebound; choose a saved Provider Key')
   }
   return decryptKey(userId, parsed.keyId).key
 }
@@ -736,6 +733,9 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // POST /api/agents
       if (pathname === '/api/agents' && method === 'POST') {
         const parsed = parseApiAgentConfigBody(await parseBody(req))
+        if (!parsed.keyId) {
+          throw new HttpError(400, 'Choose a saved Provider Key before creating an Agent')
+        }
         const apiKey = resolveApiKeySelection(authUser!.userId, parsed)
         const encrypted = apiKey ? encryptSecret(authUser!.userId, apiKey) : {}
         try {
@@ -764,8 +764,8 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const current = state.getUserAgent(authUser!.userId, decodeURIComponent(userAgentMatch[1]))
         if (!current) return json(res, 404, { error: 'Not found' })
         const parsed = parseApiAgentConfigBody(await parseBody(req), current)
-        if (parsed.adapter !== current.adapter && !parsed.apiKey && !parsed.keyId) {
-          throw new HttpError(400, 'Choose a Provider Key or paste a new API key when changing adapter')
+        if (parsed.adapter !== current.adapter && !parsed.keyId) {
+          throw new HttpError(400, 'Choose a saved Provider Key when changing adapter')
         }
         const apiKey = resolveApiKeySelection(authUser!.userId, parsed)
         const encrypted = apiKey ? encryptSecret(authUser!.userId, apiKey) : undefined

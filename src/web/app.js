@@ -2265,10 +2265,6 @@ window.showAgentModal = async function(name) {
             ${agentKeyOptions(selectedAdapter, Boolean(existing?.hasKey))}
           </select>
         </div>
-        <div class="form-group">
-          <label>New API Key ${existing?.hasKey ? '(optional replacement)' : '(optional)'}</label>
-          <input class="input" name="apiKey" type="password" autocomplete="new-password" placeholder="Paste only when adding or rotating a key">
-        </div>
         <div class="form-row">
           <div class="form-group">
             <label>Timeout (ms)</label>
@@ -2293,7 +2289,6 @@ window.saveAgent = async function(e, originalName) {
     adapter: fd.get('adapter'),
     model: String(fd.get('model') || '').trim() || undefined,
     baseUrl: String(fd.get('baseUrl') || '').trim() || undefined,
-    apiKey: String(fd.get('apiKey') || '').trim() || undefined,
     keyId: String(fd.get('keyId') || '').trim() || undefined,
     timeout: parseInt(fd.get('timeout')) || undefined,
   })
@@ -2598,7 +2593,7 @@ function defaultModelForAdapter(adapter) {
 function agentKeyOptions(adapter, hasCurrentKey) {
   const defaultOption = hasCurrentKey
     ? '<option value="">Keep current key</option>'
-    : '<option value="">Paste a new key below</option>'
+    : '<option value="">Select a saved Provider Key</option>'
   return defaultOption + providerKeyOptionsForAdapter(adapter)
 }
 

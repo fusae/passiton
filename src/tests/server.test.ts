@@ -86,13 +86,24 @@ test('GET /health returns unauthenticated liveness payload', async () => {
 test('agent CRUD stores user API model configs', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'agents@example.com')
+    const keyCreate = await fetch(`${baseUrl}/api/keys`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'anthropic',
+        name: 'Claude Vault',
+        key: 'sk-ant-test1234',
+      }),
+    })
+    assert.equal(keyCreate.status, 201)
+    const key = await keyCreate.json() as { id: string }
     const create = await fetch(`${baseUrl}/api/agents`, {
       method: 'POST',
       headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
       body: JSON.stringify({
         name: 'claude-api',
         adapter: 'anthropic-api',
-        apiKey: 'sk-ant-test1234',
+        keyId: key.id,
         model: 'claude-sonnet-4-20250514',
       }),
     })
