@@ -2,26 +2,10 @@
   "server": {
     "port": 4590
   },
-  "agents": {
-    "codex": {
-      "adapter": "codex",
-      "command": "codex",
-      "args": ["exec", "-p"],
-      "timeout": 300000
-    },
-    "claude-code": {
-      "adapter": "claude-code",
-      "command": "claude",
-      "args": ["-p", "--output-format", "stream-json"],
-      "timeout": 300000
-    },
-    "opencode": {
-      "adapter": "opencode",
-      "command": "opencode",
-      "args": ["run", "--dangerously-skip-permissions"],
-      "timeout": 300000
-    }
+  "features": {
+    "localCliAgents": false
   },
+  "agents": {},
   "policy": {
     "maxRounds": 20,
     "messageTimeout": 300000,

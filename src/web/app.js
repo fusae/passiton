@@ -1670,6 +1670,19 @@ async function renderSettings() {
   await loadConfig()
   await loadAgents()
   await loadApiKeys()
+  const localCliEnabled = Boolean(state.config?.features?.localCliAgents)
+  const localCliTab = localCliEnabled ? '<button class="tab-btn" data-tab="local-cli" onclick="window.switchSettingsTab(\'local-cli\')">Local CLI Agents</button>' : ''
+  const localCliPanel = localCliEnabled ? `
+            <div id="tab-local-cli" class="tab-panel" data-tab="local-cli">
+              <div class="flex-between mb-24">
+                <div>
+                  <h3>Local CLI Agents</h3>
+                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Available only on this machine when enabled by configuration</p>
+                </div>
+              </div>
+              <div class="agent-list" id="local-cli-list"></div>
+            </div>
+  ` : ''
 
   document.body.innerHTML = `
     <div class="app-layout">
@@ -1689,35 +1702,38 @@ async function renderSettings() {
         <div class="content">
           <div style="max-width: 860px;">
             <div class="tabs">
-              <button class="tab-btn active" onclick="window.switchSettingsTab('agents')">Agents</button>
-              <button class="tab-btn" onclick="window.switchSettingsTab('apikeys')">Provider Keys</button>
-              <button class="tab-btn" onclick="window.switchSettingsTab('general')">General</button>
+              <button class="tab-btn active" data-tab="agents" onclick="window.switchSettingsTab('agents')">API Assistants</button>
+              <button class="tab-btn" data-tab="apikeys" onclick="window.switchSettingsTab('apikeys')">Provider Keys</button>
+              ${localCliTab}
+              <button class="tab-btn" data-tab="general" onclick="window.switchSettingsTab('general')">General</button>
             </div>
 
-            <div id="tab-agents" class="tab-panel active">
+            <div id="tab-agents" class="tab-panel active" data-tab="agents">
               <div class="flex-between mb-24">
                 <div>
-                  <h3>Configured Agents</h3>
+                  <h3>API Assistants</h3>
                   <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage your AI model connections</p>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="window.showAgentModal()">+ Add Agent</button>
+                <button class="btn btn-primary btn-sm" onclick="window.showAgentModal()">+ Add Assistant</button>
               </div>
 
               <div class="agent-list" id="agents-list"></div>
             </div>
 
-            <div id="tab-apikeys" class="tab-panel">
+            <div id="tab-apikeys" class="tab-panel" data-tab="apikeys">
               <div class="flex-between mb-24">
                 <div>
                   <h3>Provider Keys</h3>
-                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage keys used by agents and sessions</p>
+                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage keys used by API assistants and sessions</p>
                 </div>
                 <button class="btn btn-primary btn-sm" onclick="window.showApiKeyModal()">+ Add Key</button>
               </div>
               <div class="agent-list" id="api-keys-list"></div>
             </div>
 
-            <div id="tab-general" class="tab-panel">
+            ${localCliPanel}
+
+            <div id="tab-general" class="tab-panel" data-tab="general">
               <h3 class="mb-24">General Settings</h3>
 
               <div class="form-group">
@@ -1745,19 +1761,21 @@ async function renderSettings() {
 
   renderAgentsList()
   renderApiKeysList()
+  renderLocalCliAgentsList()
   updateThemeButton()
 }
 
 function renderAgentsList() {
   const container = document.getElementById('agents-list')
   if (!container) return
+  const apiAgents = state.agents.filter(agent => agent.kind !== 'local')
 
-  if (state.agents.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No agents configured</p>'
+  if (apiAgents.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No API assistants configured</p>'
     return
   }
 
-  container.innerHTML = state.agents.map(agent => {
+  container.innerHTML = apiAgents.map(agent => {
     const colors = ['#6366f1', '#22c55e', '#f59e0b', '#3b82f6', '#8b5cf6']
     const color = colors[Math.floor(Math.random() * colors.length)]
     const initial = agent.name.charAt(0).toUpperCase()
@@ -1804,14 +1822,32 @@ function renderApiKeysList() {
   `).join('')
 }
 
+function renderLocalCliAgentsList() {
+  const container = document.getElementById('local-cli-list')
+  if (!container) return
+  const agents = state.agents.filter(agent => agent.kind === 'local')
+  if (agents.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No local CLI agents available</p>'
+    return
+  }
+  container.innerHTML = agents.map(agent => `
+    <div class="agent-item">
+      <div class="agent-icon">${escapeHtml(agent.name.charAt(0).toUpperCase())}</div>
+      <div class="agent-info">
+        <div class="agent-name">${escapeHtml(agent.name)}</div>
+        <div class="agent-model">${escapeHtml(agent.adapter)} · ${escapeHtml(agent.command || '')}${agent.version ? ` · ${escapeHtml(agent.version)}` : ''}</div>
+      </div>
+      <span class="badge badge-${agent.status === 'ready' ? 'active' : 'error'}">${escapeHtml(agent.status)}</span>
+    </div>
+  `).join('')
+}
+
 window.switchSettingsTab = function(tab) {
-  document.querySelectorAll('.tab-btn').forEach((btn, i) => {
-    const tabs = ['agents', 'apikeys', 'general']
-    btn.classList.toggle('active', tabs[i] === tab)
+  document.querySelectorAll('.tab-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.tab === tab)
   })
-  document.querySelectorAll('.tab-panel').forEach((panel, i) => {
-    const tabs = ['agents', 'apikeys', 'general']
-    panel.classList.toggle('active', tabs[i] === tab)
+  document.querySelectorAll('.tab-panel').forEach((panel) => {
+    panel.classList.toggle('active', panel.dataset.tab === tab)
   })
 }
 
@@ -1840,7 +1876,7 @@ window.showTemplateGalleryModal = async function() {
   })
   const agentNotice = state.agents.length ? '' : `
     <div class="template-empty-agents">
-      <span>No agents configured yet.</span>
+      <span>No API assistants configured yet.</span>
       <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
     </div>
   `
@@ -1894,14 +1930,14 @@ window.showNewSessionModal = async function(templateId = 'custom') {
       <div class="modal-head">
         <div>
           <h3>New Session</h3>
-          <p>Create an agent collaboration session.</p>
+          <p>Create an assistant collaboration session.</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
       </div>
       ${templateBadge}
       ${noAgents ? `
         <div class="template-empty-agents" style="margin-bottom: 20px;">
-          <span>No agents configured yet.</span>
+          <span>No API assistants configured yet.</span>
           <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
         </div>
       ` : ''}
@@ -2028,7 +2064,7 @@ window.showNewWorkflowModal = async function() {
       </div>
       ${noAgents ? `
         <div class="template-empty-agents" style="margin-bottom: 20px;">
-          <span>No agents configured yet.</span>
+          <span>No API assistants configured yet.</span>
           <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
         </div>
       ` : ''}
@@ -2228,7 +2264,7 @@ window.showAgentModal = async function(name) {
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>${existing ? 'Edit Agent' : 'Add Agent'}</h3>
+          <h3>${existing ? 'Edit Assistant' : 'Add Assistant'}</h3>
           <p>Configure an API-backed model.</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
@@ -2305,8 +2341,8 @@ window.saveAgent = async function(e, originalName) {
 
 window.deleteAgent = async function(name) {
   if (!await confirmAction({
-    title: 'Delete Agent',
-    message: `Delete agent "${name}"?`,
+    title: 'Delete Assistant',
+    message: `Delete assistant "${name}"?`,
     confirmText: 'Delete',
     danger: true,
   })) return

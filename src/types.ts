@@ -229,6 +229,9 @@ export interface ApiAgentInfo {
   hasKey: boolean
   keyMasked?: string
   status: 'ready' | 'no_key' | 'invalid'
+  kind?: 'api' | 'local'
+  command?: string
+  version?: string
 }
 
 export type AgentListResponse = ApiAgentInfo[]
@@ -236,6 +239,10 @@ export type AgentListResponse = ApiAgentInfo[]
 export interface DefaultsConfig {
   maxRounds: number
   mode: SessionMode
+}
+
+export interface FeatureConfig {
+  localCliAgents: boolean
 }
 
 // Full app config
@@ -249,6 +256,7 @@ export interface AppConfig {
   }
   agents: Record<string, AgentConfig>
   defaults: DefaultsConfig
+  features: FeatureConfig
   policy: PolicyConfig
 }
 

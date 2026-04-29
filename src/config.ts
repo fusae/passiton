@@ -9,6 +9,7 @@ const CONFIG_PATH = join(homedir(), '.turing', 'config.json')
 const DEFAULT_CODEX_COMMAND = process.env.TURING_CODEX_COMMAND ?? 'codex'
 const DEFAULT_CLAUDE_COMMAND = process.env.TURING_CLAUDE_COMMAND ?? 'claude'
 const DEFAULT_OPENCODE_COMMAND = process.env.TURING_OPENCODE_COMMAND ?? 'opencode'
+const LOCAL_CLI_ADAPTERS = new Set(['codex', 'claude-code', 'opencode'])
 
 export const DEFAULT_CONFIG: AppConfig = {
   server: {
@@ -19,7 +20,20 @@ export const DEFAULT_CONFIG: AppConfig = {
     maxRounds: 20,
     mode: 'collaborate',
   },
-  agents: {
+  features: {
+    localCliAgents: parseBooleanEnv(process.env.TURING_LOCAL_CLI_AGENTS) ?? false,
+  },
+  agents: {},
+  policy: {
+    maxRounds: 20,
+    messageTimeout: 600_000,
+    messageRetentionMs: 30 * 24 * 60 * 60 * 1000,
+    sessionTimeout: 7_200_000,
+    retries: 1,
+  },
+}
+
+export const LOCAL_CLI_AGENT_DEFAULTS: Record<string, AppConfig['agents'][string]> = {
     codex: {
       adapter: 'codex',
       command: DEFAULT_CODEX_COMMAND,
@@ -38,14 +52,6 @@ export const DEFAULT_CONFIG: AppConfig = {
       args: ['run', '{prompt}', '--dangerously-skip-permissions'],
       timeout: 600_000,
     },
-  },
-  policy: {
-    maxRounds: 20,
-    messageTimeout: 600_000,
-    messageRetentionMs: 30 * 24 * 60 * 60 * 1000,
-    sessionTimeout: 7_200_000,
-    retries: 1,
-  },
 }
 
 export function loadConfig(): AppConfig {
@@ -88,8 +94,8 @@ function validateConfig(config: AppConfig): AppConfig {
   assertPositiveInt(config.policy.sessionTimeout, 'policy.sessionTimeout')
   assertNonNegativeInt(config.policy.retries, 'policy.retries')
 
-  if (!isPlainObject(config.agents) || Object.keys(config.agents).length === 0) {
-    throw new Error('[config] "agents" must be a non-empty object')
+  if (!isPlainObject(config.agents)) {
+    throw new Error('[config] "agents" must be an object')
   }
 
   for (const [name, agent] of Object.entries(config.agents)) {
@@ -138,7 +144,7 @@ function validateConfig(config: AppConfig): AppConfig {
 }
 
 function isApiAdapter(adapter: string): boolean {
-  return adapter === 'anthropic-api' || adapter === 'openai-api' || adapter === 'zhipu-api'
+  return adapter === 'anthropic-api' || adapter === 'openai-api' || adapter === 'zhipu-api' || adapter === 'custom-api'
 }
 
 function normalizeConfig(config: AppConfig): AppConfig {
@@ -146,10 +152,17 @@ function normalizeConfig(config: AppConfig): AppConfig {
     maxRounds: config.defaults?.maxRounds ?? config.policy?.maxRounds ?? DEFAULT_CONFIG.defaults.maxRounds,
     mode: config.defaults?.mode ?? DEFAULT_CONFIG.defaults.mode,
   }
+  const features = {
+    ...DEFAULT_CONFIG.features,
+    ...config.features,
+    localCliAgents: parseBooleanEnv(process.env.TURING_LOCAL_CLI_AGENTS) ?? config.features?.localCliAgents ?? DEFAULT_CONFIG.features.localCliAgents,
+  }
 
   return {
     ...config,
     defaults,
+    features,
+    agents: config.agents ?? {},
     policy: {
       ...config.policy,
       maxRounds: defaults.maxRounds,
@@ -207,6 +220,24 @@ function assertSessionMode(value: unknown, field: string): asserts value is Sess
   if (value !== 'collaborate' && value !== 'discuss' && value !== 'review' && value !== 'freeform') {
     throw new Error(`[config] "${field}" must be one of collaborate, discuss, review, freeform`)
   }
+}
+
+function isLocalCliAdapter(adapter: string): boolean {
+  return LOCAL_CLI_ADAPTERS.has(adapter)
+}
+
+export function activeAgents(config: AppConfig): AppConfig['agents'] {
+  if (config.features.localCliAgents) return config.agents
+  return Object.fromEntries(
+    Object.entries(config.agents).filter(([, agent]) => !isLocalCliAdapter(agent.adapter))
+  )
+}
+
+function parseBooleanEnv(value: string | undefined): boolean | undefined {
+  if (value === undefined) return undefined
+  if (['1', 'true', 'yes', 'on'].includes(value.toLowerCase())) return true
+  if (['0', 'false', 'no', 'off'].includes(value.toLowerCase())) return false
+  return undefined
 }
 
 export function writeConfig(config: AppConfig): void {

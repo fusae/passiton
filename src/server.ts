@@ -20,7 +20,7 @@ import {
   revokeUserToken,
   type AuthUser,
 } from './auth.js'
-import { loadConfig, writeConfig } from './config.js'
+import { activeAgents, loadConfig, writeConfig } from './config.js'
 import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
@@ -304,11 +304,19 @@ function agentNameFromPath(pathname: string): string | undefined {
 }
 
 async function reloadAgents(router: Router, agentCatalog: AgentCatalog, config: AppConfig): Promise<void> {
+  const agents = activeAgents(config)
   router.clearAdapters()
-  agentCatalog.setConfiguredAgents(config.agents)
+  agentCatalog.setLocalCliAgentsEnabled(config.features.localCliAgents)
+  agentCatalog.setConfiguredAgents(agents)
   await agentCatalog.discover()
-  registerConfiguredAdapters(router, config.agents)
+  registerConfiguredAdapters(router, agents)
   agentCatalog.registerDiscoveredAdapters(router)
+}
+
+function assertLocalCliAgentsEnabled(): void {
+  if (!loadConfig().features.localCliAgents) {
+    throw new HttpError(404, 'Local CLI Agents are disabled')
+  }
 }
 
 function decryptUserAgentKey(record: state.UserAgentRecord): string | undefined {
@@ -345,16 +353,36 @@ function reloadUserAgents(router: Router, userId: string): void {
   registerUserConfiguredAdapters(router, userId, userAgentConfigs(userId))
 }
 
-async function listAgentModels(userId: string): Promise<AgentListResponse> {
+async function listAgentModels(userId: string, agentCatalog?: AgentCatalog): Promise<AgentListResponse> {
   const current = loadConfig()
   const globalApi = Object.entries(current.agents)
     .filter(([, cfg]) => API_ADAPTERS.has(cfg.adapter))
     .map(([name, cfg]) => apiAgentInfoFromConfig(name, cfg))
   const userApi = state.listUserAgents(userId).map(apiAgentInfoFromRecord)
   const userNames = new Set(userApi.map((agent) => agent.name))
-  return [
+  const apiAgents = [
     ...userApi,
     ...globalApi.filter((agent) => !userNames.has(agent.name)),
+  ]
+  if (!current.features.localCliAgents || !agentCatalog) return apiAgents
+
+  const takenNames = new Set(apiAgents.map((agent) => agent.name))
+  const localAgents = (await agentCatalog.listAgents())
+    .filter((agent) => !API_ADAPTERS.has(agent.adapter) && !takenNames.has(agent.name))
+    .map((agent): ApiAgentInfo => ({
+      name: agent.name,
+      adapter: agent.adapter,
+      provider: 'Local CLI',
+      model: agent.version,
+      hasKey: true,
+      status: agent.healthy && agent.availableForSessions ? 'ready' : 'invalid',
+      kind: 'local',
+      command: agent.command,
+      version: agent.version,
+    }))
+  return [
+    ...apiAgents,
+    ...localAgents,
   ]
 }
 
@@ -369,6 +397,7 @@ function apiAgentInfoFromConfig(name: string, cfg: AgentConfig): ApiAgentInfo {
     hasKey,
     keyMasked: cfg.apiKey ? maskAgentKey(cfg.apiKey) : undefined,
     status: hasKey && apiConfigHealthy(cfg) ? 'ready' : hasKey ? 'invalid' : 'no_key',
+    kind: 'api',
   }
 }
 
@@ -726,7 +755,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // GET /api/agents
       if (pathname === '/api/agents' && method === 'GET') {
-        const agents = await listAgentModels(authUser!.userId)
+        const agents = await listAgentModels(authUser!.userId, agentCatalog)
         return json(res, 200, agents)
       }
 
@@ -756,7 +785,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           throw err
         }
         reloadUserAgents(router, authUser!.userId)
-        return json(res, 201, await listAgentModels(authUser!.userId))
+        return json(res, 201, await listAgentModels(authUser!.userId, agentCatalog))
       }
 
       const userAgentMatch = pathname.match(/^\/api\/agents\/([^/]+)$/)
@@ -785,7 +814,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           throw err
         }
         reloadUserAgents(router, authUser!.userId)
-        return json(res, 200, await listAgentModels(authUser!.userId))
+        return json(res, 200, await listAgentModels(authUser!.userId, agentCatalog))
       }
 
       if (userAgentMatch && method === 'DELETE') {
@@ -793,7 +822,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           return json(res, 404, { error: 'Not found' })
         }
         reloadUserAgents(router, authUser!.userId)
-        return json(res, 200, await listAgentModels(authUser!.userId))
+        return json(res, 200, await listAgentModels(authUser!.userId, agentCatalog))
       }
 
       // GET /api/templates
@@ -827,6 +856,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // POST /api/config/agents
       if (pathname === '/api/config/agents' && method === 'POST') {
+        assertLocalCliAgentsEnabled()
         const current = loadConfig()
         const { name, config } = parseAgentConfigBody(await parseBody(req))
         if (current.agents[name]) {
@@ -844,6 +874,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       const configAgentName = agentNameFromPath(pathname)
       if (configAgentName && method === 'PUT') {
+        assertLocalCliAgentsEnabled()
         const current = loadConfig()
         const existing = current.agents[configAgentName]
         if (!existing) return json(res, 404, { error: 'Not found' })
@@ -862,6 +893,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       }
 
       if (configAgentName && method === 'DELETE') {
+        assertLocalCliAgentsEnabled()
         const current = loadConfig()
         if (!current.agents[configAgentName]) return json(res, 404, { error: 'Not found' })
         if (Object.keys(current.agents).length <= 1) {

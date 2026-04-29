@@ -53,9 +53,15 @@ const DISCOVERY_PRESETS: DiscoveryPreset[] = [
 export class AgentCatalog {
   private entries = new Map<string, AgentEntry>()
   private probeCache = new Map<string, ProbeCacheEntry>()
+  private localCliAgentsEnabled: boolean
 
-  constructor(configuredAgents: Record<string, AgentConfig>) {
+  constructor(configuredAgents: Record<string, AgentConfig>, localCliAgentsEnabled = false) {
+    this.localCliAgentsEnabled = localCliAgentsEnabled
     this.setConfiguredAgents(configuredAgents)
+  }
+
+  setLocalCliAgentsEnabled(enabled: boolean): void {
+    this.localCliAgentsEnabled = enabled
   }
 
   setConfiguredAgents(configuredAgents: Record<string, AgentConfig>): void {
@@ -74,6 +80,7 @@ export class AgentCatalog {
   }
 
   async discover(): Promise<void> {
+    if (!this.localCliAgentsEnabled) return
     for (const preset of DISCOVERY_PRESETS) {
       if (this.entries.has(preset.name)) continue
       const command = await findExecutable(preset.commands)
@@ -91,6 +98,7 @@ export class AgentCatalog {
   }
 
   registerDiscoveredAdapters(router: Router): void {
+    if (!this.localCliAgentsEnabled) return
     for (const entry of this.entries.values()) {
       if (entry.source !== 'discovered' || !entry.supported || !entry.command) continue
       const config = createDiscoveredAgentConfig(entry.adapter, entry.command)

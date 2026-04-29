@@ -1,6 +1,6 @@
 // Turing — entry point
 
-import { loadConfig } from './config.js'
+import { activeAgents, loadConfig } from './config.js'
 import { AgentCatalog } from './agents.js'
 import { initDb } from './state.js'
 import { Router } from './router.js'
@@ -16,11 +16,12 @@ async function main(): Promise<void> {
 
   // Build router with policy from config
   const router = new Router(config.policy)
-  const agentCatalog = new AgentCatalog(config.agents)
+  const agents = activeAgents(config)
+  const agentCatalog = new AgentCatalog(agents, config.features.localCliAgents)
   await agentCatalog.discover()
 
   // Register adapters based on config
-  registerConfiguredAdapters(router, config.agents)
+  registerConfiguredAdapters(router, agents)
   registerPersistedUserAgents(router)
   agentCatalog.registerDiscoveredAdapters(router)
 
