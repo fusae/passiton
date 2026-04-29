@@ -1,7 +1,7 @@
 import type { AdapterSendOpts } from '../../types.js'
 import { ApiAdapter, type ApiAdapterConfig, type ApiParsedResponse, type ApiRequest } from './base.js'
 
-const DEFAULT_MODEL = 'gpt-4o'
+const DEFAULT_MODEL = 'gpt-5.5'
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1/chat/completions'
 
 type ChatRole = 'system' | 'user' | 'assistant'

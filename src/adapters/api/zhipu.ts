@@ -1,7 +1,7 @@
 import { OpenAIApiAdapter, type OpenAIApiAdapterConfig } from './openai.js'
 import { ApiHttpError } from './base.js'
 
-const DEFAULT_MODEL = 'glm-4-flash'
+const DEFAULT_MODEL = 'glm-5.1'
 const DEFAULT_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
 
 export interface ZhipuApiAdapterConfig extends OpenAIApiAdapterConfig {}

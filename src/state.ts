@@ -12,6 +12,7 @@ import type {
   SessionStatus,
   SessionMode,
   SessionContext,
+  SessionArtifacts,
   RoundMetadata,
   DiffSnapshot,
   Pipeline,
@@ -158,6 +159,8 @@ function createTables(): void {
       context      TEXT,
       system_prompts TEXT,
       template_id  TEXT,
+      git_snapshot TEXT,
+      artifacts    TEXT,
       error_type   TEXT,
       error_round  INTEGER,
       error_message TEXT,
@@ -232,6 +235,12 @@ function createTables(): void {
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE sessions ADD COLUMN template_id TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN git_snapshot TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN artifacts TEXT`)
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE sessions ADD COLUMN next_turn TEXT NOT NULL DEFAULT 'to'`)
@@ -498,6 +507,10 @@ function rowToSession(row: Record<string, unknown>): Session {
   if (row.context) {
     try { context = JSON.parse(row.context as string) } catch { /* ignore */ }
   }
+  let artifacts: SessionArtifacts | undefined
+  if (row.artifacts) {
+    try { artifacts = JSON.parse(row.artifacts as string) } catch { /* ignore */ }
+  }
   return {
     id: row.id as string,
     userId: row.user_id as string | undefined,
@@ -513,6 +526,8 @@ function rowToSession(row: Record<string, unknown>): Session {
     context,
     systemPrompts,
     templateId: row.template_id as string | undefined,
+    gitSnapshot: row.git_snapshot as string | undefined,
+    artifacts,
     errorType: row.error_type as Session['errorType'] | undefined,
     errorRound: row.error_round as number | undefined,
     errorMessage: row.error_message as string | undefined,
@@ -532,6 +547,8 @@ export function createSession(params: {
   context?: SessionContext
   systemPrompts?: { from: string; to: string }
   templateId?: string
+  gitSnapshot?: string
+  artifacts?: SessionArtifacts
   nextTurn?: 'from' | 'to'
   maxRounds?: number
   approveMode?: boolean
@@ -541,8 +558,8 @@ export function createSession(params: {
   const stmt = db.prepare(`
     INSERT INTO sessions (id, user_id, from_adapter, from_label, to_adapter, to_label,
       status, mode, next_turn, max_rounds, current_round, approve_mode, cwd, context, system_prompts, template_id,
-      created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
+      git_snapshot, artifacts, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   stmt.run(
     params.id,
@@ -559,6 +576,8 @@ export function createSession(params: {
     params.context ? JSON.stringify(params.context) : null,
     params.systemPrompts ? JSON.stringify(params.systemPrompts) : null,
     params.templateId ?? null,
+    params.gitSnapshot ?? null,
+    params.artifacts ? JSON.stringify(params.artifacts) : null,
     now,
     now
   )
@@ -572,7 +591,7 @@ export function getSession(id: string, userId?: string): Session | undefined {
   return row ? rowToSession(row) : undefined
 }
 
-export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'nextTurn' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount' | 'context' | 'systemPrompts'>>, userId?: string): Session {
+export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'nextTurn' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount' | 'context' | 'systemPrompts' | 'gitSnapshot' | 'artifacts'>>, userId?: string): Session {
   const fields: string[] = ['updated_at = ?']
   const values: unknown[] = [Date.now()]
 
@@ -588,6 +607,8 @@ export function updateSession(id: string, updates: Partial<Pick<Session, 'status
   if (updates.resumeCount !== undefined) { fields.push('resume_count = ?'); values.push(updates.resumeCount) }
   if (updates.context !== undefined) { fields.push('context = ?'); values.push(JSON.stringify(updates.context)) }
   if (updates.systemPrompts !== undefined) { fields.push('system_prompts = ?'); values.push(JSON.stringify(updates.systemPrompts)) }
+  if (updates.gitSnapshot !== undefined) { fields.push('git_snapshot = ?'); values.push(updates.gitSnapshot) }
+  if (updates.artifacts !== undefined) { fields.push('artifacts = ?'); values.push(JSON.stringify(updates.artifacts)) }
 
   values.push(id)
   if (userId) {

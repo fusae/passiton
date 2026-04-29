@@ -7,7 +7,7 @@ interface PromptPair {
   to: string
 }
 
-const TURING_AWARENESS = 'You are operating inside Turing, an agent-to-agent orchestration system. If the task should be split into parallel or dependent sub-tasks, explicitly propose a Turing pipeline/session plan instead of losing scope in one thread.'
+const TURING_AWARENESS = 'You are operating inside Turing, an agent-to-agent orchestration system. If the task should be split into parallel or dependent sub-tasks, explicitly propose a Turing pipeline/session plan instead of losing scope in one thread. When your task is complete, wrap your final result or summary in [RESULT]...[/RESULT] tags.'
 
 /**
  * Generate system prompts for both agents based on session mode.

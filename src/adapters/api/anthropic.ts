@@ -1,7 +1,7 @@
 import type { AdapterSendOpts } from '../../types.js'
 import { ApiAdapter, type ApiAdapterConfig, type ApiParsedResponse, type ApiRequest } from './base.js'
 
-const DEFAULT_MODEL = 'claude-sonnet-4-20250514'
+const DEFAULT_MODEL = 'claude-sonnet-4-6'
 const DEFAULT_BASE_URL = 'https://api.anthropic.com/v1/messages'
 const ANTHROPIC_VERSION = '2023-06-01'
 

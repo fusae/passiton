@@ -764,6 +764,9 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const current = state.getUserAgent(authUser!.userId, decodeURIComponent(userAgentMatch[1]))
         if (!current) return json(res, 404, { error: 'Not found' })
         const parsed = parseApiAgentConfigBody(await parseBody(req), current)
+        if (parsed.adapter !== current.adapter && !parsed.apiKey && !parsed.keyId) {
+          throw new HttpError(400, 'Choose a Provider Key or paste a new API key when changing adapter')
+        }
         const apiKey = resolveApiKeySelection(authUser!.userId, parsed)
         const encrypted = apiKey ? encryptSecret(authUser!.userId, apiKey) : undefined
         try {

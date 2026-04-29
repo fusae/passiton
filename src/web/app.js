@@ -5,10 +5,45 @@ const API = ''  // same origin
 const AUTH_TOKEN_KEY = 'turing-jwt'
 const THEME_KEY = 'turing-theme'
 
+const MODEL_OPTIONS_BY_ADAPTER = {
+  'anthropic-api': [
+    { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+    { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+    { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+    { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 snapshot' },
+  ],
+  'openai-api': [
+    { value: 'gpt-5.5', label: 'GPT-5.5' },
+    { value: 'gpt-5.4', label: 'GPT-5.4' },
+    { value: 'gpt-5.4-mini', label: 'GPT-5.4 mini' },
+    { value: 'gpt-5.4-nano', label: 'GPT-5.4 nano' },
+    { value: 'gpt-5.2', label: 'GPT-5.2' },
+    { value: 'gpt-4.1', label: 'GPT-4.1' },
+  ],
+  'zhipu-api': [
+    { value: 'glm-5.1', label: 'GLM-5.1' },
+    { value: 'glm-5', label: 'GLM-5' },
+    { value: 'glm-5-turbo', label: 'GLM-5-Turbo' },
+    { value: 'glm-4.7', label: 'GLM-4.7' },
+    { value: 'glm-4.7-flashx', label: 'GLM-4.7-FlashX' },
+    { value: 'glm-4.7-flash', label: 'GLM-4.7-Flash' },
+    { value: 'glm-4.6', label: 'GLM-4.6' },
+    { value: 'glm-4.5-air', label: 'GLM-4.5-Air' },
+    { value: 'glm-4.5-airx', label: 'GLM-4.5-AirX' },
+  ],
+  'custom-api': [
+    { value: '', label: 'Provider default' },
+    { value: 'gpt-5.5', label: 'GPT-5.5 compatible' },
+    { value: 'gpt-5.4', label: 'GPT-5.4 compatible' },
+    { value: 'gpt-4.1', label: 'GPT-4.1 compatible' },
+  ],
+}
+
 // ── Global State ──────────────────────────────────────────────────────────────
 const state = {
   user: null,
   sessions: [],
+  pipelines: [],
   agents: [],
   templates: [],
   apiKeys: [],
@@ -17,11 +52,21 @@ const state = {
   currentView: 'sessions',
   currentSessionId: null,
   currentSession: null,
+  currentPipelineId: null,
+  currentPipeline: null,
+  expandedWorkflowStep: null,
   currentMessages: [],
   currentSnapshots: [],
   ws: null,
   heartbeats: new Map(),
   streamDeltas: new Map(),
+  streamRaw: new Map(),
+  streamSteps: new Map(),
+  streamStatus: new Map(),
+  expandedStepDetails: new Set(),
+  expandedArtifactFiles: new Set(),
+  artifactFullDiffVisible: false,
+  rawOutputVisible: false,
   streamFrame: null,
 }
 
@@ -30,6 +75,8 @@ const routes = {
   '/': 'landing',
   '/sessions': 'sessions',
   '/session/:id': 'session',
+  '/workflows': 'workflows',
+  '/workflow/:id': 'workflow',
   '/settings': 'settings',
   '/login': 'login',
 }
@@ -57,6 +104,11 @@ function render() {
   } else if (path.startsWith('/session/')) {
     const id = path.split('/')[2]
     renderSession(id)
+  } else if (path === '/workflows') {
+    renderWorkflows()
+  } else if (path.startsWith('/workflow/')) {
+    const id = path.split('/')[2]
+    renderWorkflow(id)
   } else if (path === '/settings') {
     renderSettings()
   } else {
@@ -190,6 +242,31 @@ function renderUserMenu() {
   `
 }
 
+function renderSidebar(active) {
+  return `
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="logo-icon">T</div>
+        <span>Turing Cloud</span>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="/sessions" class="${active === 'sessions' ? 'active' : ''}">
+          <span class="nav-icon">◉</span> Sessions
+        </a>
+        <a href="/workflows" class="${active === 'workflows' ? 'active' : ''}">
+          <span class="nav-icon">⛓</span> Workflows
+        </a>
+        <a href="/settings" class="${active === 'settings' ? 'active' : ''}">
+          <span class="nav-icon">⚙</span> Settings
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        Turing Cloud v0.1.0
+      </div>
+    </aside>
+  `
+}
+
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 function connectWs() {
   if (state.ws) return
@@ -248,12 +325,20 @@ function handleWsEvent(event) {
         navigate('/sessions')
       }
       break
+    case 'pipeline:created':
+    case 'pipeline:updated':
+      applyPipelineUpdate(event.payload)
+      break
     case 'message:delta':
       handleMessageDelta(event.payload)
+      break
+    case 'message:step':
+      handleMessageStep(event.payload)
       break
     case 'message:new':
       if (state.currentSessionId === event.payload.sessionId) {
         clearStreamingDelta(event.payload.sessionId)
+        setStreamStatus(event.payload.sessionId, '已完成本轮输出')
         upsertCurrentMessage(event.payload)
         renderSessionMessages()
       }
@@ -284,6 +369,25 @@ function applySessionUpdate(session) {
   renderSessionCards()
 }
 
+function applyPipelineUpdate(pipeline) {
+  if (!pipeline?.id) return
+  const index = state.pipelines.findIndex(item => item.id === pipeline.id)
+  if (index >= 0) {
+    state.pipelines[index] = { ...state.pipelines[index], ...pipeline }
+  } else {
+    state.pipelines.unshift(pipeline)
+  }
+
+  if (state.currentPipelineId === pipeline.id) {
+    state.currentPipeline = { ...(state.currentPipeline || {}), ...pipeline }
+    renderWorkflowHeader(state.currentPipeline)
+    renderWorkflowSteps(state.currentPipeline)
+    renderWorkflowTimeline(state.currentPipeline)
+  }
+
+  renderPipelineCards()
+}
+
 function removeSessionFromList(id) {
   if (!id) return
   state.sessions = state.sessions.filter(session => session.id !== id)
@@ -303,7 +407,31 @@ function handleMessageDelta(payload) {
   existing.content += payload.content
   existing.from = payload.from || existing.from
   state.streamDeltas.set(payload.sessionId, existing)
+  state.streamRaw.set(payload.sessionId, (state.streamRaw.get(payload.sessionId) || '') + payload.content)
+  setStreamStatus(payload.sessionId, summarizeRawStatus(payload.content))
   scheduleStreamingRender()
+}
+
+function handleMessageStep(payload) {
+  if (!payload?.sessionId || !payload.step) return
+  const steps = state.streamSteps.get(payload.sessionId) || []
+  const last = steps[steps.length - 1]
+  const step = {
+    ...payload.step,
+    id: `${Date.now()}-${steps.length}`,
+    detail: payload.step.detail || '',
+  }
+  if (last && last.type === step.type && last.summary === step.summary) return
+  steps.push(step)
+  state.streamSteps.set(payload.sessionId, steps)
+  setStreamStatus(payload.sessionId, step.summary)
+  if (state.currentSessionId === payload.sessionId) renderSessionMessages()
+}
+
+function setStreamStatus(sessionId, status) {
+  if (!sessionId || !status) return
+  state.streamStatus.set(sessionId, status)
+  if (state.currentSessionId === sessionId) updateSessionStatusLine()
 }
 
 function scheduleStreamingRender() {
@@ -315,33 +443,8 @@ function scheduleStreamingRender() {
 }
 
 function renderStreamingDelta() {
-  const stream = state.streamDeltas.get(state.currentSessionId)
-  if (!stream) return
-  const container = document.getElementById('messages')
-  if (!container) return
-
-  let node = document.getElementById('streaming-message')
-  if (!node) {
-    if (state.currentMessages.length === 0) container.innerHTML = ''
-    node = document.createElement('div')
-    node.id = 'streaming-message'
-    node.className = 'chat-msg from streaming'
-    node.innerHTML = `
-      <div class="chat-avatar">${escapeHtml((stream.from || 'A').charAt(0).toUpperCase())}</div>
-      <div>
-        <div class="chat-bubble"><span class="stream-content"></span><span class="stream-cursor"></span></div>
-        <div class="chat-meta"><span>${escapeHtml(stream.from)} · typing</span></div>
-      </div>
-    `
-    container.appendChild(node)
-  }
-
-  const content = node.querySelector('.stream-content')
-  const meta = node.querySelector('.chat-meta span')
-  const avatar = node.querySelector('.chat-avatar')
-  if (content) content.textContent = stream.content
-  if (meta) meta.textContent = `${stream.from} · typing`
-  if (avatar) avatar.textContent = (stream.from || 'A').charAt(0).toUpperCase()
+  updateSessionStatusLine()
+  updateRawOutput()
 
   const messagesContainer = document.getElementById('messages-container')
   if (messagesContainer) {
@@ -353,6 +456,16 @@ function clearStreamingDelta(sessionId) {
   state.streamDeltas.delete(sessionId)
   const node = document.getElementById('streaming-message')
   if (node) node.remove()
+}
+
+function resetSessionStream(sessionId) {
+  state.streamDeltas.delete(sessionId)
+  state.streamRaw.delete(sessionId)
+  state.streamSteps.delete(sessionId)
+  state.streamStatus.delete(sessionId)
+  state.expandedStepDetails = new Set([...state.expandedStepDetails].filter(key => !key.startsWith(`${sessionId}:`)))
+  state.expandedArtifactFiles = new Set()
+  state.artifactFullDiffVisible = false
 }
 
 function upsertCurrentMessage(message) {
@@ -367,6 +480,7 @@ function upsertCurrentMessage(message) {
 function updateHeartbeat(hb) {
   // Update progress indicators if on session page
   if (state.currentSessionId === hb.sessionId) {
+    setStreamStatus(hb.sessionId, summarizeRawStatus(hb.lastOutput || 'Processing...'))
     const progressAgent = document.getElementById('progress-agent')
     const progressElapsed = document.getElementById('progress-elapsed')
     const progressOutput = document.getElementById('progress-output')
@@ -383,6 +497,15 @@ async function loadSessions() {
     state.sessions = await api('/api/sessions')
   } catch (err) {
     console.error('Failed to load sessions:', err)
+  }
+}
+
+async function loadPipelines() {
+  try {
+    state.pipelines = await api('/api/pipelines')
+  } catch (err) {
+    console.error('Failed to load pipelines:', err)
+    state.pipelines = []
   }
 }
 
@@ -433,7 +556,7 @@ async function loadSessionDetail(id) {
     const session = await api(`/api/sessions/${id}`)
     state.currentSession = session
     state.currentMessages = session.messages || []
-    clearStreamingDelta(id)
+    resetSessionStream(id)
     renderSessionMessages()
     renderSessionPanel(session)
     renderSessionHeader(session)
@@ -695,23 +818,7 @@ window.handleRegister = async function(e) {
 function renderSessions() {
   document.body.innerHTML = `
     <div class="app-layout">
-      <aside class="sidebar">
-        <div class="sidebar-brand">
-          <div class="logo-icon">T</div>
-          <span>Turing Cloud</span>
-        </div>
-        <nav class="sidebar-nav">
-          <a href="/sessions" class="active">
-            <span class="nav-icon">◉</span> Sessions
-          </a>
-          <a href="/settings">
-            <span class="nav-icon">⚙</span> Settings
-          </a>
-        </nav>
-        <div class="sidebar-footer">
-          Turing Cloud v0.1.0
-        </div>
-      </aside>
+      ${renderSidebar('sessions')}
 
       <div class="main">
         <header class="topbar">
@@ -821,6 +928,245 @@ function renderSessionCards() {
   `).join('')
 }
 
+function renderWorkflows() {
+  state.currentSessionId = null
+  state.currentSession = null
+  state.currentPipelineId = null
+  state.currentPipeline = null
+  document.body.innerHTML = `
+    <div class="app-layout">
+      ${renderSidebar('workflows')}
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-left">
+            <h2>Workflows</h2>
+          </div>
+          <div class="topbar-right">
+            <button class="btn btn-primary btn-sm" onclick="window.showNewWorkflowModal()">+ New Workflow</button>
+            <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
+            ${renderUserMenu()}
+          </div>
+        </header>
+
+        <div class="content">
+          <div class="flex-between mb-24">
+            <h3>Recent Workflows</h3>
+          </div>
+          <div id="pipeline-cards" class="session-cards workflow-cards"></div>
+        </div>
+      </div>
+    </div>
+  `
+
+  updateThemeButton()
+  loadWorkflowsData()
+}
+
+async function loadWorkflowsData() {
+  await loadPipelines()
+  renderPipelineCards()
+}
+
+function renderPipelineCards() {
+  const container = document.getElementById('pipeline-cards')
+  if (!container) return
+
+  if (state.pipelines.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No workflows yet. Create your first one!</p>'
+    return
+  }
+
+  container.innerHTML = state.pipelines.map(pipeline => `
+    <a href="/workflow/${pipeline.id}" class="card session-card workflow-card">
+      <div class="session-card-header">
+        <span class="session-card-title">${escapeHtml(pipeline.name || 'Untitled workflow')}</span>
+        <span class="badge badge-${pipeline.status}">${escapeHtml(pipeline.status)}</span>
+      </div>
+      ${renderStepRail(pipeline.sessions || [])}
+      <div class="session-card-meta">
+        <span>${(pipeline.sessions || []).length} steps</span>
+        <span>Created ${formatTime(pipeline.createdAt)}</span>
+      </div>
+    </a>
+  `).join('')
+}
+
+async function renderWorkflow(id) {
+  state.currentSessionId = null
+  state.currentSession = null
+  state.currentPipelineId = id
+  state.expandedWorkflowStep = state.expandedWorkflowStep || null
+
+  let pipeline = null
+  try {
+    pipeline = await api(`/api/pipelines/${id}`)
+  } catch (err) {
+    document.body.innerHTML = '<div>Workflow not found</div>'
+    return
+  }
+  state.currentPipeline = pipeline
+
+  document.body.innerHTML = `
+    <div class="app-layout">
+      ${renderSidebar('workflows')}
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-left">
+            <a href="/workflows" class="btn btn-ghost btn-sm">← Back</a>
+            <h2 id="workflow-title">${escapeHtml(pipeline.name || 'Untitled workflow')}</h2>
+            <span id="workflow-status-badge" class="badge badge-${pipeline.status}">${escapeHtml(pipeline.status)}</span>
+          </div>
+          <div class="topbar-right" id="workflow-actions">
+            ${renderWorkflowActions(pipeline)}
+            <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
+            ${renderUserMenu()}
+          </div>
+        </header>
+
+        <div class="content workflow-detail">
+          <div class="workflow-map" id="workflow-steps"></div>
+          <div class="workflow-timeline card" id="workflow-timeline"></div>
+        </div>
+      </div>
+    </div>
+  `
+
+  renderWorkflowSteps(pipeline)
+  renderWorkflowTimeline(pipeline)
+  updateThemeButton()
+}
+
+function renderWorkflowActions(pipeline) {
+  return `
+    ${pipeline.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.pauseWorkflow()">⏸ Pause</button>' : ''}
+    ${pipeline.status === 'paused' ? '<button class="btn btn-primary btn-sm" onclick="window.resumeWorkflow()">▶ Resume</button>' : ''}
+    <button class="btn btn-ghost btn-sm" onclick="window.deleteCurrentWorkflow()">Delete</button>
+  `
+}
+
+function renderWorkflowHeader(pipeline) {
+  const title = document.getElementById('workflow-title')
+  if (title) title.textContent = pipeline.name || 'Untitled workflow'
+
+  const badge = document.getElementById('workflow-status-badge')
+  if (badge) {
+    badge.className = `badge badge-${pipeline.status}`
+    badge.textContent = pipeline.status
+  }
+
+  const actions = document.getElementById('workflow-actions')
+  if (actions) {
+    actions.innerHTML = `
+      ${renderWorkflowActions(pipeline)}
+      <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
+      ${renderUserMenu()}
+    `
+    updateThemeButton()
+  }
+}
+
+function renderWorkflowSteps(pipeline) {
+  const container = document.getElementById('workflow-steps')
+  if (!container || !pipeline) return
+  const steps = pipeline.sessions || []
+  const details = pipeline.sessionDetails || []
+  container.innerHTML = `
+    <div class="workflow-rail-large">${renderStepRail(steps)}</div>
+    <div class="workflow-step-grid">
+      ${steps.map((step, index) => renderWorkflowStepCard(step, details[index], index)).join('')}
+    </div>
+  `
+}
+
+function renderWorkflowStepCard(step, session, index) {
+  const expanded = state.expandedWorkflowStep === step.sessionId
+  const dependsOn = step.dependsOn || []
+  const from = agentLabel(session?.from) || 'Agent A'
+  const to = agentLabel(session?.to) || 'Agent B'
+  const currentRound = Number(session?.currentRound) || 0
+  const maxRounds = Number(session?.maxRounds) || 0
+  return `
+    <div class="workflow-step-wrap">
+      <button class="workflow-step-card ${expanded ? 'expanded' : ''}" onclick='window.toggleWorkflowStep(${jsString(step.sessionId)})'>
+        <div class="workflow-step-top">
+          <span class="workflow-step-index">Step ${index + 1}</span>
+          <span class="badge badge-${step.status}">${escapeHtml(step.status)}</span>
+        </div>
+        <div class="workflow-step-route">${escapeHtml(from)} <span>→</span> ${escapeHtml(to)}</div>
+        <div class="workflow-step-meta">
+          <span>${currentRound}${maxRounds ? ` / ${maxRounds}` : ''} turns</span>
+          <span>${dependsOn.length ? `Depends on ${dependsOn.length}` : 'No dependency'}</span>
+        </div>
+      </button>
+      ${dependsOn.length ? `<div class="workflow-deps">← ${dependsOn.map(id => `Step ${stepIndexBySessionId(id) + 1 || '?'}`).join(', ')}</div>` : ''}
+      ${expanded ? renderWorkflowStepMessages(session) : ''}
+    </div>
+  `
+}
+
+function renderWorkflowStepMessages(session) {
+  const messages = session?.messages || []
+  if (!messages.length) {
+    return '<div class="workflow-step-messages"><p style="color: var(--text-muted); text-align: center;">No messages yet</p></div>'
+  }
+  return `
+    <div class="workflow-step-messages">
+      <div class="chat-stream">
+        ${messages.map(msg => {
+          const isFrom = msg.from !== 'human'
+          const avatar = isFrom ? (msg.from || 'A').charAt(0).toUpperCase() : 'H'
+          return `
+            <div class="chat-msg ${isFrom ? 'from' : 'to'}">
+              <div class="chat-avatar">${escapeHtml(avatar)}</div>
+              <div>
+                <div class="chat-bubble">${renderMarkdown(msg.content || '')}</div>
+                <div class="chat-meta">
+                  <span>${escapeHtml(msg.from || '')} · Turn ${escapeHtml(msg.round ?? '')}</span>
+                </div>
+              </div>
+            </div>
+          `
+        }).join('')}
+      </div>
+    </div>
+  `
+}
+
+function renderWorkflowTimeline(pipeline) {
+  const container = document.getElementById('workflow-timeline')
+  if (!container || !pipeline) return
+  const steps = pipeline.sessions || []
+  container.innerHTML = `
+    <div class="flex-between mb-16">
+      <h3>Timeline</h3>
+      <span class="badge badge-${pipeline.status}">${escapeHtml(pipeline.status)}</span>
+    </div>
+    <div class="workflow-log">
+      <div><span>Created</span><strong>${new Date(pipeline.createdAt).toLocaleString()}</strong></div>
+      <div><span>Updated</span><strong>${new Date(pipeline.updatedAt).toLocaleString()}</strong></div>
+      ${steps.map((step, index) => `<div><span>Step ${index + 1}</span><strong>${escapeHtml(step.status)}</strong></div>`).join('')}
+    </div>
+  `
+}
+
+function renderStepRail(steps) {
+  const items = steps.length ? steps : [{ status: 'pending' }]
+  return `
+    <div class="step-rail">
+      ${items.map((step, index) => `
+        <span class="step-node step-${step.status}" title="Step ${index + 1}: ${escapeAttr(step.status)}"></span>
+        ${index < items.length - 1 ? '<span class="step-arrow">→</span>' : ''}
+      `).join('')}
+    </div>
+  `
+}
+
+function stepIndexBySessionId(sessionId) {
+  return (state.currentPipeline?.sessions || []).findIndex(step => step.sessionId === sessionId)
+}
+
 function formatStatNumber(value) {
   const number = Number(value)
   if (!Number.isFinite(number)) return '0'
@@ -830,6 +1176,8 @@ function formatStatNumber(value) {
 
 async function renderSession(id) {
   state.currentSessionId = id
+  state.currentPipelineId = null
+  state.currentPipeline = null
 
   // Load session data
   let session = null
@@ -840,26 +1188,11 @@ async function renderSession(id) {
     return
   }
   state.currentSession = session
+  resetSessionStream(id)
 
   document.body.innerHTML = `
     <div class="app-layout">
-      <aside class="sidebar">
-        <div class="sidebar-brand">
-          <div class="logo-icon">T</div>
-          <span>Turing Cloud</span>
-        </div>
-        <nav class="sidebar-nav">
-          <a href="/sessions">
-            <span class="nav-icon">◉</span> Sessions
-          </a>
-          <a href="/settings">
-            <span class="nav-icon">⚙</span> Settings
-          </a>
-        </nav>
-        <div class="sidebar-footer">
-          Turing Cloud v0.1.0
-        </div>
-      </aside>
+      ${renderSidebar('sessions')}
 
       <div class="main">
         <header class="topbar">
@@ -878,8 +1211,18 @@ async function renderSession(id) {
 
         <div class="session-layout">
           <div class="session-chat">
+            <div class="session-status-line" id="session-status-line">
+              <span class="status-spinner"></span>
+              <span id="session-live-status">${session.status === 'active' ? '等待输出...' : escapeHtml(session.status)}</span>
+            </div>
             <div class="session-chat-messages" id="messages-container">
               <div class="chat-stream" id="messages"></div>
+            </div>
+            <div class="raw-output-panel">
+              <button class="raw-output-toggle" onclick="window.toggleRawOutput()">
+                <span id="raw-output-toggle-label">${state.rawOutputVisible ? '隐藏原始输出' : '显示原始输出'}</span>
+              </button>
+              <pre class="raw-output ${state.rawOutputVisible ? 'visible' : ''}" id="raw-output"></pre>
             </div>
             <div class="session-chat-input">
               <div class="inject-bar">
@@ -1002,13 +1345,17 @@ function renderSessionPanel(session) {
 function renderSessionMessages() {
   const container = document.getElementById('messages')
   if (!container) return
+  const steps = state.streamSteps.get(state.currentSessionId) || []
+  const artifactHtml = renderSessionArtifacts(state.currentSession)
 
-  if (state.currentMessages.length === 0) {
+  if (state.currentMessages.length === 0 && steps.length === 0 && !artifactHtml) {
     container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No messages yet</p>'
+    updateSessionStatusLine()
+    updateRawOutput()
     return
   }
 
-  container.innerHTML = state.currentMessages.map(msg => {
+  const messagesHtml = state.currentMessages.map(msg => {
     const isFrom = msg.from !== 'human'
     const avatar = isFrom ? (msg.from.charAt(0).toUpperCase()) : 'H'
     return `
@@ -1025,6 +1372,14 @@ function renderSessionMessages() {
     `
   }).join('')
 
+  const stepsHtml = steps.length ? `
+    <div class="step-stream">
+      ${steps.map((step, index) => renderStepCard(step, index, steps.length)).join('')}
+    </div>
+  ` : ''
+
+  container.innerHTML = artifactHtml + messagesHtml + stepsHtml
+
   renderStreamingDelta()
 
   // Scroll to bottom
@@ -1032,6 +1387,185 @@ function renderSessionMessages() {
   if (messagesContainer) {
     messagesContainer.scrollTop = messagesContainer.scrollHeight
   }
+}
+
+function renderSessionArtifacts(session) {
+  if (!session || session.status !== 'done' || !session.artifacts) return ''
+  const artifacts = session.artifacts
+  const files = Array.isArray(artifacts.filesChanged) ? artifacts.filesChanged : []
+  const totalAdditions = files.reduce((sum, file) => sum + (Number(file.additions) || 0), 0)
+  const totalDeletions = files.reduce((sum, file) => sum + (Number(file.deletions) || 0), 0)
+  const hasGit = Boolean(artifacts.gitDiffFull || artifacts.gitDiffStat || files.length)
+  const summary = artifacts.summary || '暂无摘要'
+  return `
+    <section class="artifact-card">
+      <div class="artifact-title">产出</div>
+      ${hasGit ? `
+        <div class="artifact-section">
+          <div class="artifact-section-title">📄 文件变更 <span>(${files.length} files, +${totalAdditions} -${totalDeletions})</span></div>
+          <div class="artifact-files">
+            ${files.map(file => renderArtifactFile(file, artifacts.gitDiffFull || '')).join('')}
+          </div>
+        </div>
+      ` : ''}
+      <div class="artifact-section">
+        <div class="artifact-section-title">📋 摘要</div>
+        <div class="artifact-summary">${escapeHtml(summary)}</div>
+      </div>
+      <div class="artifact-actions">
+        <button class="btn btn-secondary btn-sm" onclick="window.copyArtifactSummary()">复制摘要</button>
+        ${artifacts.gitDiffFull ? `<button class="btn btn-secondary btn-sm" onclick="window.toggleFullDiff()">${state.artifactFullDiffVisible ? '收起完整 Diff' : '查看完整 Diff'}</button>` : ''}
+      </div>
+      ${state.artifactFullDiffVisible && artifacts.gitDiffFull ? `
+        <pre class="artifact-diff"><code>${renderHighlightedDiff(artifacts.gitDiffFull)}</code></pre>
+      ` : ''}
+    </section>
+  `
+}
+
+function renderArtifactFile(file, fullDiff) {
+  const key = file.path || ''
+  const expanded = state.expandedArtifactFiles.has(key)
+  const fileDiff = expanded ? extractFileDiff(fullDiff, key) : ''
+  return `
+    <div class="artifact-file">
+      <button class="artifact-file-row" onclick='window.toggleArtifactFile(${jsString(key)})'>
+        <span class="artifact-file-path">${escapeHtml(file.path)}</span>
+        <span class="artifact-file-counts"><span class="additions">+${Number(file.additions) || 0}</span> <span class="deletions">-${Number(file.deletions) || 0}</span></span>
+      </button>
+      ${expanded ? `<pre class="artifact-diff"><code>${renderHighlightedDiff(fileDiff || 'No diff for this file.')}</code></pre>` : ''}
+    </div>
+  `
+}
+
+function renderHighlightedDiff(diff) {
+  if (typeof hljs !== 'undefined') {
+    try {
+      return hljs.highlight(diff, { language: 'diff', ignoreIllegals: true }).value
+    } catch {
+      return escapeHtml(diff)
+    }
+  }
+  return escapeHtml(diff)
+}
+
+function extractFileDiff(fullDiff, path) {
+  if (!fullDiff || !path) return ''
+  const blocks = fullDiff.split(/^diff --git /m).filter(Boolean).map(block => `diff --git ${block}`)
+  return blocks.find(block => block.startsWith(`diff --git a/${path} b/${path}`) || block.includes(` b/${path}\n`)) || ''
+}
+
+function renderStepCard(step, index, total) {
+  const isLast = index === total - 1
+  const isDone = step.type === 'done' || !isLast || state.currentSession?.status !== 'active'
+  const stateClass = step.type === 'done' ? 'done' : isDone ? 'complete' : 'active'
+  const icon = isDone ? '✅' : stepIcon(step.type)
+  const detailKey = `${state.currentSessionId}:${index}`
+  const expanded = state.expandedStepDetails.has(detailKey)
+  return `
+    <div class="step-card ${stateClass} type-${escapeAttr(step.type)}">
+      <div class="step-icon">${icon}</div>
+      <div class="step-body">
+        <div class="step-summary">${escapeHtml(step.summary || '')}</div>
+        ${step.detail ? `
+          <button class="step-detail-toggle" onclick="window.toggleStepDetail(${jsString(detailKey)})">${expanded ? '收起详情' : '展开详情'}</button>
+          <pre class="step-detail ${expanded ? 'visible' : ''}">${escapeHtml(step.detail)}</pre>
+        ` : ''}
+      </div>
+    </div>
+  `
+}
+
+function stepIcon(type) {
+  if (type === 'done') return '✅'
+  if (type === 'read') return '📖'
+  if (type === 'write') return '✏️'
+  if (type === 'exec') return '⚡'
+  if (type === 'think') return '🤔'
+  return '•'
+}
+
+function summarizeRawStatus(content) {
+  const text = (content || '').replace(/\s+/g, ' ').trim()
+  if (!text) return '处理中...'
+  const file = extractUiFile(text)
+  const command = extractUiCommand(text)
+  if (/\b(read file|read_file|reading|read|cat|sed|rg|grep)\b/i.test(text)) return `正在读取 ${file || command || '文件'}...`
+  if (/\b(write|edit|apply_patch|patch|wrote|modified|update file|create file|save)\b/i.test(text)) return `正在修改 ${file || '文件'}...`
+  if (/\b(bash|shell|exec|execute|run command|npm|pnpm|yarn|git|node|tsc|pytest|vitest|make)\b/i.test(text)) return `正在执行 ${command || text.slice(0, 50)}...`
+  if (/thinking|analysis|plan|分析|计划/i.test(text)) return '正在分析...'
+  return text.slice(0, 50)
+}
+
+function extractUiFile(text) {
+  const quoted = text.match(/[`'"]([^`'"]+\.[\w.-]+)[`'"]/)
+  if (quoted?.[1]) return quoted[1]
+  const pathMatch = text.match(/(?:^|\s)((?:\.{1,2}\/|\/)?[\w@.-]+(?:\/[\w@.-]+)+\.[\w.-]+)/)
+  if (pathMatch?.[1]) return pathMatch[1]
+  const simple = text.match(/\b([\w@.-]+\.[A-Za-z0-9_-]{1,8})\b/)
+  return simple?.[1]
+}
+
+function extractUiCommand(text) {
+  const quoted = text.match(/(?:cmd|command|bash|exec|执行|运行)[^`'"]*[`'"]([^`'"]+)[`'"]/i)
+  if (quoted?.[1]) return quoted[1].slice(0, 80)
+  const match = text.match(/\b((?:npm|pnpm|yarn|git|node|npx|tsc|pytest|vitest|make|bash|sh|rg|sed|cat)\s+[^.;\n]{1,80})/i)
+  return match?.[1]?.trim()
+}
+
+function updateSessionStatusLine() {
+  const text = document.getElementById('session-live-status')
+  const line = document.getElementById('session-status-line')
+  if (!text || !line) return
+  const status = state.streamStatus.get(state.currentSessionId)
+    || (state.currentSession?.status === 'active' ? '等待输出...' : state.currentSession?.status || '空闲')
+  text.textContent = status
+  line.classList.toggle('idle', state.currentSession?.status !== 'active')
+}
+
+function updateRawOutput() {
+  const raw = document.getElementById('raw-output')
+  if (!raw) return
+  raw.textContent = state.streamRaw.get(state.currentSessionId) || ''
+}
+
+window.toggleStepDetail = function(key) {
+  if (state.expandedStepDetails.has(key)) {
+    state.expandedStepDetails.delete(key)
+  } else {
+    state.expandedStepDetails.add(key)
+  }
+  renderSessionMessages()
+}
+
+window.toggleRawOutput = function() {
+  state.rawOutputVisible = !state.rawOutputVisible
+  const raw = document.getElementById('raw-output')
+  const label = document.getElementById('raw-output-toggle-label')
+  if (raw) raw.classList.toggle('visible', state.rawOutputVisible)
+  if (label) label.textContent = state.rawOutputVisible ? '隐藏原始输出' : '显示原始输出'
+  updateRawOutput()
+}
+
+window.toggleArtifactFile = function(path) {
+  if (state.expandedArtifactFiles.has(path)) {
+    state.expandedArtifactFiles.delete(path)
+  } else {
+    state.expandedArtifactFiles.add(path)
+  }
+  renderSessionMessages()
+}
+
+window.toggleFullDiff = function() {
+  state.artifactFullDiffVisible = !state.artifactFullDiffVisible
+  renderSessionMessages()
+}
+
+window.copyArtifactSummary = async function() {
+  const summary = state.currentSession?.artifacts?.summary || ''
+  if (!summary) return
+  const ok = await copyText(summary)
+  showToast(ok ? '摘要已复制' : '复制失败', ok ? 'success' : 'error')
 }
 
 window.pauseSession = async function() {
@@ -1139,23 +1673,7 @@ async function renderSettings() {
 
   document.body.innerHTML = `
     <div class="app-layout">
-      <aside class="sidebar">
-        <div class="sidebar-brand">
-          <div class="logo-icon">T</div>
-          <span>Turing Cloud</span>
-        </div>
-        <nav class="sidebar-nav">
-          <a href="/sessions">
-            <span class="nav-icon">◉</span> Sessions
-          </a>
-          <a href="/settings" class="active">
-            <span class="nav-icon">⚙</span> Settings
-          </a>
-        </nav>
-        <div class="sidebar-footer">
-          Turing Cloud v0.1.0
-        </div>
-      </aside>
+      ${renderSidebar('settings')}
 
       <div class="main">
         <header class="topbar">
@@ -1490,10 +2008,222 @@ window.createSession = async function(e) {
   }
 }
 
+window.showNewWorkflowModal = async function() {
+  if (!state.config) await loadConfig()
+  if (!state.agents.length) await loadAgents()
+  const readyAgents = state.agents.filter(agent => agent.status === 'ready')
+  const agents = readyAgents.length ? readyAgents : state.agents
+  const noAgents = agents.length === 0
+  const defaultFrom = agents[0]?.name || ''
+  const defaultTo = agents[1]?.name || agents[0]?.name || ''
+
+  showModal(`
+    <div class="modal-card workflow-modal">
+      <div class="modal-head">
+        <div>
+          <h3>New Workflow</h3>
+          <p>Create a multi-step agent pipeline.</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+      </div>
+      ${noAgents ? `
+        <div class="template-empty-agents" style="margin-bottom: 20px;">
+          <span>No agents configured yet.</span>
+          <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
+        </div>
+      ` : ''}
+      <form onsubmit="window.createWorkflow(event)">
+        <div class="form-group">
+          <label>Pipeline name</label>
+          <input class="input" name="name" required placeholder="Release workflow">
+        </div>
+        <div class="workflow-editor-head">
+          <h3>Steps</h3>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.addWorkflowStep()">+ Add Step</button>
+        </div>
+        <div id="workflow-step-editor" class="workflow-step-editor" data-from="${escapeAttr(defaultFrom)}" data-to="${escapeAttr(defaultTo)}" data-count="0"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary" ${noAgents ? 'disabled' : ''}>Create</button>
+        </div>
+      </form>
+    </div>
+  `)
+  window.addWorkflowStep()
+  window.addWorkflowStep()
+}
+
+window.addWorkflowStep = function() {
+  const editor = document.getElementById('workflow-step-editor')
+  if (!editor) return
+  const index = Number(editor.dataset.count || '0')
+  editor.dataset.count = String(index + 1)
+  const defaultFrom = editor.dataset.from || ''
+  const defaultTo = editor.dataset.to || defaultFrom
+  const row = document.createElement('div')
+  row.className = 'workflow-edit-step'
+  row.draggable = true
+  row.innerHTML = renderWorkflowEditStep(index, defaultFrom, defaultTo)
+  row.addEventListener('dragstart', event => {
+    event.dataTransfer.setData('text/plain', String([...editor.children].indexOf(row)))
+  })
+  row.addEventListener('dragover', event => event.preventDefault())
+  row.addEventListener('drop', event => {
+    event.preventDefault()
+    const from = Number(event.dataTransfer.getData('text/plain'))
+    const rows = [...editor.children]
+    const source = rows[from]
+    if (!source || source === row) return
+    editor.insertBefore(source, rows.indexOf(row) > from ? row.nextSibling : row)
+    refreshWorkflowStepEditor()
+  })
+  editor.appendChild(row)
+  refreshWorkflowStepEditor()
+}
+
+function renderWorkflowEditStep(index, defaultFrom, defaultTo) {
+  const options = state.agents.map(agent => `<option value="${escapeAttr(agent.name)}">${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
+  return `
+    <div class="workflow-edit-title">
+      <span class="drag-handle">↕</span>
+      <strong data-step-label>Step ${index + 1}</strong>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="window.removeWorkflowStep(this)">Remove</button>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Agent A</label>
+        <select class="input" name="from" required>${options.replace(`value="${escapeAttr(defaultFrom)}"`, `value="${escapeAttr(defaultFrom)}" selected`)}</select>
+      </div>
+      <div class="form-group">
+        <label>Agent B</label>
+        <select class="input" name="to" required>${options.replace(`value="${escapeAttr(defaultTo)}"`, `value="${escapeAttr(defaultTo)}" selected`)}</select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Mode</label>
+        <select class="input" name="mode">
+          <option value="collaborate">Collaboration</option>
+          <option value="discuss">Discuss</option>
+          <option value="review">Review</option>
+          <option value="freeform">Freeform</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Max Turns</label>
+        <input class="input" type="number" name="maxRounds" min="1" value="${state.config?.defaults?.maxRounds || 5}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Prompt</label>
+      <textarea class="input" name="initialPrompt" rows="3" required placeholder="Describe this step..."></textarea>
+    </div>
+    <div class="form-group">
+      <label>Depends on</label>
+      <select class="input" name="dependsOn" multiple data-deps></select>
+    </div>
+  `
+}
+
+window.removeWorkflowStep = function(button) {
+  const row = button.closest('.workflow-edit-step')
+  if (row) row.remove()
+  refreshWorkflowStepEditor()
+}
+
+function refreshWorkflowStepEditor() {
+  const editor = document.getElementById('workflow-step-editor')
+  if (!editor) return
+  const rows = [...editor.querySelectorAll('.workflow-edit-step')]
+  rows.forEach((row, index) => {
+    row.querySelector('[data-step-label]').textContent = `Step ${index + 1}`
+    const deps = row.querySelector('[data-deps]')
+    const selected = [...deps.selectedOptions].map(option => option.value)
+    deps.innerHTML = rows.map((_, depIndex) => {
+      if (depIndex === index) return ''
+      const defaultSelected = selected.includes(String(depIndex)) || (selected.length === 0 && depIndex === index - 1)
+      return `<option value="${depIndex}" ${defaultSelected ? 'selected' : ''}>Step ${depIndex + 1}</option>`
+    }).join('')
+  })
+}
+
+window.createWorkflow = async function(e) {
+  e.preventDefault()
+  const fd = new FormData(e.target)
+  const rows = [...document.querySelectorAll('#workflow-step-editor .workflow-edit-step')]
+  const steps = rows.map(row => {
+    const dependsOn = [...row.querySelector('[name="dependsOn"]').selectedOptions]
+      .map(option => Number(option.value))
+      .filter(value => Number.isInteger(value))
+    return compactObject({
+      from: { adapter: row.querySelector('[name="from"]').value },
+      to: { adapter: row.querySelector('[name="to"]').value },
+      initialPrompt: row.querySelector('[name="initialPrompt"]').value.trim(),
+      mode: row.querySelector('[name="mode"]').value,
+      maxRounds: parseInt(row.querySelector('[name="maxRounds"]').value) || undefined,
+      dependsOn: dependsOn.length ? dependsOn : undefined,
+    })
+  })
+
+  try {
+    const pipeline = await api('/api/pipelines', 'POST', {
+      name: String(fd.get('name') || '').trim(),
+      steps,
+    })
+    closeModal()
+    navigate(`/workflow/${pipeline.id}`)
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.toggleWorkflowStep = function(sessionId) {
+  state.expandedWorkflowStep = state.expandedWorkflowStep === sessionId ? null : sessionId
+  renderWorkflowSteps(state.currentPipeline)
+}
+
+window.pauseWorkflow = async function() {
+  if (!state.currentPipelineId) return
+  try {
+    const pipeline = await api(`/api/pipelines/${state.currentPipelineId}/pause`, 'POST')
+    applyPipelineUpdate(pipeline)
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.resumeWorkflow = async function() {
+  if (!state.currentPipelineId) return
+  try {
+    const pipeline = await api(`/api/pipelines/${state.currentPipelineId}/resume`, 'POST')
+    applyPipelineUpdate(pipeline)
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.deleteCurrentWorkflow = async function() {
+  if (!state.currentPipelineId) return
+  if (!await confirmAction({
+    title: 'Delete Workflow',
+    message: 'Delete this workflow permanently?',
+    confirmText: 'Delete',
+    danger: true,
+  })) return
+  try {
+    await api(`/api/pipelines/${state.currentPipelineId}`, 'DELETE')
+    state.pipelines = state.pipelines.filter(pipeline => pipeline.id !== state.currentPipelineId)
+    navigate('/workflows')
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
 window.showAgentModal = async function(name) {
   if (!state.apiKeys.length) await loadApiKeys()
   const existing = state.agents.find(agent => agent.name === name)
-  const keyOptions = providerKeyOptions(existing)
+  const selectedAdapter = existing?.adapter || 'anthropic-api'
+  const selectedModel = existing?.model || defaultModelForAdapter(selectedAdapter)
   showModal(`
     <div class="modal-card">
       <div class="modal-head">
@@ -1511,17 +2241,19 @@ window.showAgentModal = async function(name) {
           </div>
           <div class="form-group">
             <label>Adapter</label>
-            <select class="input" name="adapter" required>
-              ${adapterOption('anthropic-api', existing?.adapter)}
-              ${adapterOption('openai-api', existing?.adapter)}
-              ${adapterOption('zhipu-api', existing?.adapter)}
-              ${adapterOption('custom-api', existing?.adapter)}
+            <select class="input" name="adapter" id="agent-adapter-select" required onchange="window.updateAgentModelOptions()">
+              ${adapterOption('anthropic-api', selectedAdapter)}
+              ${adapterOption('openai-api', selectedAdapter)}
+              ${adapterOption('zhipu-api', selectedAdapter)}
+              ${adapterOption('custom-api', selectedAdapter)}
             </select>
           </div>
         </div>
         <div class="form-group">
           <label>Model</label>
-          <input class="input" name="model" value="${escapeAttr(existing?.model || '')}" placeholder="claude-sonnet-4-20250514">
+          <select class="input" name="model" id="agent-model-select">
+            ${modelOptions(selectedAdapter, selectedModel)}
+          </select>
         </div>
         <div class="form-group">
           <label>Base URL</label>
@@ -1529,9 +2261,8 @@ window.showAgentModal = async function(name) {
         </div>
         <div class="form-group">
           <label>Provider Key</label>
-          <select class="input" name="keyId">
-            ${existing?.hasKey ? '<option value="">Keep current key</option>' : '<option value="">Paste a new key below</option>'}
-            ${keyOptions}
+          <select class="input" name="keyId" id="agent-key-select" data-has-current-key="${existing?.hasKey ? 'true' : 'false'}" data-original-adapter="${escapeAttr(existing?.adapter || '')}">
+            ${agentKeyOptions(selectedAdapter, Boolean(existing?.hasKey))}
           </select>
         </div>
         <div class="form-group">
@@ -1848,11 +2579,46 @@ function adapterOption(value, selected) {
   return `<option value="${escapeAttr(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(value)}</option>`
 }
 
-function providerKeyOptions(existing) {
+function modelOptions(adapter, selected) {
+  const options = MODEL_OPTIONS_BY_ADAPTER[adapter] || []
+  const selectedValue = selected ?? ''
+  const known = options.some(option => option.value === selectedValue)
+  const current = selectedValue && !known
+    ? `<option value="${escapeAttr(selectedValue)}" selected>${escapeHtml(selectedValue)} · current</option>`
+    : ''
+  return current + options
+    .map(option => `<option value="${escapeAttr(option.value)}" ${option.value === selectedValue ? 'selected' : ''}>${escapeHtml(option.label)}</option>`)
+    .join('')
+}
+
+function defaultModelForAdapter(adapter) {
+  return (MODEL_OPTIONS_BY_ADAPTER[adapter] || [])[0]?.value || ''
+}
+
+function agentKeyOptions(adapter, hasCurrentKey) {
+  const defaultOption = hasCurrentKey
+    ? '<option value="">Keep current key</option>'
+    : '<option value="">Paste a new key below</option>'
+  return defaultOption + providerKeyOptionsForAdapter(adapter)
+}
+
+function providerKeyOptionsForAdapter(adapter) {
   return state.apiKeys
-    .filter(key => !key.readOnly && (!existing || providerMatchesAdapter(key.provider, existing.adapter)))
+    .filter(key => !key.readOnly && providerMatchesAdapter(key.provider, adapter))
     .map(key => `<option value="${escapeAttr(key.id)}">${escapeHtml(key.name)} · ${escapeHtml(providerLabel(key.provider))} · ${escapeHtml(key.maskedKey)}</option>`)
     .join('')
+}
+
+window.updateAgentModelOptions = function() {
+  const adapterSelect = document.getElementById('agent-adapter-select')
+  const modelSelect = document.getElementById('agent-model-select')
+  const keySelect = document.getElementById('agent-key-select')
+  const adapter = adapterSelect?.value || 'anthropic-api'
+  if (modelSelect) modelSelect.innerHTML = modelOptions(adapter, defaultModelForAdapter(adapter))
+  if (keySelect) {
+    const canKeepCurrentKey = keySelect.dataset.hasCurrentKey === 'true' && adapter === keySelect.dataset.originalAdapter
+    keySelect.innerHTML = agentKeyOptions(adapter, canKeepCurrentKey)
+  }
 }
 
 function providerMatchesAdapter(provider, adapter) {

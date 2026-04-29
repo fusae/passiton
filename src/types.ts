@@ -28,6 +28,17 @@ export interface SessionLog {
   message: string
 }
 
+export interface SessionArtifacts {
+  gitDiffStat?: string
+  gitDiffFull?: string
+  filesChanged?: Array<{
+    path: string
+    additions: number
+    deletions: number
+  }>
+  summary?: string
+}
+
 export interface SessionContextFile {
   path: string
   content: string
@@ -63,6 +74,8 @@ export interface Session {
     to: string
   }
   templateId?: string
+  gitSnapshot?: string
+  artifacts?: SessionArtifacts
   errorType?: SessionErrorType
   errorMessage?: string
   lastAgentOutput?: string
@@ -254,6 +267,7 @@ export type WsEventType =
   | 'pipeline:error'
   | 'message:new'
   | 'message:delta'
+  | 'message:step'
   | 'snapshot:new'
   | 'agent:status'
   | 'heartbeat'

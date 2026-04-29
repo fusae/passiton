@@ -331,3 +331,48 @@ test('pipeline dependencies inject upstream output and file contents', async () 
     }
   })
 })
+
+test('completed sessions store git artifacts and result summary', async () => {
+  await withTempDb(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turing-artifacts-'))
+    try {
+      execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.name', 'Turing Test'], { cwd: dir, stdio: 'ignore' })
+      const filePath = join(dir, 'result.txt')
+      writeFileSync(filePath, 'base\n', 'utf-8')
+      execFileSync('git', ['add', 'result.txt'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' })
+
+      const router = new Router()
+      router.registerAdapter(new StubAdapter('codex', async () => '[RESULT]Added result output[/RESULT]\n[DONE]'))
+      router.registerAdapter(new StubAdapter('claude-code', async () => {
+        writeFileSync(filePath, 'base\nchanged\n', 'utf-8')
+        execFileSync('git', ['add', 'result.txt'], { cwd: dir, stdio: 'ignore' })
+        execFileSync('git', ['commit', '-m', 'update result'], { cwd: dir, stdio: 'ignore' })
+        return 'changed result.txt'
+      }))
+
+      const session = router.startSession({
+        from: { adapter: 'codex' },
+        to: { adapter: 'claude-code' },
+        initialPrompt: 'produce artifact',
+        cwd: dir,
+        maxRounds: 2,
+      })
+
+      await waitFor(() => state.getSession(session.id)?.status === 'done', 5_000)
+
+      const completed = state.getSession(session.id)
+      assert.ok(completed?.gitSnapshot)
+      assert.equal(completed?.artifacts?.summary, 'Added result output')
+      assert.match(completed?.artifacts?.gitDiffStat ?? '', /result\.txt/)
+      assert.match(completed?.artifacts?.gitDiffFull ?? '', /\+changed/)
+      assert.deepEqual(completed?.artifacts?.filesChanged, [
+        { path: 'result.txt', additions: 1, deletions: 0 },
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

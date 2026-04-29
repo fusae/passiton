@@ -1,11 +1,11 @@
 // Router module — session lifecycle and message routing
 
 import { EventEmitter } from 'events'
-import { execFile } from 'child_process'
+import { execFile, execFileSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
-import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline } from './types.js'
+import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts } from './types.js'
 import * as state from './state.js'
 import { decryptKey } from './keyvault.js'
 import {
@@ -24,6 +24,12 @@ const PIPELINE_DEP_MAX_FILES = 8
 const PIPELINE_DEP_FILE_CHARS = 12_000
 const PIPELINE_DEP_TEXT_CHARS = 4_000
 
+type StreamStep = {
+  type: 'read' | 'write' | 'exec' | 'think' | 'done'
+  summary: string
+  detail?: string
+}
+
 export class Router extends EventEmitter {
   private adapters = new Map<string, Adapter>()
   private userAdapters = new Map<string, Map<string, Adapter>>()
@@ -32,6 +38,7 @@ export class Router extends EventEmitter {
   private runningLoops = new Set<string>()
   private runEpochs = new Map<string, number>()
   private timeoutExtensions = new Map<string, number>()
+  private lastStreamStepSignatures = new Map<string, string>()
 
   constructor(policy: Partial<PolicyConfig> = {}) {
     super()
@@ -205,7 +212,7 @@ export class Router extends EventEmitter {
   async stopSession(id: string): Promise<Session> {
     this.runningLoops.delete(id)
     this.timeoutExtensions.delete(id)
-    const session = state.updateSession(id, { status: 'done' })
+    const session = await this.completeSession(id)
     this.emit('event', { type: 'session:done', payload: session } satisfies WsEvent)
     this.emitLog('info', `Session stopped [${id.slice(0, 8)}]`, id)
     this.handlePipelineSessionFinished(id, 'done')
@@ -259,7 +266,7 @@ export class Router extends EventEmitter {
       if (session?.status === 'active') {
         this.runningLoops.delete(step.sessionId)
         this.nextRunEpoch(step.sessionId)
-        const stopped = state.updateSession(step.sessionId, { status: 'done' })
+        const stopped = await this.completeSession(step.sessionId)
         this.emit('event', { type: 'session:done', payload: stopped } satisfies WsEvent)
       }
     }
@@ -386,7 +393,7 @@ export class Router extends EventEmitter {
         const result = await this.processTurn(sessionId, nextMessage, epoch, nextRoundOverride)
         nextRoundOverride = undefined
         if (result.done) {
-          const updated = state.updateSession(sessionId, { status: 'done' })
+          const updated = await this.completeSession(sessionId)
           this.emit('event', { type: 'session:done', payload: updated } satisfies WsEvent)
           this.emitLog('info', `Session completed [${sessionId.slice(0, 8)}] after ${updated.currentRound} rounds`, sessionId)
           this.handlePipelineSessionFinished(sessionId, 'done')
@@ -451,6 +458,7 @@ export class Router extends EventEmitter {
           from: target.adapter,
         },
       } satisfies WsEvent)
+      this.emitStreamStep(sessionId, line)
     }
     let response: AdapterResponse
     try {
@@ -476,6 +484,7 @@ export class Router extends EventEmitter {
     this.emitLog('info', `Adapter response: ${target.adapter} [${sessionId.slice(0, 8)}] (${content.length} chars)`, sessionId)
 
     this.recordMessage(sessionId, target.adapter, content, round, metadata)
+    this.emitStreamStep(sessionId, content, 'done')
     await this.captureGitSnapshot(sessionId, round)
 
     if (recipient === 'to') {
@@ -568,6 +577,18 @@ export class Router extends EventEmitter {
     return msg
   }
 
+  private emitStreamStep(sessionId: string, output: string, forcedType?: StreamStep['type']): void {
+    const step = forcedType === 'done' ? buildDoneStep(output) : parseStreamStep(output)
+    if (!step) return
+    const signature = `${step.type}:${step.summary}`
+    if (this.lastStreamStepSignatures.get(sessionId) === signature) return
+    this.lastStreamStepSignatures.set(sessionId, signature)
+    this.emit('event', {
+      type: 'message:step',
+      payload: { sessionId, step },
+    } satisfies WsEvent)
+  }
+
   private markError(sessionId: string, err?: unknown, errorRound?: number, errorType?: SessionErrorType): void {
     try {
       const session = state.getSession(sessionId)
@@ -619,6 +640,7 @@ export class Router extends EventEmitter {
       maxRounds: params.maxRounds ?? this.policy.maxRounds,
       approveMode: params.approveMode ?? false,
       cwd: params.cwd,
+      gitSnapshot: captureGitHead(params.cwd),
     })
     this.recordMessage(created.id, 'human', params.initialPrompt, 0)
 
@@ -717,6 +739,13 @@ export class Router extends EventEmitter {
     } catch (err) {
       this.emitLog('warn', `Git diff snapshot failed [${sessionId.slice(0, 8)}]: ${errorMessage(err)}`, sessionId)
     }
+  }
+
+  private async completeSession(sessionId: string): Promise<Session> {
+    const session = state.getSession(sessionId)
+    if (!session) throw new Error(`Session ${sessionId} not found`)
+    const artifacts = await buildSessionArtifacts(session)
+    return state.updateSession(sessionId, { status: 'done', artifacts })
   }
 
   private emitLog(level: 'info' | 'warn' | 'error', message: string, sessionId: string): void {
@@ -969,6 +998,76 @@ function normalizeAdapterResponse(result: string | AdapterResponse): AdapterResp
   }
 }
 
+function parseStreamStep(output: string): StreamStep | undefined {
+  const text = normalizeStreamText(output)
+  if (!text) return undefined
+  const lower = text.toLowerCase()
+  const file = extractStreamFile(text)
+  const command = extractStreamCommand(text)
+
+  if (/\b(read file|read_file|reading|read|cat|sed|rg|grep)\b/i.test(text)) {
+    return {
+      type: 'read',
+      summary: `正在读取 ${file ?? command ?? '文件'}...`,
+      detail: text,
+    }
+  }
+
+  if (/\b(write|edit|apply_patch|patch|wrote|modified|update file|create file|save)\b/i.test(text)) {
+    return {
+      type: 'write',
+      summary: `正在修改 ${file ?? '文件'}...`,
+      detail: text,
+    }
+  }
+
+  if (/\b(bash|shell|exec|execute|run command|npm|pnpm|yarn|git|node|tsc|pytest|vitest|make)\b/i.test(text)) {
+    return {
+      type: 'exec',
+      summary: `正在执行 ${command ?? text.slice(0, 60)}...`,
+      detail: text,
+    }
+  }
+
+  if (lower.includes('thinking') || lower.includes('analysis') || lower.includes('plan') || text.includes('分析') || text.includes('计划')) {
+    return {
+      type: 'think',
+      summary: '正在分析...',
+      detail: text,
+    }
+  }
+
+  return undefined
+}
+
+function buildDoneStep(output: string): StreamStep {
+  return {
+    type: 'done',
+    summary: '已完成本轮输出',
+    detail: normalizeStreamText(output).slice(0, 2000),
+  }
+}
+
+function normalizeStreamText(output: string): string {
+  return output.replace(/\s+/g, ' ').trim()
+}
+
+function extractStreamFile(text: string): string | undefined {
+  const quoted = text.match(/[`'"]([^`'"]+\.[\w.-]+)[`'"]/)
+  if (quoted?.[1]) return quoted[1]
+  const pathMatch = text.match(/(?:^|\s)((?:\.{1,2}\/|\/)?[\w@.-]+(?:\/[\w@.-]+)+\.[\w.-]+)/)
+  if (pathMatch?.[1]) return pathMatch[1]
+  const simple = text.match(/\b([\w@.-]+\.[A-Za-z0-9_-]{1,8})\b/)
+  return simple?.[1]
+}
+
+function extractStreamCommand(text: string): string | undefined {
+  const quoted = text.match(/(?:cmd|command|bash|exec|执行|运行)[^`'"]*[`'"]([^`'"]+)[`'"]/i)
+  if (quoted?.[1]) return truncate(quoted[1], 80)
+  const match = text.match(/\b((?:npm|pnpm|yarn|git|node|npx|tsc|pytest|vitest|make|bash|sh|rg|sed|cat)\s+[^.;\n]{1,80})/i)
+  return match?.[1]?.trim()
+}
+
 function classifyError(message: string): SessionErrorType {
   const normalized = message.toLowerCase()
   if (normalized.includes('policy')) {
@@ -1030,6 +1129,66 @@ function summarizeCompletedRounds(session: Session, messages: Message[], failedR
 function truncate(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value
   return `${value.slice(0, maxLength)}...`
+}
+
+function captureGitHead(cwd?: string): string | undefined {
+  if (!cwd || !fs.existsSync(path.join(cwd, '.git'))) return undefined
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd,
+      timeout: GIT_DIFF_TIMEOUT_MS,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+  } catch {
+    return undefined
+  }
+}
+
+async function buildSessionArtifacts(session: Session): Promise<SessionArtifacts> {
+  const artifacts: SessionArtifacts = {
+    summary: extractSessionSummary(session.id),
+  }
+
+  if (!session.cwd || !session.gitSnapshot) return artifacts
+
+  try {
+    const [gitDiffStat, gitDiffFull] = await Promise.all([
+      runGitDiff(session.cwd, ['diff', session.gitSnapshot, 'HEAD', '--stat']),
+      runGitDiff(session.cwd, ['diff', session.gitSnapshot, 'HEAD']),
+    ])
+    artifacts.gitDiffStat = gitDiffStat
+    artifacts.gitDiffFull = gitDiffFull
+    artifacts.filesChanged = parseGitDiffStat(gitDiffStat)
+  } catch {
+    // Git artifacts are best-effort; non-git dirs and command failures are ignored.
+  }
+
+  return artifacts
+}
+
+function extractSessionSummary(sessionId: string): string {
+  const messages = state.getMessages(sessionId)
+  const lastAgentMessage = [...messages].reverse().find((msg) => msg.from !== 'human')
+  const content = lastAgentMessage?.content ?? messages.at(-1)?.content ?? ''
+  const resultMatch = content.match(/\[RESULT\]([\s\S]*?)\[\/RESULT\]/i)
+  return (resultMatch?.[1] ?? content).trim().slice(0, 300)
+}
+
+function parseGitDiffStat(stat: string): SessionArtifacts['filesChanged'] {
+  return stat
+    .split('\n')
+    .map((line) => {
+      const match = line.match(/^\s*(.+?)\s+\|\s+(?:\d+|-)\s+([+\-]*)\s*$/)
+      if (!match) return undefined
+      const marks = match[2] ?? ''
+      return {
+        path: match[1].trim(),
+        additions: (marks.match(/\+/g) ?? []).length,
+        deletions: (marks.match(/-/g) ?? []).length,
+      }
+    })
+    .filter((item): item is NonNullable<SessionArtifacts['filesChanged']>[number] => Boolean(item))
 }
 
 function runGitDiff(cwd: string, args: string[]): Promise<string> {
