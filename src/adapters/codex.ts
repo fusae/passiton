@@ -1,4 +1,4 @@
-// Codex adapter — uses codex exec -p "prompt"
+// Codex adapter — uses the configured codex CLI command.
 
 import type { Adapter } from './types.js'
 import type { Session, AdapterSendOpts } from '../types.js'

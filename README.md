@@ -74,7 +74,7 @@ node dist/index.js
 - `POST /api/sessions/:id/message`
 - `POST /api/sessions/:id/nudge`
 
-完整说明见 [docs/README.md](/path/to/project/docs/README.md)。
+完整说明见 [docs/README.md](docs/README.md)。
 
 ## 数据保留
 
