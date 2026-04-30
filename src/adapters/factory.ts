@@ -26,54 +26,62 @@ const DISCOVERED_DEFAULTS: Record<string, Omit<AgentConfig, 'command'>> = {
 }
 
 export function createAdapter(agentCfg: AgentConfig): Adapter | undefined {
+  let adapter: Adapter | undefined
   switch (agentCfg.adapter) {
     case 'codex':
-      return new CodexAdapter({
+      adapter = new CodexAdapter({
         command: agentCfg.command,
         args: agentCfg.args,
         timeout: agentCfg.timeout,
         env: agentCfg.env,
       })
+      break
     case 'claude-code':
-      return new ClaudeCodeAdapter({
+      adapter = new ClaudeCodeAdapter({
         command: agentCfg.command,
         args: agentCfg.args,
         timeout: agentCfg.timeout,
         env: agentCfg.env,
       })
+      break
     case 'opencode':
-      return new OpenCodeAdapter({
+      adapter = new OpenCodeAdapter({
         command: agentCfg.command,
         args: agentCfg.args,
         timeout: agentCfg.timeout,
         model: agentCfg.model,
         env: agentCfg.env,
       })
+      break
     case 'anthropic-api':
-      return new AnthropicApiAdapter({
+      adapter = new AnthropicApiAdapter({
         apiKey: requireApiKey(agentCfg),
         model: agentCfg.model,
         baseUrl: agentCfg.baseUrl,
         timeout: agentCfg.timeout,
       })
+      break
     case 'openai-api':
     case 'custom-api':
-      return new OpenAIApiAdapter({
+      adapter = new OpenAIApiAdapter({
         apiKey: requireApiKey(agentCfg),
         model: agentCfg.model,
         baseUrl: agentCfg.baseUrl,
         timeout: agentCfg.timeout,
       })
+      break
     case 'zhipu-api':
-      return new ZhipuApiAdapter({
+      adapter = new ZhipuApiAdapter({
         apiKey: requireApiKey(agentCfg),
         model: agentCfg.model,
         baseUrl: agentCfg.baseUrl,
         timeout: agentCfg.timeout,
       })
+      break
     default:
       return undefined
   }
+  return withAdapterMetadata(adapter, agentCfg.adapter)
 }
 
 export function registerConfiguredAdapters(
@@ -115,6 +123,24 @@ function requireApiKey(agentCfg: AgentConfig): string {
     throw new Error(`[init] apiKey is required for adapter "${agentCfg.adapter}"`)
   }
   return agentCfg.apiKey
+}
+
+function withAdapterMetadata(adapter: Adapter, adapterType: string): Adapter {
+  adapter.config.adapter = adapterType
+  const canUseLocalTools = !isApiAdapterType(adapterType)
+  adapter.capabilities = {
+    tools: canUseLocalTools,
+    fileSystem: canUseLocalTools,
+    shell: canUseLocalTools,
+  }
+  return adapter
+}
+
+function isApiAdapterType(adapterType: string): boolean {
+  return adapterType === 'anthropic-api' ||
+    adapterType === 'openai-api' ||
+    adapterType === 'zhipu-api' ||
+    adapterType === 'custom-api'
 }
 
 export function createDiscoveredAgentConfig(adapter: string, command: string): AgentConfig | undefined {

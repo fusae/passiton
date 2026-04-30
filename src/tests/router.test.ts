@@ -6,15 +6,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Router } from '../router.js'
 import * as state from '../state.js'
-import type { Adapter, AdapterSendOpts, Session } from '../types.js'
+import type { Adapter, AdapterCapabilities, AdapterSendOpts, Session } from '../types.js'
 
 class StubAdapter implements Adapter {
-  readonly config: Record<string, unknown> = {}
+  readonly config: Record<string, unknown>
+  readonly capabilities?: AdapterCapabilities
 
   constructor(
     readonly name: string,
-    private readonly handler: (session: Session, message: string, opts?: AdapterSendOpts) => Promise<string>
-  ) {}
+    private readonly handler: (session: Session, message: string, opts?: AdapterSendOpts) => Promise<string>,
+    config: Record<string, unknown> = {},
+    capabilities?: AdapterCapabilities
+  ) {
+    this.config = config
+    this.capabilities = capabilities
+  }
 
   send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string> {
     return this.handler(session, message, opts)
@@ -24,6 +30,69 @@ class StubAdapter implements Adapter {
     return true
   }
 }
+
+test('API planner tool warning uses adapter capabilities instead of agent name', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    let plannerSystemPrompt = ''
+
+    router.registerAdapter(new StubAdapter('executor', async () => 'implemented'))
+    router.registerUserAdapter('user-api-planner', new StubAdapter(
+      'writer',
+      async (_session, _message, opts) => {
+        plannerSystemPrompt = opts?.systemPrompt ?? ''
+        return '[DONE]'
+      },
+      { adapter: 'anthropic-api' },
+      { tools: false, fileSystem: false, shell: false }
+    ))
+
+    const session = router.startSession({
+      userId: 'user-api-planner',
+      from: { adapter: 'writer' },
+      to: { adapter: 'executor' },
+      initialPrompt: 'change a file',
+      mode: 'collaborate',
+      maxRounds: 2,
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+    assert.match(plannerSystemPrompt, /CANNOT execute tools/)
+    assert.match(plannerSystemPrompt, /Do NOT output XML tool tags/)
+  })
+})
+
+test('local planner with API-looking name does not get API-only warning', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    let plannerSystemPrompt = ''
+
+    router.registerAdapter(new StubAdapter('executor', async () => 'implemented'))
+    router.registerAdapter(new StubAdapter(
+      'claude-api',
+      async (_session, _message, opts) => {
+        plannerSystemPrompt = opts?.systemPrompt ?? ''
+        return '[DONE]'
+      },
+      { adapter: 'claude-code' },
+      { tools: true, fileSystem: true, shell: true }
+    ))
+
+    const session = router.startSession({
+      from: { adapter: 'claude-api' },
+      to: { adapter: 'executor' },
+      initialPrompt: 'change a file',
+      mode: 'collaborate',
+      maxRounds: 2,
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+    assert.doesNotMatch(plannerSystemPrompt, /CANNOT execute tools/)
+    assert.doesNotMatch(plannerSystemPrompt, /Do NOT output XML tool tags/)
+  })
+})
 
 async function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> {
   const startedAt = Date.now()

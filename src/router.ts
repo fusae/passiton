@@ -619,12 +619,18 @@ export class Router extends EventEmitter {
     cwd?: string
   }, initialStatus: 'active' | 'paused'): Session {
     const mode = params.mode ?? 'freeform'
+    const fromAdapter = this.resolveAdapter(params.from.adapter, params.userId)
+    const toAdapter = this.resolveAdapter(params.to.adapter, params.userId)
     const systemPrompts = params.systemPrompts ?? generateSystemPrompts(
       mode,
       params.from,
       params.to,
       params.initialPrompt,
-      params.context
+      params.context,
+      {
+        fromCanUseTools: adapterCanUseTools(fromAdapter),
+        toCanUseTools: adapterCanUseTools(toAdapter),
+      }
     )
 
     const created = state.createSession({
@@ -863,7 +869,11 @@ export class Router extends EventEmitter {
       session.from,
       session.to,
       task,
-      mergedContext
+      mergedContext,
+      {
+        fromCanUseTools: adapterCanUseTools(this.resolveAdapter(session.from.adapter, session.userId)),
+        toCanUseTools: adapterCanUseTools(this.resolveAdapter(session.to.adapter, session.userId)),
+      }
     )
 
     state.updateSession(sessionId, { context: mergedContext, systemPrompts })
@@ -996,6 +1006,10 @@ function normalizeAdapterResponse(result: string | AdapterResponse): AdapterResp
     content: result.content,
     metadata: result.metadata,
   }
+}
+
+function adapterCanUseTools(adapter: Adapter | undefined): boolean {
+  return adapter?.capabilities?.tools ?? true
 }
 
 function parseStreamStep(output: string): StreamStep | undefined {

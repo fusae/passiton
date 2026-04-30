@@ -2,12 +2,14 @@
 
 import type { SessionMode, AgentRef, SessionContext } from './types.js'
 
-// API-only adapters that cannot execute tools or write files
-const API_ONLY_ADAPTERS = ['claude-api', 'anthropic-api', 'openai-api', 'zhipu-api']
-
 interface PromptPair {
   from: string
   to: string
+}
+
+export interface PromptCapabilities {
+  fromCanUseTools?: boolean
+  toCanUseTools?: boolean
 }
 
 const TURING_AWARENESS = 'You are operating inside Turing, an agent-to-agent orchestration system. If the task should be split into parallel or dependent sub-tasks, explicitly propose a Turing pipeline/session plan instead of losing scope in one thread. When your task is complete, wrap your final result or summary in [RESULT]...[/RESULT] tags.'
@@ -26,7 +28,8 @@ export function generateSystemPrompts(
   from: AgentRef,
   to: AgentRef,
   task: string,
-  context?: SessionContext
+  context?: SessionContext,
+  capabilities?: PromptCapabilities
 ): PromptPair {
   const fromName = from.label || from.adapter
   const toName = to.label || to.adapter
@@ -35,9 +38,9 @@ export function generateSystemPrompts(
 
   switch (mode) {
     case 'collaborate': {
-      const fromIsApiOnly = API_ONLY_ADAPTERS.some(a => from.adapter.includes(a) || from.adapter === a)
+      const fromCanUseTools = capabilities?.fromCanUseTools ?? true
 
-      const plannerNoToolWarning = fromIsApiOnly
+      const plannerNoToolWarning = !fromCanUseTools
         ? [
             `CRITICAL: You are an API-based agent — you CANNOT execute tools, write files, or run commands.`,
             `Do NOT output XML tool tags like <write_file>, <bash>, <read_file>, <file_editor>, etc. They will NOT be executed.`,
@@ -47,7 +50,7 @@ export function generateSystemPrompts(
           ].join('\n')
         : ''
 
-      const executorVerifyWarning = fromIsApiOnly
+      const executorVerifyWarning = !fromCanUseTools
         ? `IMPORTANT: ${fromName} cannot execute tools — it can only give you instructions via text. If ${fromName}'s message contains tool-like XML tags (<write_file>, <bash>, etc.), those were NOT executed. You must implement everything yourself. Always verify by reading files or running commands after making changes.`
         : ''
 

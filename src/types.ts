@@ -173,10 +173,17 @@ export interface DiffSnapshot {
   diffFull: string
 }
 
+export interface AdapterCapabilities {
+  tools: boolean
+  fileSystem: boolean
+  shell: boolean
+}
+
 // Adapter interface — one per agent type
 export interface Adapter {
   name: string
   config: Record<string, unknown>
+  capabilities?: AdapterCapabilities
   send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string | AdapterResponse>
   healthCheck(): Promise<boolean>
 }
