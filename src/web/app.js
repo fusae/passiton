@@ -65,6 +65,7 @@ const state = {
   streamStatus: new Map(),
   expandedStepDetails: new Set(),
   expandedArtifactFiles: new Set(),
+  autoFollowMessages: true,
   artifactFullDiffVisible: false,
   rawOutputVisible: false,
   streamFrame: null,
@@ -341,6 +342,7 @@ function handleWsEvent(event) {
         setStreamStatus(event.payload.sessionId, '已完成本轮输出')
         upsertCurrentMessage(event.payload)
         renderSessionMessages()
+        renderSessionPanel(state.currentSession)
       }
       break
     case 'heartbeat':
@@ -447,7 +449,7 @@ function renderStreamingDelta() {
   updateRawOutput()
 
   const messagesContainer = document.getElementById('messages-container')
-  if (messagesContainer) {
+  if (messagesContainer && state.autoFollowMessages) {
     messagesContainer.scrollTop = messagesContainer.scrollHeight
   }
 }
@@ -1189,6 +1191,7 @@ async function renderSession(id) {
   }
   state.currentSession = session
   resetSessionStream(id)
+  state.autoFollowMessages = true
 
   document.body.innerHTML = `
     <div class="app-layout">
@@ -1218,6 +1221,10 @@ async function renderSession(id) {
             <div class="session-chat-messages" id="messages-container">
               <div class="chat-stream" id="messages"></div>
             </div>
+            <div class="message-scroll-controls" aria-label="Message navigation">
+              <button class="scroll-jump-btn" onclick="window.scrollSessionMessages('top')" title="跳到开头">↑</button>
+              <button class="scroll-jump-btn" onclick="window.scrollSessionMessages('bottom')" title="跳到结尾">↓</button>
+            </div>
             <div class="raw-output-panel">
               <button class="raw-output-toggle" onclick="window.toggleRawOutput()">
                 <span id="raw-output-toggle-label">${state.rawOutputVisible ? '隐藏原始输出' : '显示原始输出'}</span>
@@ -1240,6 +1247,7 @@ async function renderSession(id) {
 
   state.currentMessages = session.messages || []
   renderSessionMessages()
+  bindMessageScrollTracking()
   renderSessionPanel(session)
   updateThemeButton()
 }
@@ -1250,7 +1258,7 @@ function renderSessionActions(session) {
     ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.extendSessionTimeout()">+5m</button>' : ''}
     ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.pauseSession()">⏸ Pause</button>' : ''}
     ${session.status === 'paused' ? '<button class="btn btn-primary btn-sm" onclick="window.resumeSession()">▶ Resume</button>' : ''}
-    ${session.status !== 'done' ? '<button class="btn btn-danger btn-sm" onclick="window.stopSession()">■ Stop</button>' : ''}
+    ${session.status === 'active' || session.status === 'paused' ? '<button class="btn btn-danger btn-sm" onclick="window.stopSession()">■ Stop</button>' : ''}
   `
 }
 
@@ -1322,6 +1330,7 @@ function renderSessionPanel(session) {
       <div class="progress-bar">
         <div class="progress-bar-fill" style="width: ${progress}%;"></div>
       </div>
+      ${renderRoundJumpList()}
     </div>
 
     ${session.errorMessage ? `
@@ -1342,9 +1351,12 @@ function renderSessionPanel(session) {
   `
 }
 
-function renderSessionMessages() {
+function renderSessionMessages(options = {}) {
   const container = document.getElementById('messages')
   if (!container) return
+  const { preserveScroll = false, forceScrollBottom = false } = options
+  const messagesContainer = document.getElementById('messages-container')
+  const previousScrollTop = messagesContainer?.scrollTop ?? 0
   const steps = state.streamSteps.get(state.currentSessionId) || []
   const artifactHtml = renderSessionArtifacts(state.currentSession)
 
@@ -1359,9 +1371,9 @@ function renderSessionMessages() {
     const isFrom = msg.from !== 'human'
     const avatar = isFrom ? (msg.from.charAt(0).toUpperCase()) : 'H'
     return `
-      <div class="chat-msg ${isFrom ? 'from' : 'to'}">
+      <div class="chat-msg ${isFrom ? 'from' : 'to'}" id="message-${escapeAttr(msg.id)}" data-round="${escapeAttr(String(msg.round))}">
         <div class="chat-avatar">${avatar}</div>
-        <div>
+        <div class="chat-content">
           <div class="chat-bubble">${renderMarkdown(msg.content)}</div>
           <div class="chat-meta">
             <span>${escapeHtml(msg.from)} · Turn ${msg.round} · ${new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
@@ -1382,9 +1394,12 @@ function renderSessionMessages() {
 
   renderStreamingDelta()
 
-  // Scroll to bottom
-  const messagesContainer = document.getElementById('messages-container')
-  if (messagesContainer) {
+  if (!messagesContainer) return
+  if (preserveScroll) {
+    messagesContainer.scrollTop = previousScrollTop
+    return
+  }
+  if (forceScrollBottom || state.autoFollowMessages) {
     messagesContainer.scrollTop = messagesContainer.scrollHeight
   }
 }
@@ -1463,15 +1478,25 @@ function renderStepCard(step, index, total) {
   const detailKey = `${state.currentSessionId}:${index}`
   const expanded = state.expandedStepDetails.has(detailKey)
   return `
-    <div class="step-card ${stateClass} type-${escapeAttr(step.type)}">
+    <div class="step-card ${stateClass} type-${escapeAttr(step.type)}" data-step-key="${escapeAttr(detailKey)}">
       <div class="step-icon">${icon}</div>
       <div class="step-body">
         <div class="step-summary">${escapeHtml(step.summary || '')}</div>
         ${step.detail ? `
-          <button class="step-detail-toggle" onclick="window.toggleStepDetail(${jsString(detailKey)})">${expanded ? '收起详情' : '展开详情'}</button>
-          <pre class="step-detail ${expanded ? 'visible' : ''}">${escapeHtml(step.detail)}</pre>
+          <button type="button" class="step-detail-toggle" data-step-toggle="${escapeAttr(detailKey)}" onclick="window.toggleStepDetail(${jsString(detailKey)})">${expanded ? '收起详情' : '展开详情'}</button>
+          <pre class="step-detail ${expanded ? 'visible' : ''}" data-step-detail="${escapeAttr(detailKey)}">${escapeHtml(step.detail)}</pre>
         ` : ''}
       </div>
+    </div>
+  `
+}
+
+function renderRoundJumpList() {
+  const rounds = Array.from(new Set(state.currentMessages.map(msg => Number(msg.round)).filter(Number.isFinite))).sort((a, b) => a - b)
+  if (!rounds.length) return ''
+  return `
+    <div class="round-jump-list">
+      ${rounds.map(round => `<button type="button" class="round-jump-btn" onclick="window.scrollSessionRound(${round})">${round === 0 ? 'Start' : `Turn ${round}`}</button>`).join('')}
     </div>
   `
 }
@@ -1529,13 +1554,55 @@ function updateRawOutput() {
   raw.textContent = state.streamRaw.get(state.currentSessionId) || ''
 }
 
+function bindMessageScrollTracking() {
+  const messagesContainer = document.getElementById('messages-container')
+  if (!messagesContainer) return
+  messagesContainer.addEventListener('scroll', () => {
+    state.autoFollowMessages = isNearMessageBottom(messagesContainer)
+  }, { passive: true })
+}
+
+function isNearMessageBottom(container) {
+  return container.scrollHeight - container.scrollTop - container.clientHeight < 80
+}
+
+window.scrollSessionMessages = function(position) {
+  const messagesContainer = document.getElementById('messages-container')
+  if (!messagesContainer) return
+  if (position === 'top') {
+    state.autoFollowMessages = false
+    messagesContainer.scrollTo({ top: 0, behavior: 'smooth' })
+    return
+  }
+  state.autoFollowMessages = true
+  messagesContainer.scrollTo({ top: messagesContainer.scrollHeight, behavior: 'smooth' })
+}
+
+window.scrollSessionRound = function(round) {
+  const messagesContainer = document.getElementById('messages-container')
+  const target = document.querySelector(`.chat-msg[data-round="${round}"]`)
+  if (!messagesContainer || !target) return
+  state.autoFollowMessages = false
+  messagesContainer.scrollTo({
+    top: target.offsetTop - messagesContainer.offsetTop - 16,
+    behavior: 'smooth',
+  })
+}
+
 window.toggleStepDetail = function(key) {
+  state.autoFollowMessages = false
   if (state.expandedStepDetails.has(key)) {
     state.expandedStepDetails.delete(key)
   } else {
     state.expandedStepDetails.add(key)
   }
-  renderSessionMessages()
+  const expanded = state.expandedStepDetails.has(key)
+  document.querySelectorAll('[data-step-detail]').forEach(node => {
+    if (node.dataset.stepDetail === key) node.classList.toggle('visible', expanded)
+  })
+  document.querySelectorAll('[data-step-toggle]').forEach(node => {
+    if (node.dataset.stepToggle === key) node.textContent = expanded ? '收起详情' : '展开详情'
+  })
 }
 
 window.toggleRawOutput = function() {

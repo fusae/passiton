@@ -137,6 +137,7 @@ function statusColor(s: string): string {
     case 'paused':  return `\x1b[33m${s}\x1b[0m`
     case 'done':    return `\x1b[35m${s}\x1b[0m`
     case 'error':   return `\x1b[31m${s}\x1b[0m`
+    case 'stopped': return `\x1b[90m${s}\x1b[0m`
     default:        return s
   }
 }
@@ -747,11 +748,12 @@ async function followSession(sessionId: string): Promise<void> {
       }
 
       if (
-        (evt.type === 'session:done' || evt.type === 'session:error') &&
+        (evt.type === 'session:done' || evt.type === 'session:error' || evt.type === 'session:updated') &&
         (evt.payload as { id?: string; session?: { id: string } })?.id === sessionId
       ) {
-        const payload = evt.payload as { id?: string; errorType?: string; errorMessage?: string; lastAgentOutput?: string; errorRound?: number }
-        const status = evt.type === 'session:done' ? 'done' : 'error'
+        const payload = evt.payload as { id?: string; status?: string; errorType?: string; errorMessage?: string; lastAgentOutput?: string; errorRound?: number }
+        const status = evt.type === 'session:done' ? 'done' : evt.type === 'session:error' ? 'error' : payload.status
+        if (status !== 'done' && status !== 'error' && status !== 'stopped') return
         console.log(`\n  [session ${statusColor(status)}]\n`)
         if (evt.type === 'session:error') {
           if (payload.errorType) console.log(`  errorType: ${payload.errorType}`)
@@ -827,7 +829,7 @@ function usage() {
                 [--context-rules <text>] [--context-text <text>] [--context-files <paths>]
                 "<prompt>"
 
-    turing sessions [--status <active|paused|done|error>]
+    turing sessions [--status <active|paused|done|error|stopped>]
     turing log <session-id>
     turing delete <session-id>
 

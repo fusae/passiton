@@ -483,14 +483,14 @@ function parseAgentRef(value: unknown, field: string): { adapter: string; label?
   }
 }
 
-function parseSessionStatus(value: string | null): 'active' | 'paused' | 'done' | 'error' | null {
+function parseSessionStatus(value: string | null): 'active' | 'paused' | 'done' | 'error' | 'stopped' | null {
   if (value === null) {
     return null
   }
-  if (value === 'active' || value === 'paused' || value === 'done' || value === 'error') {
+  if (value === 'active' || value === 'paused' || value === 'done' || value === 'error' || value === 'stopped') {
     return value
   }
-  throw new HttpError(400, '"status" must be one of active, paused, done, error')
+  throw new HttpError(400, '"status" must be one of active, paused, done, error, stopped')
 }
 
 function parseSessionMode(value: unknown): SessionMode | undefined {

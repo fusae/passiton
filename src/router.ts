@@ -212,10 +212,10 @@ export class Router extends EventEmitter {
   async stopSession(id: string): Promise<Session> {
     this.runningLoops.delete(id)
     this.timeoutExtensions.delete(id)
-    const session = await this.completeSession(id)
-    this.emit('event', { type: 'session:done', payload: session } satisfies WsEvent)
+    this.nextRunEpoch(id)
+    const session = state.updateSession(id, { status: 'stopped' })
+    this.emit('event', { type: 'session:updated', payload: session } satisfies WsEvent)
     this.emitLog('info', `Session stopped [${id.slice(0, 8)}]`, id)
-    this.handlePipelineSessionFinished(id, 'done')
     return session
   }
 

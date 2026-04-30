@@ -1,6 +1,6 @@
 // Core type definitions for Turing
 
-export type SessionStatus = 'active' | 'paused' | 'done' | 'error'
+export type SessionStatus = 'active' | 'paused' | 'done' | 'error' | 'stopped'
 
 // Session modes determine the system prompts and interaction style
 export type SessionMode = 'collaborate' | 'discuss' | 'review' | 'freeform'
@@ -115,6 +115,7 @@ export interface SessionStats {
   paused: number
   done: number
   error: number
+  stopped: number
   successRate: number
   avgRounds: number
   avgDurationMs: number

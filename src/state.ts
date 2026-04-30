@@ -928,6 +928,7 @@ export function getStats(userId?: string): TuringStats {
     paused: 0,
     done: 0,
     error: 0,
+    stopped: 0,
   }
   let totalRounds = 0
   let totalDuration = 0
@@ -975,6 +976,7 @@ export function getStats(userId?: string): TuringStats {
       paused: counts.paused,
       done: counts.done,
       error: counts.error,
+      stopped: counts.stopped,
       successRate: sessions.length > 0 ? counts.done / sessions.length : 0,
       avgRounds: sessions.length > 0 ? totalRounds / sessions.length : 0,
       avgDurationMs: sessions.length > 0 ? totalDuration / sessions.length : 0,

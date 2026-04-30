@@ -2,6 +2,9 @@
 
 import type { SessionMode, AgentRef, SessionContext } from './types.js'
 
+// API-only adapters that cannot execute tools or write files
+const API_ONLY_ADAPTERS = ['claude-api', 'anthropic-api', 'openai-api', 'zhipu-api']
+
 interface PromptPair {
   from: string
   to: string
@@ -31,12 +34,29 @@ export function generateSystemPrompts(
   const contextBlock = formatContextBlock(context)
 
   switch (mode) {
-    case 'collaborate':
+    case 'collaborate': {
+      const fromIsApiOnly = API_ONLY_ADAPTERS.some(a => from.adapter.includes(a) || from.adapter === a)
+
+      const plannerNoToolWarning = fromIsApiOnly
+        ? [
+            `CRITICAL: You are an API-based agent — you CANNOT execute tools, write files, or run commands.`,
+            `Do NOT output XML tool tags like <write_file>, <bash>, <read_file>, <file_editor>, etc. They will NOT be executed.`,
+            `Your messages are plain-text instructions sent to ${toName}. Describe WHAT needs to be done clearly and completely.`,
+            `${toName} has its own tools and will decide how to implement your instructions.`,
+            `Do NOT say [DONE] until ${toName} confirms it has actually completed the work and verified the results.`,
+          ].join('\n')
+        : ''
+
+      const executorVerifyWarning = fromIsApiOnly
+        ? `IMPORTANT: ${fromName} cannot execute tools — it can only give you instructions via text. If ${fromName}'s message contains tool-like XML tags (<write_file>, <bash>, etc.), those were NOT executed. You must implement everything yourself. Always verify by reading files or running commands after making changes.`
+        : ''
+
       return {
         from: [
           `You are "${fromName}", acting as the **planner/director** in a collaboration with "${toName}" (the executor).`,
           `Your role: break down the task into clear, actionable instructions for ${toName}. Review their results and guide next steps.`,
           `You are talking to another AI agent, not a human. Be direct and specific — give instructions, not suggestions.`,
+          plannerNoToolWarning,
           TURING_AWARENESS,
           `When the task is fully complete, end your message with [DONE].`,
           contextBlock,
@@ -46,11 +66,13 @@ export function generateSystemPrompts(
           `You are "${toName}", acting as the **executor** in a collaboration with "${fromName}" (the planner).`,
           `Your role: execute the instructions from ${fromName}. Report results clearly — what you did, what worked, what failed.`,
           `You are talking to another AI agent, not a human. Be direct — report facts, ask clarifying questions if instructions are unclear.`,
+          executorVerifyWarning,
           TURING_AWARENESS,
           `When you believe the task is fully complete, end your message with [DONE].`,
           contextBlock,
         ].filter(Boolean).join('\n'),
       }
+    }
 
     case 'discuss':
       return {
