@@ -39,6 +39,12 @@ npm start
       "args": ["run", "{prompt}", "--dangerously-skip-permissions"],
       "timeout": 300000,
       "model": "gpt-4.1"
+    },
+    "gemini-cli": {
+      "adapter": "gemini-cli",
+      "command": "gemini",
+      "args": ["-p", "{prompt}"],
+      "timeout": 300000
     }
   }
 }
@@ -49,6 +55,7 @@ npm start
 ```bash
 TURING_CODEX_COMMAND=/path/to/codex
 TURING_CLAUDE_COMMAND=/path/to/claude
+TURING_GEMINI_COMMAND=/path/to/gemini
 TURING_OPENCODE_COMMAND=/path/to/opencode
 ```
 

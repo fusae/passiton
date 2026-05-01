@@ -12,6 +12,7 @@ Turing 是一个本地运行的 **AI Agent 通信代理**。它让任意两个 A
 |------|------|
 | **codex** | OpenAI Codex（本机 App） |
 | **claude-code** | Anthropic Claude Code CLI |
+| **gemini-cli** | Google Gemini CLI |
 | **opencode** | OpenCode（支持 GLM、GPT 等多模型） |
 
 ## 怎么用

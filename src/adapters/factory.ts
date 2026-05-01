@@ -2,6 +2,7 @@ import type { AgentConfig, Adapter } from '../types.js'
 import type { Router } from '../router.js'
 import { ClaudeCodeAdapter } from './claude-code.js'
 import { CodexAdapter } from './codex.js'
+import { GeminiAdapter } from './gemini.js'
 import { OpenCodeAdapter } from './opencode.js'
 import { AnthropicApiAdapter } from './api/anthropic.js'
 import { OpenAIApiAdapter } from './api/openai.js'
@@ -21,6 +22,11 @@ const DISCOVERED_DEFAULTS: Record<string, Omit<AgentConfig, 'command'>> = {
   opencode: {
     adapter: 'opencode',
     args: ['run', '{prompt}', '--dangerously-skip-permissions'],
+    timeout: 600_000,
+  },
+  'gemini-cli': {
+    adapter: 'gemini-cli',
+    args: ['-p', '{prompt}'],
     timeout: 600_000,
   },
 }
@@ -46,6 +52,15 @@ export function createAdapter(agentCfg: AgentConfig): Adapter | undefined {
       break
     case 'opencode':
       adapter = new OpenCodeAdapter({
+        command: agentCfg.command,
+        args: agentCfg.args,
+        timeout: agentCfg.timeout,
+        model: agentCfg.model,
+        env: agentCfg.env,
+      })
+      break
+    case 'gemini-cli':
+      adapter = new GeminiAdapter({
         command: agentCfg.command,
         args: agentCfg.args,
         timeout: agentCfg.timeout,

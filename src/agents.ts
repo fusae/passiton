@@ -1,10 +1,11 @@
 import { access } from 'fs/promises'
 import { constants } from 'fs'
-import { delimiter, join } from 'path'
+import { delimiter, dirname, join } from 'path'
+import { homedir } from 'os'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import type { AgentConfig } from './types.js'
-import { createAdapter, createDiscoveredAgentConfig } from './adapters/factory.js'
+import { createAdapter } from './adapters/factory.js'
 import type { Router } from './router.js'
 
 const execFileAsync = promisify(execFile)
@@ -14,6 +15,7 @@ interface DiscoveryPreset {
   name: string
   adapter: string
   commands: string[]
+  envVars?: string[]
   supported: boolean
 }
 
@@ -42,12 +44,29 @@ interface ProbeCacheEntry {
   value: { healthy: boolean; version?: string }
 }
 
+let searchPathCache: string[] | undefined
+let extraSearchPathEntries: string[] = []
+
 const DISCOVERY_PRESETS: DiscoveryPreset[] = [
-  { name: 'codex', adapter: 'codex', commands: ['codex'], supported: true },
-  { name: 'claude-code', adapter: 'claude-code', commands: ['claude'], supported: true },
-  { name: 'opencode', adapter: 'opencode', commands: ['opencode'], supported: true },
+  { name: 'codex', adapter: 'codex', commands: ['codex'], envVars: ['TURING_CODEX_COMMAND'], supported: true },
+  { name: 'claude-code', adapter: 'claude-code', commands: ['claude'], envVars: ['TURING_CLAUDE_COMMAND'], supported: true },
+  { name: 'gemini-cli', adapter: 'gemini-cli', commands: ['gemini'], envVars: ['TURING_GEMINI_COMMAND'], supported: true },
+  { name: 'opencode', adapter: 'opencode', commands: ['opencode'], envVars: ['TURING_OPENCODE_COMMAND'], supported: true },
+  { name: 'amp', adapter: 'amp', commands: ['amp'], supported: false },
   { name: 'aider', adapter: 'aider', commands: ['aider'], supported: false },
+  { name: 'cline', adapter: 'cline', commands: ['cline'], supported: false },
+  { name: 'continue', adapter: 'continue', commands: ['continue', 'cn'], supported: false },
+  { name: 'copilot', adapter: 'copilot', commands: ['copilot'], supported: false },
   { name: 'cursor', adapter: 'cursor', commands: ['cursor-agent', 'cursor'], supported: false },
+  { name: 'devin', adapter: 'devin', commands: ['devin'], supported: false },
+  { name: 'goose', adapter: 'goose', commands: ['goose'], supported: false },
+  { name: 'kiro', adapter: 'kiro', commands: ['kiro'], supported: false },
+  { name: 'kilo-code', adapter: 'kilo-code', commands: ['kilo', 'kilo-code'], supported: false },
+  { name: 'openhands', adapter: 'openhands', commands: ['openhands', 'openhands-cli'], supported: false },
+  { name: 'roo-code', adapter: 'roo-code', commands: ['roo', 'roo-code'], supported: false },
+  { name: 'swe-agent', adapter: 'swe-agent', commands: ['sweagent', 'swe-agent'], supported: false },
+  { name: 'windsurf', adapter: 'windsurf', commands: ['windsurf'], supported: false },
+  { name: 'zed-agent', adapter: 'zed-agent', commands: ['zed'], supported: false },
 ]
 
 export class AgentCatalog {
@@ -83,7 +102,7 @@ export class AgentCatalog {
     if (!this.localCliAgentsEnabled) return
     for (const preset of DISCOVERY_PRESETS) {
       if (this.entries.has(preset.name)) continue
-      const command = await findExecutable(preset.commands)
+      const command = await findExecutable(preset.commands, preset.envVars)
       if (!command) continue
 
       this.entries.set(preset.name, {
@@ -98,16 +117,7 @@ export class AgentCatalog {
   }
 
   registerDiscoveredAdapters(router: Router): void {
-    if (!this.localCliAgentsEnabled) return
-    for (const entry of this.entries.values()) {
-      if (entry.source !== 'discovered' || !entry.supported || !entry.command) continue
-      const config = createDiscoveredAgentConfig(entry.adapter, entry.command)
-      if (!config) continue
-      const adapter = createAdapter(config)
-      if (adapter) {
-        router.registerAdapter(adapter)
-      }
-    }
+    void router
   }
 
   async listAgents(): Promise<AgentInfo[]> {
@@ -150,12 +160,21 @@ export class AgentCatalog {
   }
 }
 
-async function findExecutable(candidates: string[]): Promise<string | undefined> {
-  for (const candidate of candidates) {
+export async function findExecutable(candidates: string[], envVars: string[] = []): Promise<string | undefined> {
+  const envCandidates = envVars
+    .map((name) => process.env[name])
+    .filter((value): value is string => Boolean(value?.trim()))
+
+  for (const candidate of [...envCandidates, ...candidates]) {
     const found = await resolveCommand(candidate)
     if (found) return found
   }
   return undefined
+}
+
+export function setExtraAgentSearchPathsForTesting(entries: string[]): void {
+  extraSearchPathEntries = entries
+  searchPathCache = undefined
 }
 
 async function resolveCommand(command: string): Promise<string | undefined> {
@@ -163,8 +182,7 @@ async function resolveCommand(command: string): Promise<string | undefined> {
     return await isExecutable(command) ? command : undefined
   }
 
-  const pathEntries = (process.env.PATH ?? '').split(delimiter).filter(Boolean)
-  for (const entry of pathEntries) {
+  for (const entry of await getSearchPathEntries()) {
     const fullPath = join(entry, command)
     if (await isExecutable(fullPath)) {
       return fullPath
@@ -172,6 +190,61 @@ async function resolveCommand(command: string): Promise<string | undefined> {
   }
 
   return undefined
+}
+
+async function getSearchPathEntries(): Promise<string[]> {
+  if (searchPathCache) return searchPathCache
+
+  const home = homedir()
+  const entries = [
+    ...extraSearchPathEntries,
+    ...(process.env.PATH ?? '').split(delimiter),
+    dirname(process.execPath),
+    join(home, '.local', 'bin'),
+    join(home, 'bin'),
+    join(home, '.npm-global', 'bin'),
+    join(home, '.npm', 'bin'),
+    join(home, '.bun', 'bin'),
+    join(home, '.deno', 'bin'),
+    join(home, '.cargo', 'bin'),
+    join(home, '.yarn', 'bin'),
+    join(home, 'Library', 'pnpm'),
+    join(home, 'Library', 'Application Support', 'fnm', 'aliases', 'default', 'bin'),
+    '/opt/homebrew/bin',
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',
+    '/usr/local/sbin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+    ...await packageManagerBins(),
+  ]
+
+  searchPathCache = Array.from(new Set(entries.filter(Boolean)))
+  return searchPathCache
+}
+
+async function packageManagerBins(): Promise<string[]> {
+  const probes: Array<[string, string[]]> = [
+    ['npm', ['bin', '-g']],
+    ['pnpm', ['bin', '-g']],
+    ['yarn', ['global', 'bin']],
+    ['bun', ['pm', 'bin', '-g']],
+  ]
+  const bins: string[] = []
+
+  for (const [command, args] of probes) {
+    try {
+      const { stdout } = await execFileAsync(command, args, { timeout: 2_000 })
+      const path = String(stdout).trim()
+      if (path && !path.includes('\n')) bins.push(path)
+    } catch {
+      // Package manager is not installed or does not expose a global bin.
+    }
+  }
+
+  return bins
 }
 
 async function isExecutable(filePath: string): Promise<boolean> {

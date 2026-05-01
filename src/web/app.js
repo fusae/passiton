@@ -1737,19 +1737,18 @@ async function renderSettings() {
   await loadConfig()
   await loadAgents()
   await loadApiKeys()
-  const localCliEnabled = Boolean(state.config?.features?.localCliAgents)
-  const localCliTab = localCliEnabled ? '<button class="tab-btn" data-tab="local-cli" onclick="window.switchSettingsTab(\'local-cli\')">Local CLI Agents</button>' : ''
-  const localCliPanel = localCliEnabled ? `
+  const localCliTab = '<button class="tab-btn" data-tab="local-cli" onclick="window.switchSettingsTab(\'local-cli\')">Local CLI Agents</button>'
+  const localCliPanel = `
             <div id="tab-local-cli" class="tab-panel" data-tab="local-cli">
               <div class="flex-between mb-24">
                 <div>
                   <h3>Local CLI Agents</h3>
-                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Available only on this machine when enabled by configuration</p>
+                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Discovered on this machine; add the ones you want to use in sessions</p>
                 </div>
               </div>
               <div class="agent-list" id="local-cli-list"></div>
             </div>
-  ` : ''
+  `
 
   document.body.innerHTML = `
     <div class="app-layout">
@@ -1897,16 +1896,58 @@ function renderLocalCliAgentsList() {
     container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No local CLI agents available</p>'
     return
   }
-  container.innerHTML = agents.map(agent => `
+  container.innerHTML = agents.map(agent => {
+    const canAdd = agent.source === 'discovered'
+    const canDelete = agent.source === 'configured'
+    const badgeClass = agent.status === 'ready' ? 'active' : agent.status === 'discovered' ? 'paused' : 'error'
+    return `
     <div class="agent-item">
       <div class="agent-icon">${escapeHtml(agent.name.charAt(0).toUpperCase())}</div>
       <div class="agent-info">
         <div class="agent-name">${escapeHtml(agent.name)}</div>
         <div class="agent-model">${escapeHtml(agent.adapter)} · ${escapeHtml(agent.command || '')}${agent.version ? ` · ${escapeHtml(agent.version)}` : ''}</div>
       </div>
-      <span class="badge badge-${agent.status === 'ready' ? 'active' : 'error'}">${escapeHtml(agent.status)}</span>
+      <span class="badge badge-${badgeClass}">${escapeHtml(agent.status)}</span>
+      <div class="agent-actions">
+        ${canAdd ? `<button class="btn btn-primary btn-sm" onclick='window.addLocalCliAgent(${jsString(agent.name)})'>Add</button>` : ''}
+        ${canDelete ? `<button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteLocalCliAgent(${jsString(agent.name)})'>Delete</button>` : ''}
+      </div>
     </div>
-  `).join('')
+  `}).join('')
+}
+
+window.addLocalCliAgent = async function(name) {
+  const agent = state.agents.find(item => item.kind === 'local' && item.name === name)
+  if (!agent?.command) return
+  try {
+    state.config = await api('/api/config/agents', 'POST', {
+      name: agent.name,
+      adapter: agent.adapter,
+      command: agent.command,
+    })
+    await loadAgents()
+    renderAgentsList()
+    renderLocalCliAgentsList()
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.deleteLocalCliAgent = async function(name) {
+  if (!await confirmAction({
+    title: 'Remove Local CLI Agent',
+    message: `Remove local CLI agent "${name}" from sessions?`,
+    confirmText: 'Remove',
+    danger: true,
+  })) return
+  try {
+    state.config = await api(`/api/config/agents/${encodeURIComponent(name)}`, 'DELETE')
+    await loadAgents()
+    renderAgentsList()
+    renderLocalCliAgentsList()
+  } catch (err) {
+    showToast(err.message)
+  }
 }
 
 window.switchSettingsTab = function(tab) {

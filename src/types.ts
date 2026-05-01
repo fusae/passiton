@@ -236,8 +236,9 @@ export interface ApiAgentInfo {
   baseUrl?: string
   hasKey: boolean
   keyMasked?: string
-  status: 'ready' | 'no_key' | 'invalid'
+  status: 'ready' | 'no_key' | 'invalid' | 'discovered'
   kind?: 'api' | 'local'
+  source?: 'configured' | 'discovered'
   command?: string
   version?: string
 }

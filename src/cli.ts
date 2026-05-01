@@ -207,11 +207,10 @@ async function serverStart() {
 
   initDb(undefined, { messageRetentionMs: config.policy.messageRetentionMs })
   const router = new Router(config.policy)
-  const agentCatalog = new AgentCatalog(config.agents)
+  const agentCatalog = new AgentCatalog(config.agents, true)
   await agentCatalog.discover()
   registerConfiguredAdapters(router, config.agents)
   registerPersistedUserAgents(router)
-  agentCatalog.registerDiscoveredAdapters(router)
 
   const server = createServer(router, config.server.port, agentCatalog)
   installGracefulShutdown(server)

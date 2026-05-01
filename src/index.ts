@@ -17,13 +17,12 @@ async function main(): Promise<void> {
   // Build router with policy from config
   const router = new Router(config.policy)
   const agents = activeAgents(config)
-  const agentCatalog = new AgentCatalog(agents, config.features.localCliAgents)
+  const agentCatalog = new AgentCatalog(agents, true)
   await agentCatalog.discover()
 
   // Register adapters based on config
   registerConfiguredAdapters(router, agents)
   registerPersistedUserAgents(router)
-  agentCatalog.registerDiscoveredAdapters(router)
 
   // Start HTTP + WebSocket server
   const server = createServer(router, config.server.port, agentCatalog)

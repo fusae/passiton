@@ -224,6 +224,17 @@ test('factory requires apiKey for API adapters', () => {
   assert.equal(createAdapter({ adapter: 'zhipu-api', apiKey: 'zhipu-test' })?.name, 'zhipu-api')
 })
 
+test('factory creates Gemini CLI adapter', () => {
+  const adapter = createAdapter({
+    adapter: 'gemini-cli',
+    command: 'gemini',
+    args: ['-p', '{prompt}'],
+  })
+
+  assert.equal(adapter?.name, 'gemini-cli')
+  assert.deepEqual(adapter?.config.args, ['-p', '{prompt}'])
+})
+
 function mockFetch(handler: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>): void {
   globalThis.fetch = handler as typeof fetch
 }

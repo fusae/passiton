@@ -8,8 +8,8 @@ import type { AppConfig, SessionMode } from './types.js'
 const CONFIG_PATH = join(homedir(), '.turing', 'config.json')
 const DEFAULT_CODEX_COMMAND = process.env.TURING_CODEX_COMMAND ?? 'codex'
 const DEFAULT_CLAUDE_COMMAND = process.env.TURING_CLAUDE_COMMAND ?? 'claude'
+const DEFAULT_GEMINI_COMMAND = process.env.TURING_GEMINI_COMMAND ?? 'gemini'
 const DEFAULT_OPENCODE_COMMAND = process.env.TURING_OPENCODE_COMMAND ?? 'opencode'
-const LOCAL_CLI_ADAPTERS = new Set(['codex', 'claude-code', 'opencode'])
 
 export const DEFAULT_CONFIG: AppConfig = {
   server: {
@@ -44,6 +44,12 @@ export const LOCAL_CLI_AGENT_DEFAULTS: Record<string, AppConfig['agents'][string
       adapter: 'claude-code',
       command: DEFAULT_CLAUDE_COMMAND,
       args: ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
+      timeout: 600_000,
+    },
+    'gemini-cli': {
+      adapter: 'gemini-cli',
+      command: DEFAULT_GEMINI_COMMAND,
+      args: ['-p', '{prompt}'],
       timeout: 600_000,
     },
     opencode: {
@@ -222,15 +228,8 @@ function assertSessionMode(value: unknown, field: string): asserts value is Sess
   }
 }
 
-function isLocalCliAdapter(adapter: string): boolean {
-  return LOCAL_CLI_ADAPTERS.has(adapter)
-}
-
 export function activeAgents(config: AppConfig): AppConfig['agents'] {
-  if (config.features.localCliAgents) return config.agents
-  return Object.fromEntries(
-    Object.entries(config.agents).filter(([, agent]) => !isLocalCliAdapter(agent.adapter))
-  )
+  return config.agents
 }
 
 function parseBooleanEnv(value: string | undefined): boolean | undefined {

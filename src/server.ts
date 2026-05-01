@@ -252,7 +252,7 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
   const command = requireNonEmptyString(data.command, 'command')
   const defaults = createDiscoveredAgentConfig(adapter, command)
   if (!defaults) {
-    throw new HttpError(400, '"adapter" must be one of claude-code, codex, opencode')
+    throw new HttpError(400, '"adapter" must be one of claude-code, codex, gemini-cli, opencode')
   }
 
   const env = parseEnv(data.env, 'env')
@@ -306,17 +306,10 @@ function agentNameFromPath(pathname: string): string | undefined {
 async function reloadAgents(router: Router, agentCatalog: AgentCatalog, config: AppConfig): Promise<void> {
   const agents = activeAgents(config)
   router.clearAdapters()
-  agentCatalog.setLocalCliAgentsEnabled(config.features.localCliAgents)
+  agentCatalog.setLocalCliAgentsEnabled(true)
   agentCatalog.setConfiguredAgents(agents)
   await agentCatalog.discover()
   registerConfiguredAdapters(router, agents)
-  agentCatalog.registerDiscoveredAdapters(router)
-}
-
-function assertLocalCliAgentsEnabled(): void {
-  if (!loadConfig().features.localCliAgents) {
-    throw new HttpError(404, 'Local CLI Agents are disabled')
-  }
 }
 
 function decryptUserAgentKey(record: state.UserAgentRecord): string | undefined {
@@ -364,7 +357,7 @@ async function listAgentModels(userId: string, agentCatalog?: AgentCatalog): Pro
     ...userApi,
     ...globalApi.filter((agent) => !userNames.has(agent.name)),
   ]
-  if (!current.features.localCliAgents || !agentCatalog) return apiAgents
+  if (!agentCatalog) return apiAgents
 
   const takenNames = new Set(apiAgents.map((agent) => agent.name))
   const localAgents = (await agentCatalog.listAgents())
@@ -375,8 +368,11 @@ async function listAgentModels(userId: string, agentCatalog?: AgentCatalog): Pro
       provider: 'Local CLI',
       model: agent.version,
       hasKey: true,
-      status: agent.healthy && agent.availableForSessions ? 'ready' : 'invalid',
+      status: agent.source === 'configured'
+        ? (agent.healthy && agent.availableForSessions ? 'ready' : 'invalid')
+        : (agent.healthy ? 'discovered' : 'invalid'),
       kind: 'local',
+      source: agent.source,
       command: agent.command,
       version: agent.version,
     }))
@@ -856,7 +852,6 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // POST /api/config/agents
       if (pathname === '/api/config/agents' && method === 'POST') {
-        assertLocalCliAgentsEnabled()
         const current = loadConfig()
         const { name, config } = parseAgentConfigBody(await parseBody(req))
         if (current.agents[name]) {
@@ -874,7 +869,6 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       const configAgentName = agentNameFromPath(pathname)
       if (configAgentName && method === 'PUT') {
-        assertLocalCliAgentsEnabled()
         const current = loadConfig()
         const existing = current.agents[configAgentName]
         if (!existing) return json(res, 404, { error: 'Not found' })
@@ -893,12 +887,8 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       }
 
       if (configAgentName && method === 'DELETE') {
-        assertLocalCliAgentsEnabled()
         const current = loadConfig()
         if (!current.agents[configAgentName]) return json(res, 404, { error: 'Not found' })
-        if (Object.keys(current.agents).length <= 1) {
-          throw new HttpError(400, 'At least one agent is required')
-        }
         const agents = { ...current.agents }
         delete agents[configAgentName]
         const updated: AppConfig = { ...current, agents }
