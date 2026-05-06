@@ -750,6 +750,11 @@ function renderLogin() {
     </div>
   `
   updateThemeButton()
+  setTimeout(() => {
+    if (!getValidAuthToken() && typeof window.handleLocalLogin === 'function') {
+      window.handleLocalLogin()
+    }
+  }, 0)
 }
 
 window.handleLogin = async function(e) {

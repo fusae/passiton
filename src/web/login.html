@@ -97,7 +97,7 @@
     }
 
     document.querySelectorAll('.auth-form').forEach((form) => form.addEventListener('submit', submitAuth))
-    document.getElementById('local-login-button').addEventListener('click', async () => {
+    async function localLogin() {
       const btn = document.getElementById('local-login-button')
       const originalText = btn.textContent
       try {
@@ -118,7 +118,10 @@
         btn.disabled = false
         btn.textContent = originalText
       }
-    })
+    }
+
+    document.getElementById('local-login-button').addEventListener('click', localLogin)
+    setTimeout(localLogin, 0)
     document.getElementById('forgot-password-link').addEventListener('click', (event) => {
       event.preventDefault()
       showToast('Password reset is not configured yet', 'info')

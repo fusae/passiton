@@ -75,7 +75,10 @@ class HttpError extends Error {
 
 function json(res: http.ServerResponse, status: number, data: unknown): void {
   const body = JSON.stringify(data)
-  res.writeHead(status, { 'Content-Type': 'application/json' })
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+  })
   res.end(body)
 }
 
@@ -142,7 +145,10 @@ function serveStatic(res: http.ServerResponse, filePath: string): void {
   const mime = MIME[ext] ?? 'application/octet-stream'
   try {
     const content = fs.readFileSync(resolvedPath)
-    res.writeHead(200, { 'Content-Type': mime })
+    res.writeHead(200, {
+      'Content-Type': mime,
+      'Cache-Control': 'no-store',
+    })
     res.end(content)
   } catch {
     res.writeHead(404)
