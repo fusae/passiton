@@ -32,6 +32,7 @@
         <button class="modal-submit auth-submit" type="submit">Login</button>
         <a id="forgot-password-link" class="auth-link" href="#">Forgot password?</a>
       </form>
+      <button id="local-login-button" class="modal-submit auth-submit" type="button" style="margin-top: 12px;">Continue as Local User</button>
 
     </section>
   </main>
@@ -96,6 +97,28 @@
     }
 
     document.querySelectorAll('.auth-form').forEach((form) => form.addEventListener('submit', submitAuth))
+    document.getElementById('local-login-button').addEventListener('click', async () => {
+      const btn = document.getElementById('local-login-button')
+      const originalText = btn.textContent
+      try {
+        btn.disabled = true
+        btn.textContent = 'Continuing...'
+        const res = await fetch(`${API_BASE}/api/auth/local`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        })
+        const data = await res.json().catch(() => null)
+        if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+        localStorage.setItem(TOKEN_KEY, data.token)
+        window.location.href = API_BASE ? `${API_BASE}/sessions` : '/sessions'
+      } catch (err) {
+        showToast(err.message || 'Local login failed', 'error')
+      } finally {
+        btn.disabled = false
+        btn.textContent = originalText
+      }
+    })
     document.getElementById('forgot-password-link').addEventListener('click', (event) => {
       event.preventDefault()
       showToast('Password reset is not configured yet', 'info')

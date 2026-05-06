@@ -743,6 +743,9 @@ function renderLogin() {
             Login
           </button>
         </form>
+        <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-top: 12px;" onclick="window.handleLocalLogin()">
+          Continue as Local User
+        </button>
       </div>
     </div>
   `
@@ -758,6 +761,17 @@ window.handleLogin = async function(e) {
 
   try {
     const data = await api('/api/auth/login', 'POST', { email, password })
+    setAuthToken(data.token)
+    state.user = data.user
+    navigate('/sessions')
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.handleLocalLogin = async function() {
+  try {
+    const data = await api('/api/auth/local', 'POST', {})
     setAuthToken(data.token)
     state.user = data.user
     navigate('/sessions')

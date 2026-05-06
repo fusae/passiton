@@ -136,6 +136,25 @@ export function loginUser(email: string, password: string): { user: AuthUser; to
   return { user, token: signJwt(user) }
 }
 
+export function loginLocalUser(email?: string): { user: AuthUser; token: string } {
+  const normalizedEmail = email ? normalizeEmail(email) : undefined
+  const existing = normalizedEmail ? state.getUserByEmail(normalizedEmail) : state.getPrimaryUser()
+  if (existing) {
+    const user = { userId: existing.id, email: existing.email }
+    return { user, token: signJwt(user) }
+  }
+
+  const salt = crypto.randomBytes(16).toString('hex')
+  const created = state.createUser({
+    id: crypto.randomUUID(),
+    email: normalizedEmail || 'local@turing.local',
+    salt,
+    passwordHash: hashPassword(crypto.randomBytes(32).toString('hex'), salt),
+  })
+  const user = { userId: created.id, email: created.email }
+  return { user, token: signJwt(user) }
+}
+
 export function createUserToken(userId: string, name?: string): { id: string; token: string; name: string; createdAt: number } {
   const token = `turing_${crypto.randomBytes(32).toString('hex')}`
   const record = state.createApiToken({

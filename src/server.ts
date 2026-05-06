@@ -15,6 +15,7 @@ import {
   authenticateRequest,
   createUserToken,
   listUserTokens,
+  loginLocalUser,
   loginUser,
   registerUser,
   revokeUserToken,
@@ -712,6 +713,17 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       if (pathname === '/api/auth/login' && method === 'POST') {
         const { email, password } = parseAuthBody(await parseBody(req))
         const result = loginUser(email, password)
+        res.setHeader('Set-Cookie', authCookie(result.token))
+        return json(res, 200, { token: result.token, user: result.user })
+      }
+
+      // POST /api/auth/local
+      if (pathname === '/api/auth/local' && method === 'POST') {
+        const config = loadConfig()
+        if (!config.auth?.localAccess) {
+          throw new HttpError(403, 'Local access is disabled')
+        }
+        const result = loginLocalUser(config.auth.localUserEmail)
         res.setHeader('Set-Cookie', authCookie(result.token))
         return json(res, 200, { token: result.token, user: result.user })
       }

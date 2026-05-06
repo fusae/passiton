@@ -6,7 +6,8 @@
     "localCliAgents": false
   },
   "auth": {
-    "allowRegistration": false
+    "allowRegistration": false,
+    "localAccess": true
   },
   "agents": {},
   "policy": {

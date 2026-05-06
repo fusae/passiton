@@ -99,6 +99,22 @@ test('POST /api/auth/register is disabled by default', async () => {
   }, { allowRegistration: false })
 })
 
+test('POST /api/auth/local returns a local user token', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/auth/local`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+    assert.equal(response.status, 200)
+    const payload = await response.json() as { token: string; user: { userId: string; email: string } }
+    assert.equal(payload.user.email, 'local@turing.local')
+
+    const stats = await fetch(`${baseUrl}/api/stats`, { headers: authHeaders(payload.token) })
+    assert.equal(stats.status, 200)
+  }, { allowRegistration: false })
+})
+
 test('agent CRUD stores user API model configs', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'agents@example.com')

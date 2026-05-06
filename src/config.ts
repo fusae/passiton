@@ -17,6 +17,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   },
   auth: {
     allowRegistration: false,
+    localAccess: true,
   },
   defaults: {
     maxRounds: 20,
@@ -159,6 +160,8 @@ function normalizeConfig(config: AppConfig): AppConfig {
   const auth = {
     ...config.auth,
     allowRegistration: parseBooleanEnv(process.env.TURING_ALLOW_REGISTRATION) ?? config.auth?.allowRegistration ?? false,
+    localAccess: parseBooleanEnv(process.env.TURING_LOCAL_ACCESS) ?? config.auth?.localAccess ?? true,
+    localUserEmail: process.env.TURING_LOCAL_USER_EMAIL ?? config.auth?.localUserEmail,
   }
   const defaults = {
     maxRounds: config.defaults?.maxRounds ?? config.policy?.maxRounds ?? DEFAULT_CONFIG.defaults.maxRounds,

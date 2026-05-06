@@ -354,6 +354,18 @@ export function getUserByEmail(email: string): UserRecord | undefined {
   return row ? rowToUser(row) : undefined
 }
 
+export function getPrimaryUser(): UserRecord | undefined {
+  const row = db.prepare(`
+    SELECT users.*
+    FROM users
+    LEFT JOIN sessions ON sessions.user_id = users.id
+    GROUP BY users.id
+    ORDER BY COUNT(sessions.id) DESC, users.created_at ASC
+    LIMIT 1
+  `).get() as Record<string, unknown> | undefined
+  return row ? rowToUser(row) : undefined
+}
+
 export function createApiToken(params: { id: string; userId: string; tokenHash: string; tokenLast4: string; name: string }): ApiTokenRecord {
   const now = Date.now()
   db.prepare(`
