@@ -18,10 +18,7 @@
         <p>AI agent sessions for production teams</p>
       </div>
 
-      <div class="auth-tabs" role="tablist">
-        <button class="auth-tab active" type="button" data-auth-tab="login">Login</button>
-        <button class="auth-tab" type="button" data-auth-tab="register">Register</button>
-      </div>
+      <p class="auth-link" style="text-align: center; margin-bottom: 18px;">Sign in with your existing local account.</p>
 
       <form id="login-form" class="auth-form" data-auth-form="login">
         <div class="form-row">
@@ -36,21 +33,6 @@
         <a id="forgot-password-link" class="auth-link" href="#">Forgot password?</a>
       </form>
 
-      <form id="register-form" class="auth-form hidden" data-auth-form="register">
-        <div class="form-row">
-          <label>Email</label>
-          <input name="email" type="email" autocomplete="email" required />
-        </div>
-        <div class="form-row">
-          <label>Password</label>
-          <input name="password" type="password" autocomplete="new-password" minlength="8" required />
-        </div>
-        <div class="form-row">
-          <label>Confirm Password</label>
-          <input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
-        </div>
-        <button class="modal-submit auth-submit" type="submit">Create Account</button>
-      </form>
     </section>
   </main>
 
@@ -81,10 +63,8 @@
       const fd = new FormData(form)
       const email = String(fd.get('email') || '').trim()
       const password = String(fd.get('password') || '')
-      const confirmPassword = String(fd.get('confirmPassword') || '')
       if (!emailRe.test(email)) throw new Error('Enter a valid email address')
       if (password.length < 8) throw new Error('Password must be at least 8 characters')
-      if (mode === 'register' && password !== confirmPassword) throw new Error('Passwords do not match')
       return { email, password }
     }
 
@@ -97,7 +77,7 @@
       try {
         const body = validateAuthForm(form, mode)
         btn.disabled = true
-        btn.textContent = mode === 'login' ? 'Logging in...' : 'Creating...'
+        btn.textContent = 'Logging in...'
         const res = await fetch(`${API_BASE}/api/auth/${mode}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -114,16 +94,6 @@
         btn.textContent = originalText
       }
     }
-
-    document.querySelectorAll('.auth-tab').forEach((tab) => {
-      tab.addEventListener('click', () => {
-        const target = tab.dataset.authTab
-        document.querySelectorAll('.auth-tab').forEach((item) => item.classList.toggle('active', item === tab))
-        document.querySelectorAll('.auth-form').forEach((form) => {
-          form.classList.toggle('hidden', form.dataset.authForm !== target)
-        })
-      })
-    })
 
     document.querySelectorAll('.auth-form').forEach((form) => form.addEventListener('submit', submitAuth))
     document.getElementById('forgot-password-link').addEventListener('click', (event) => {

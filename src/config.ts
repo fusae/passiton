@@ -15,7 +15,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   server: {
     port: 4590,
   },
-  auth: {},
+  auth: {
+    allowRegistration: false,
+  },
   defaults: {
     maxRounds: 20,
     mode: 'collaborate',
@@ -154,6 +156,10 @@ function isApiAdapter(adapter: string): boolean {
 }
 
 function normalizeConfig(config: AppConfig): AppConfig {
+  const auth = {
+    ...config.auth,
+    allowRegistration: parseBooleanEnv(process.env.TURING_ALLOW_REGISTRATION) ?? config.auth?.allowRegistration ?? false,
+  }
   const defaults = {
     maxRounds: config.defaults?.maxRounds ?? config.policy?.maxRounds ?? DEFAULT_CONFIG.defaults.maxRounds,
     mode: config.defaults?.mode ?? DEFAULT_CONFIG.defaults.mode,
@@ -166,6 +172,7 @@ function normalizeConfig(config: AppConfig): AppConfig {
 
   return {
     ...config,
+    auth,
     defaults,
     features,
     agents: config.agents ?? {},

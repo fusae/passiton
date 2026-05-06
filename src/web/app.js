@@ -726,9 +726,8 @@ function renderLogin() {
           <p style="color: var(--text-secondary); font-size: 0.9rem;">Agent Sessions Platform</p>
         </div>
 
-        <div class="tabs" style="margin-bottom: 24px;">
-          <button class="tab-btn active" onclick="window.switchAuthTab('login')">Login</button>
-          <button class="tab-btn" onclick="window.switchAuthTab('register')">Register</button>
+        <div style="margin-bottom: 24px; color: var(--text-secondary); font-size: 0.9rem;">
+          Sign in with your existing local account.
         </div>
 
         <form id="login-form" class="tab-panel active" onsubmit="window.handleLogin(event)">
@@ -744,37 +743,10 @@ function renderLogin() {
             Login
           </button>
         </form>
-
-        <form id="register-form" class="tab-panel" onsubmit="window.handleRegister(event)">
-          <div class="form-group">
-            <label>Email</label>
-            <input type="email" class="input" name="email" required autocomplete="email">
-          </div>
-          <div class="form-group">
-            <label>Password</label>
-            <input type="password" class="input" name="password" required minlength="8" autocomplete="new-password">
-          </div>
-          <div class="form-group">
-            <label>Confirm Password</label>
-            <input type="password" class="input" name="confirmPassword" required minlength="8" autocomplete="new-password">
-          </div>
-          <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
-            Create Account
-          </button>
-        </form>
       </div>
     </div>
   `
   updateThemeButton()
-}
-
-window.switchAuthTab = function(tab) {
-  document.querySelectorAll('.tab-btn').forEach((btn, i) => {
-    btn.classList.toggle('active', (i === 0 && tab === 'login') || (i === 1 && tab === 'register'))
-  })
-  document.querySelectorAll('.tab-panel').forEach((panel, i) => {
-    panel.classList.toggle('active', (i === 0 && tab === 'login') || (i === 1 && tab === 'register'))
-  })
 }
 
 window.handleLogin = async function(e) {
@@ -786,29 +758,6 @@ window.handleLogin = async function(e) {
 
   try {
     const data = await api('/api/auth/login', 'POST', { email, password })
-    setAuthToken(data.token)
-    state.user = data.user
-    navigate('/sessions')
-  } catch (err) {
-    showToast(err.message)
-  }
-}
-
-window.handleRegister = async function(e) {
-  e.preventDefault()
-  const form = e.target
-  const fd = new FormData(form)
-  const email = fd.get('email')
-  const password = fd.get('password')
-  const confirmPassword = fd.get('confirmPassword')
-
-  if (password !== confirmPassword) {
-    showToast('Passwords do not match')
-    return
-  }
-
-  try {
-    const data = await api('/api/auth/register', 'POST', { email, password })
     setAuthToken(data.token)
     state.user = data.user
     navigate('/sessions')

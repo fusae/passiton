@@ -265,6 +265,7 @@ export interface AppConfig {
   auth?: {
     jwtSecret?: string
     encryptionKey?: string
+    allowRegistration?: boolean
   }
   agents: Record<string, AgentConfig>
   defaults: DefaultsConfig

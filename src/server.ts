@@ -718,6 +718,9 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // POST /api/auth/register
       if (pathname === '/api/auth/register' && method === 'POST') {
+        if (!loadConfig().auth?.allowRegistration) {
+          throw new HttpError(403, 'Registration is disabled')
+        }
         const { email, password } = parseAuthBody(await parseBody(req))
         const result = registerUser(email, password)
         res.setHeader('Set-Cookie', authCookie(result.token))

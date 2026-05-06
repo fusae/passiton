@@ -15,9 +15,12 @@ class StubAgentCatalog {
   }
 }
 
-async function withServer(fn: (baseUrl: string) => Promise<void>): Promise<void> {
+async function withServer(fn: (baseUrl: string) => Promise<void>, options: { allowRegistration?: boolean } = { allowRegistration: true }): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'turing-server-'))
   process.env.TURING_JWT_SECRET = 'server-test-jwt-secret'
+  if (options.allowRegistration !== false) {
+    process.env.TURING_ALLOW_REGISTRATION = '1'
+  }
   state.initDb(join(dir, 'turing.db'))
   const router = new Router()
   const server = createServer(router, 0, new StubAgentCatalog() as never)
@@ -34,6 +37,7 @@ async function withServer(fn: (baseUrl: string) => Promise<void>): Promise<void>
     state.closeDb()
     rmSync(dir, { recursive: true, force: true })
     delete process.env.TURING_JWT_SECRET
+    delete process.env.TURING_ALLOW_REGISTRATION
   }
 }
 
@@ -81,6 +85,18 @@ test('GET /health returns unauthenticated liveness payload', async () => {
     assert.equal(response.status, 200)
     assert.deepEqual(await response.json(), { ok: true })
   })
+})
+
+test('POST /api/auth/register is disabled by default', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'disabled@example.com', password: 'password123' }),
+    })
+    assert.equal(response.status, 403)
+    assert.deepEqual(await response.json(), { error: 'Registration is disabled' })
+  }, { allowRegistration: false })
 })
 
 test('agent CRUD stores user API model configs', async () => {
