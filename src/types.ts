@@ -240,6 +240,9 @@ export interface ApiAgentInfo {
   kind?: 'api' | 'local'
   source?: 'configured' | 'discovered'
   command?: string
+  args?: string[]
+  timeout?: number
+  env?: Record<string, string>
   version?: string
 }
 

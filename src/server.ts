@@ -197,6 +197,13 @@ function optionalPositiveInt(value: unknown, field: string): number | undefined 
   return value
 }
 
+function requireStringArray(value: unknown, field: string): string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item.trim() === '')) {
+    throw new HttpError(400, `"${field}" must be a non-empty string array`)
+  }
+  return value
+}
+
 function optionalPort(value: unknown, field: string): number | undefined {
   const port = optionalPositiveInt(value, field)
   if (port !== undefined && port > 65535) {
@@ -256,12 +263,17 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
   }
 
   const env = parseEnv(data.env, 'env')
+  const args = data.args === undefined
+    ? (existing && existing.adapter === adapter ? existing.args : defaults.args)
+    : requireStringArray(data.args, 'args')
+  const timeout = optionalPositiveInt(data.timeout, 'timeout')
+    ?? (existing && existing.adapter === adapter ? existing.timeout : defaults.timeout)
   return {
     name,
     config: {
       ...defaults,
-      args: existing && existing.adapter === adapter ? existing.args : defaults.args,
-      timeout: existing && existing.adapter === adapter ? existing.timeout : defaults.timeout,
+      args,
+      timeout,
       model: existing && existing.adapter === adapter ? existing.model : defaults.model,
       command,
       ...(env && Object.keys(env).length > 0 ? { env } : {}),
@@ -348,6 +360,7 @@ function reloadUserAgents(router: Router, userId: string): void {
 
 async function listAgentModels(userId: string, agentCatalog?: AgentCatalog): Promise<AgentListResponse> {
   const current = loadConfig()
+  const currentAgents = current.agents
   const globalApi = Object.entries(current.agents)
     .filter(([, cfg]) => API_ADAPTERS.has(cfg.adapter))
     .map(([name, cfg]) => apiAgentInfoFromConfig(name, cfg))
@@ -362,20 +375,26 @@ async function listAgentModels(userId: string, agentCatalog?: AgentCatalog): Pro
   const takenNames = new Set(apiAgents.map((agent) => agent.name))
   const localAgents = (await agentCatalog.listAgents())
     .filter((agent) => !API_ADAPTERS.has(agent.adapter) && !takenNames.has(agent.name))
-    .map((agent): ApiAgentInfo => ({
-      name: agent.name,
-      adapter: agent.adapter,
-      provider: 'Local CLI',
-      model: agent.version,
-      hasKey: true,
-      status: agent.source === 'configured'
-        ? (agent.healthy && agent.availableForSessions ? 'ready' : 'invalid')
-        : (agent.healthy ? 'discovered' : 'invalid'),
-      kind: 'local',
-      source: agent.source,
-      command: agent.command,
-      version: agent.version,
-    }))
+    .map((agent): ApiAgentInfo => {
+      const cfg = currentAgents[agent.name]
+      return {
+        name: agent.name,
+        adapter: agent.adapter,
+        provider: 'Local CLI',
+        model: agent.version,
+        hasKey: true,
+        status: agent.source === 'configured'
+          ? (agent.healthy && agent.availableForSessions ? 'ready' : 'invalid')
+          : (agent.healthy ? 'discovered' : 'invalid'),
+        kind: 'local',
+        source: agent.source,
+        command: agent.command,
+        args: cfg?.args,
+        timeout: cfg?.timeout,
+        env: cfg?.env,
+        version: agent.version,
+      }
+    })
   return [
     ...apiAgents,
     ...localAgents,

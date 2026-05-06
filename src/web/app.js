@@ -1910,6 +1910,7 @@ function renderLocalCliAgentsList() {
       <span class="badge badge-${badgeClass}">${escapeHtml(agent.status)}</span>
       <div class="agent-actions">
         ${canAdd ? `<button class="btn btn-primary btn-sm" onclick='window.addLocalCliAgent(${jsString(agent.name)})'>Add</button>` : ''}
+        ${canDelete ? `<button class="btn btn-ghost btn-sm" onclick='window.showLocalCliAgentModal(${jsString(agent.name)})'>Edit</button>` : ''}
         ${canDelete ? `<button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteLocalCliAgent(${jsString(agent.name)})'>Delete</button>` : ''}
       </div>
     </div>
@@ -1927,6 +1928,79 @@ window.addLocalCliAgent = async function(name) {
     })
     await loadAgents()
     renderAgentsList()
+    renderLocalCliAgentsList()
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.showLocalCliAgentModal = function(name) {
+  const agent = state.agents.find(item => item.kind === 'local' && item.name === name)
+  if (!agent) return
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3>Edit Local CLI Agent</h3>
+          <p>${escapeHtml(agent.name)} · ${escapeHtml(agent.adapter)}</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+      </div>
+      <form onsubmit='window.saveLocalCliAgent(event, ${jsString(agent.name)})'>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Name</label>
+            <input class="input" name="name" required value="${escapeAttr(agent.name)}">
+          </div>
+          <div class="form-group">
+            <label>Adapter</label>
+            <input class="input" name="adapter" required value="${escapeAttr(agent.adapter)}">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Command</label>
+          <input class="input" name="command" required value="${escapeAttr(agent.command || '')}">
+        </div>
+        <div class="form-group">
+          <label>Args</label>
+          <textarea class="input" name="args" rows="3">${escapeHtml((agent.args || []).join('\\n'))}</textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Timeout (ms)</label>
+            <input class="input" name="timeout" type="number" min="1" value="${escapeAttr(agent.timeout || '')}">
+          </div>
+          <div></div>
+        </div>
+        <div class="form-group">
+          <label>Environment</label>
+          <textarea class="input" name="env" rows="3" placeholder="KEY=value">${escapeHtml(envToLines(agent.env))}</textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  `)
+}
+
+window.saveLocalCliAgent = async function(e, originalName) {
+  e.preventDefault()
+  const fd = new FormData(e.target)
+  const args = String(fd.get('args') || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean)
+  const body = compactObject({
+    name: String(fd.get('name') || '').trim(),
+    adapter: String(fd.get('adapter') || '').trim(),
+    command: String(fd.get('command') || '').trim(),
+    args,
+    timeout: parseInt(fd.get('timeout')) || undefined,
+    env: parseEnvLines(String(fd.get('env') || '')),
+  })
+  try {
+    state.config = await api(`/api/config/agents/${encodeURIComponent(originalName)}`, 'PUT', body)
+    await loadAgents()
+    closeModal()
     renderLocalCliAgentsList()
   } catch (err) {
     showToast(err.message)
@@ -2712,6 +2786,22 @@ function agentLabel(agent) {
 
 function compactObject(obj) {
   return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined && value !== ''))
+}
+
+function envToLines(env) {
+  return Object.entries(env || {}).map(([key, value]) => `${key}=${value}`).join('\n')
+}
+
+function parseEnvLines(value) {
+  const env = {}
+  for (const line of value.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const index = trimmed.indexOf('=')
+    if (index <= 0) continue
+    env[trimmed.slice(0, index).trim()] = trimmed.slice(index + 1).trim()
+  }
+  return Object.keys(env).length ? env : undefined
 }
 
 function adapterOption(value, selected) {
