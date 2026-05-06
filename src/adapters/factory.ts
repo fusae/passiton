@@ -1,6 +1,6 @@
 import type { AgentConfig, Adapter } from '../types.js'
 import type { Router } from '../router.js'
-import { ClaudeCodeAdapter } from './claude-code.js'
+import { ClaudeCodeAdapter, defaultClaudeCodeArgs } from './claude-code.js'
 import { CodexAdapter } from './codex.js'
 import { GeminiAdapter } from './gemini.js'
 import { OpenCodeAdapter } from './opencode.js'
@@ -16,7 +16,7 @@ const DISCOVERED_DEFAULTS: Record<string, Omit<AgentConfig, 'command'>> = {
   },
   'claude-code': {
     adapter: 'claude-code',
-    args: ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
+    args: defaultClaudeCodeArgs(),
     timeout: 600_000,
   },
   opencode: {

@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
 import type { AppConfig, SessionMode } from './types.js'
+import { defaultClaudeCodeArgs } from './adapters/claude-code.js'
 
 const CONFIG_PATH = join(homedir(), '.turing', 'config.json')
 const DEFAULT_CODEX_COMMAND = process.env.TURING_CODEX_COMMAND ?? 'codex'
@@ -46,7 +47,7 @@ export const LOCAL_CLI_AGENT_DEFAULTS: Record<string, AppConfig['agents'][string
     'claude-code': {
       adapter: 'claude-code',
       command: DEFAULT_CLAUDE_COMMAND,
-      args: ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions'],
+      args: defaultClaudeCodeArgs(),
       timeout: 600_000,
     },
     'gemini-cli': {

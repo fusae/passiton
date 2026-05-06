@@ -5,7 +5,13 @@ import type { Session, AdapterSendOpts } from '../types.js'
 import { resolveCommandArgs } from './command-args.js'
 import { buildPrompt, runCommand } from './shared.js'
 
-const DEFAULT_CLAUDE_ARGS = ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions']
+export function defaultClaudeCodeArgs(): string[] {
+  const args = ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose']
+  if (typeof process.getuid !== 'function' || process.getuid() !== 0) {
+    args.push('--dangerously-skip-permissions')
+  }
+  return args
+}
 
 export interface ClaudeCodeAdapterConfig {
   command?: string
@@ -36,7 +42,7 @@ export class ClaudeCodeAdapter implements Adapter {
 
   constructor(cfg: ClaudeCodeAdapterConfig = {}) {
     this.command = cfg.command ?? 'claude'
-    this.args = cfg.args ?? DEFAULT_CLAUDE_ARGS
+    this.args = cfg.args ?? defaultClaudeCodeArgs()
     this.timeout = cfg.timeout ?? 300_000
     this.env = cfg.env ?? {}
     this.config = { command: this.command, args: this.args, timeout: this.timeout }
