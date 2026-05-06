@@ -88,6 +88,62 @@ test('discovered local agents are not registered until configured', async () => 
   }
 })
 
+test('configured local agents require a successful smoke run to be healthy', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-agent-smoke-'))
+  const command = join(dir, 'codex')
+  writeExecutable(command, `
+if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi
+echo TURING_READY
+`)
+
+  try {
+    const catalog = new AgentCatalog({
+      codex: {
+        adapter: 'codex',
+        command,
+        args: ['{prompt}'],
+        timeout: 1_000,
+      },
+    }, true)
+    const agents = await catalog.listAgents()
+    const codex = agents.find((agent) => agent.name === 'codex')
+
+    assert.equal(codex?.source, 'configured')
+    assert.equal(codex?.healthy, true)
+    assert.equal(codex?.version, 'codex-test')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('configured local agents fail health when smoke run fails', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-agent-smoke-fail-'))
+  const command = join(dir, 'codex')
+  writeExecutable(command, `
+if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi
+exit 2
+`)
+
+  try {
+    const catalog = new AgentCatalog({
+      codex: {
+        adapter: 'codex',
+        command,
+        args: ['{prompt}'],
+        timeout: 1_000,
+      },
+    }, true)
+    const agents = await catalog.listAgents()
+    const codex = agents.find((agent) => agent.name === 'codex')
+
+    assert.equal(codex?.source, 'configured')
+    assert.equal(codex?.healthy, false)
+    assert.equal(codex?.version, 'codex-test')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 function writeExecutable(path: string, body = 'echo test-version'): void {
   mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, `#!/bin/sh\n${body}\n`)

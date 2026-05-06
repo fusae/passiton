@@ -1,12 +1,13 @@
-import { access } from 'fs/promises'
+import { access, mkdtemp, rm } from 'fs/promises'
 import { constants } from 'fs'
 import { delimiter, dirname, join } from 'path'
-import { homedir } from 'os'
+import { homedir, tmpdir } from 'os'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
 import type { AgentConfig } from './types.js'
-import { createAdapter } from './adapters/factory.js'
+import { createAdapter, createDiscoveredAgentConfig } from './adapters/factory.js'
 import type { Router } from './router.js'
+import type { Session } from './types.js'
 
 const execFileAsync = promisify(execFile)
 const HEALTH_CACHE_TTL_MS = 60_000
@@ -37,6 +38,7 @@ interface AgentEntry {
   source: 'configured' | 'discovered'
   supported: boolean
   availableForSessions: boolean
+  config?: AgentConfig
 }
 
 interface ProbeCacheEntry {
@@ -93,6 +95,7 @@ export class AgentCatalog {
         source: 'configured',
         supported: createAdapter(agentCfg) !== undefined,
         availableForSessions: createAdapter(agentCfg) !== undefined,
+        config: agentCfg,
       })
     }
     this.probeCache.clear()
@@ -112,6 +115,7 @@ export class AgentCatalog {
         source: 'discovered',
         supported: preset.supported,
         availableForSessions: preset.supported,
+        config: createDiscoveredAgentConfig(preset.adapter, command),
       })
     }
   }
@@ -136,7 +140,7 @@ export class AgentCatalog {
         }
       }
 
-      const probe = await this.probe(entry.command)
+      const probe = await this.probe(entry)
       return {
         ...entry,
         healthy: probe.healthy,
@@ -145,14 +149,28 @@ export class AgentCatalog {
     }))
   }
 
-  private async probe(command: string): Promise<{ healthy: boolean; version?: string }> {
-    const cached = this.probeCache.get(command)
+  private async probe(entry: AgentEntry): Promise<{ healthy: boolean; version?: string }> {
+    const cacheKey = [
+      entry.source,
+      entry.name,
+      entry.command,
+      JSON.stringify(entry.config?.args ?? []),
+      JSON.stringify(entry.config?.env ?? {}),
+    ].join(':')
+    const cached = this.probeCache.get(cacheKey)
     if (cached && cached.expiresAt > Date.now()) {
       return cached.value
     }
 
-    const value = await probeCommand(command)
-    this.probeCache.set(command, {
+    const versionProbe = await probeCommand(entry.command!)
+    const smokeProbe = entry.source === 'configured' && entry.availableForSessions && entry.config
+      ? await smokeTestAgent(entry.name, entry.config)
+      : { healthy: true }
+    const value = {
+      healthy: versionProbe.healthy && smokeProbe.healthy,
+      version: versionProbe.version,
+    }
+    this.probeCache.set(cacheKey, {
       expiresAt: Date.now() + HEALTH_CACHE_TTL_MS,
       value,
     })
@@ -263,6 +281,44 @@ async function probeCommand(command: string): Promise<{ healthy: boolean; versio
     return { healthy: true, version }
   } catch {
     return { healthy: false }
+  }
+}
+
+async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ healthy: boolean }> {
+  let cwd: string | undefined
+  try {
+    const adapter = createAdapter({ ...config, timeout: Math.min(config.timeout ?? 60_000, 60_000) })
+    if (!adapter) return { healthy: false }
+    ;(adapter as { name: string }).name = name
+    cwd = await mkdtemp(join(tmpdir(), 'turing-agent-smoke-'))
+    const output = await adapter.send(smokeSession(cwd), 'Reply exactly with TURING_READY and nothing else.')
+    const content = typeof output === 'string' ? output : output.content
+    return { healthy: content.trim().length > 0 }
+  } catch {
+    return { healthy: false }
+  } finally {
+    if (cwd) {
+      await rm(cwd, { recursive: true, force: true })
+    }
+  }
+}
+
+function smokeSession(cwd: string): Session {
+  const now = Date.now()
+  return {
+    id: 'agent-smoke-test',
+    from: { adapter: 'agent-smoke' },
+    to: { adapter: 'agent-smoke' },
+    status: 'active',
+    mode: 'freeform',
+    nextTurn: 'to',
+    maxRounds: 1,
+    currentRound: 0,
+    approveMode: false,
+    cwd,
+    resumeCount: 0,
+    createdAt: now,
+    updatedAt: now,
   }
 }
 
