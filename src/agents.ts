@@ -299,7 +299,7 @@ async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ heal
     cwd = await mkdtemp(join(tmpdir(), 'turing-agent-smoke-'))
     const output = await adapter.send(smokeSession(cwd), 'Reply exactly with TURING_READY and nothing else.')
     const content = typeof output === 'string' ? output : output.content
-    return { healthy: content.includes('TURING_READY') }
+    return { healthy: content.trim() === 'TURING_READY' }
   } catch {
     return { healthy: false }
   } finally {
