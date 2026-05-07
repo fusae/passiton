@@ -18,6 +18,7 @@ const DISCOVERED_DEFAULTS: Record<string, Omit<AgentConfig, 'command'>> = {
     adapter: 'claude-code',
     args: defaultClaudeCodeArgs(),
     timeout: 600_000,
+    env: pickEnv(['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN']),
   },
   opencode: {
     adapter: 'opencode',
@@ -29,6 +30,16 @@ const DISCOVERED_DEFAULTS: Record<string, Omit<AgentConfig, 'command'>> = {
     args: ['-p', '{prompt}'],
     timeout: 600_000,
   },
+}
+
+function pickEnv(keys: string[]): Record<string, string> | undefined {
+  const env = Object.fromEntries(
+    keys
+      .map((key) => [key, process.env[key]] as const)
+      .filter(([, value]) => Boolean(value?.trim()))
+      .map(([key, value]) => [key, value!])
+  )
+  return Object.keys(env).length ? env : undefined
 }
 
 export function createAdapter(agentCfg: AgentConfig): Adapter | undefined {

@@ -275,6 +275,8 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
     : requireStringArray(data.args, 'args')
   const timeout = optionalPositiveInt(data.timeout, 'timeout')
     ?? (existing && existing.adapter === adapter ? existing.timeout : defaults.timeout)
+  const inheritedEnv = existing && existing.adapter === adapter ? existing.env : defaults.env
+  const finalEnv = env ?? inheritedEnv
   return {
     name,
     config: {
@@ -283,7 +285,7 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
       timeout,
       model: existing && existing.adapter === adapter ? existing.model : defaults.model,
       command,
-      ...(env && Object.keys(env).length > 0 ? { env } : {}),
+      ...(finalEnv && Object.keys(finalEnv).length > 0 ? { env: finalEnv } : {}),
     },
   }
 }
@@ -934,7 +936,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const updated: AppConfig = { ...current, agents }
         writeConfig(updated)
         const saved = loadConfig()
-        await reloadAgents(router, agentCatalog, saved)
+        reloadAgents(router, agentCatalog, saved)
         return json(res, 200, saved)
       }
 

@@ -1893,6 +1893,9 @@ window.addLocalCliAgent = async function(name) {
       name: agent.name,
       adapter: agent.adapter,
       command: agent.command,
+      args: agent.args,
+      timeout: agent.timeout,
+      env: agent.env,
     })
     await loadAgents()
     renderAgentsList()
@@ -1984,9 +1987,16 @@ window.deleteLocalCliAgent = async function(name) {
   })) return
   try {
     state.config = await api(`/api/config/agents/${encodeURIComponent(name)}`, 'DELETE')
-    await loadAgents()
+    state.agents = state.agents.map(agent => agent.name === name && agent.kind === 'local'
+      ? { ...agent, source: 'discovered', status: 'discovered', args: undefined, timeout: undefined, env: undefined }
+      : agent
+    )
     renderAgentsList()
     renderLocalCliAgentsList()
+    loadAgents().then(() => {
+      renderAgentsList()
+      renderLocalCliAgentsList()
+    }).catch((err) => showToast(err.message))
   } catch (err) {
     showToast(err.message)
   }
