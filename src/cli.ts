@@ -639,7 +639,7 @@ async function configCommand(subcommand: string | undefined, flags: Flags, argv:
 async function listAgents() {
   let r: { status: number; data: unknown }
   try {
-    r = await get('/api/agents')
+    r = await get('/api/agents?refresh=1')
   } catch {
     die(`Cannot reach server at ${BASE}`)
   }

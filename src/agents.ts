@@ -49,6 +49,10 @@ interface ProbeCacheEntry {
   value: { healthy: boolean; version?: string }
 }
 
+interface ListAgentsOpts {
+  refresh?: boolean
+}
+
 let searchPathCache: string[] | undefined
 let extraSearchPathEntries: string[] = []
 
@@ -127,7 +131,7 @@ export class AgentCatalog {
     void router
   }
 
-  async listAgents(): Promise<AgentInfo[]> {
+  async listAgents(opts: ListAgentsOpts = {}): Promise<AgentInfo[]> {
     const entries = Array.from(this.entries.values()).sort((a, b) => {
       if (a.availableForSessions !== b.availableForSessions) {
         return Number(b.availableForSessions) - Number(a.availableForSessions)
@@ -143,7 +147,7 @@ export class AgentCatalog {
         }
       }
 
-      const probe = await this.probe(entry)
+      const probe = await this.probe(entry, opts.refresh === true)
       return {
         ...entry,
         healthy: probe.healthy,
@@ -155,7 +159,7 @@ export class AgentCatalog {
     }))
   }
 
-  private async probe(entry: AgentEntry): Promise<{ healthy: boolean; version?: string }> {
+  private async probe(entry: AgentEntry, refresh: boolean): Promise<{ healthy: boolean; version?: string }> {
     const cacheKey = [
       entry.source,
       entry.name,
@@ -164,12 +168,12 @@ export class AgentCatalog {
       JSON.stringify(entry.config?.env ?? {}),
     ].join(':')
     const cached = this.probeCache.get(cacheKey)
-    if (cached && cached.expiresAt > Date.now()) {
+    if (!refresh && cached && cached.expiresAt > Date.now()) {
       return cached.value
     }
 
     const versionProbe = await probeCommand(entry.command!)
-    const smokeProbe = entry.source === 'configured' && entry.availableForSessions && entry.config
+    const smokeProbe = refresh && entry.source === 'configured' && entry.availableForSessions && entry.config
       ? await smokeTestAgent(entry.name, entry.config)
       : { healthy: true }
     const value = {

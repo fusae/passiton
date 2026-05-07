@@ -105,7 +105,7 @@ echo TURING_READY
         timeout: 1_000,
       },
     }, true)
-    const agents = await catalog.listAgents()
+    const agents = await catalog.listAgents({ refresh: true })
     const codex = agents.find((agent) => agent.name === 'codex')
 
     assert.equal(codex?.source, 'configured')
@@ -133,7 +133,7 @@ exit 2
         timeout: 1_000,
       },
     }, true)
-    const agents = await catalog.listAgents()
+    const agents = await catalog.listAgents({ refresh: true })
     const codex = agents.find((agent) => agent.name === 'codex')
 
     assert.equal(codex?.source, 'configured')

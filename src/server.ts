@@ -367,7 +367,11 @@ function reloadUserAgents(router: Router, userId: string): void {
   registerUserConfiguredAdapters(router, userId, userAgentConfigs(userId))
 }
 
-async function listAgentModels(userId: string, agentCatalog?: AgentCatalog): Promise<AgentListResponse> {
+async function listAgentModels(
+  userId: string,
+  agentCatalog?: AgentCatalog,
+  opts: { refresh?: boolean } = {}
+): Promise<AgentListResponse> {
   const current = loadConfig()
   const currentAgents = current.agents
   const globalApi = Object.entries(current.agents)
@@ -382,7 +386,7 @@ async function listAgentModels(userId: string, agentCatalog?: AgentCatalog): Pro
   if (!agentCatalog) return apiAgents
 
   const takenNames = new Set(apiAgents.map((agent) => agent.name))
-  const localAgents = (await agentCatalog.listAgents())
+  const localAgents = (await agentCatalog.listAgents({ refresh: opts.refresh }))
     .filter((agent) => !API_ADAPTERS.has(agent.adapter) && !takenNames.has(agent.name))
     .map((agent): ApiAgentInfo => {
       const cfg = currentAgents[agent.name]
@@ -793,7 +797,8 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // GET /api/agents
       if (pathname === '/api/agents' && method === 'GET') {
-        const agents = await listAgentModels(authUser!.userId, agentCatalog)
+        const refresh = url.searchParams.get('refresh') === '1'
+        const agents = await listAgentModels(authUser!.userId, agentCatalog, { refresh })
         return json(res, 200, agents)
       }
 
@@ -906,6 +911,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         writeConfig(updated)
         const saved = loadConfig()
         await reloadAgents(router, agentCatalog, saved)
+        await listAgentModels(authUser!.userId, agentCatalog, { refresh: true })
         return json(res, 201, saved)
       }
 
