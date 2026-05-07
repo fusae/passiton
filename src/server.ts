@@ -398,9 +398,9 @@ async function listAgentModels(userId: string, agentCatalog?: AgentCatalog): Pro
         kind: 'local',
         source: agent.source,
         command: agent.command,
-        args: cfg?.args,
-        timeout: cfg?.timeout,
-        env: cfg?.env,
+        args: cfg?.args ?? agent.args,
+        timeout: cfg?.timeout ?? agent.timeout,
+        env: cfg?.env ?? agent.env,
         version: agent.version,
       }
     })

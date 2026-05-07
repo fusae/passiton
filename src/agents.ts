@@ -24,6 +24,9 @@ export interface AgentInfo {
   name: string
   adapter: string
   command?: string
+  args?: string[]
+  timeout?: number
+  env?: Record<string, string>
   source: 'configured' | 'discovered'
   supported: boolean
   availableForSessions: boolean
@@ -145,6 +148,9 @@ export class AgentCatalog {
         ...entry,
         healthy: probe.healthy,
         version: probe.version,
+        args: entry.config?.args,
+        timeout: entry.config?.timeout,
+        env: entry.config?.env,
       }
     }))
   }
