@@ -12,7 +12,8 @@
     "check": "npm run build",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
-    "test": "npm run build && node --test dist/tests/*.test.js"
+    "test": "npm run build && node --test dist/tests/*.test.js",
+    "deploy:check": "npm run build && node scripts/deploy-check.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3",

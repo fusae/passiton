@@ -49,6 +49,24 @@ interface ProbeCacheEntry {
   value: { healthy: boolean; version?: string }
 }
 
+export interface AgentDiagnostic {
+  name: string
+  adapter: string
+  source: 'configured' | 'discovered'
+  supported: boolean
+  availableForSessions: boolean
+  command?: string
+  commandExecutable: boolean
+  args?: string[]
+  timeout?: number
+  envKeys: string[]
+  version?: string
+  versionOk: boolean
+  smokeOk?: boolean
+  healthy: boolean
+  error?: string
+}
+
 interface ListAgentsOpts {
   refresh?: boolean
 }
@@ -157,6 +175,53 @@ export class AgentCatalog {
         env: entry.config?.env,
       }
     }))
+  }
+
+  async diagnoseAgent(name: string, refresh = true): Promise<AgentDiagnostic | undefined> {
+    const entry = this.entries.get(name)
+    if (!entry) return undefined
+    const envKeys = Object.keys(entry.config?.env ?? {}).sort()
+    if (!entry.command) {
+      return {
+        name: entry.name,
+        adapter: entry.adapter,
+        source: entry.source,
+        supported: entry.supported,
+        availableForSessions: entry.availableForSessions,
+        commandExecutable: false,
+        args: entry.config?.args,
+        timeout: entry.config?.timeout,
+        envKeys,
+        versionOk: entry.availableForSessions,
+        healthy: entry.availableForSessions,
+      }
+    }
+
+    const commandExecutable = entry.command.includes('/')
+      ? await isExecutable(entry.command)
+      : Boolean(await resolveCommand(entry.command))
+    const versionProbe = refresh ? await probeCommand(entry.command) : { healthy: commandExecutable }
+    const smokeProbe = refresh && entry.source === 'configured' && entry.availableForSessions && entry.config
+      ? await smokeTestAgent(entry.name, entry.config)
+      : undefined
+    const healthy = commandExecutable && versionProbe.healthy && (smokeProbe?.healthy ?? true) && entry.availableForSessions
+    return {
+      name: entry.name,
+      adapter: entry.adapter,
+      source: entry.source,
+      supported: entry.supported,
+      availableForSessions: entry.availableForSessions,
+      command: entry.command,
+      commandExecutable,
+      args: entry.config?.args,
+      timeout: entry.config?.timeout,
+      envKeys,
+      version: versionProbe.version,
+      versionOk: versionProbe.healthy,
+      smokeOk: smokeProbe?.healthy,
+      healthy,
+      error: smokeProbe?.error ?? versionProbe.error,
+    }
   }
 
   private async probe(entry: AgentEntry, refresh: boolean): Promise<{ healthy: boolean; version?: string }> {
@@ -284,17 +349,17 @@ async function isExecutable(filePath: string): Promise<boolean> {
   }
 }
 
-async function probeCommand(command: string): Promise<{ healthy: boolean; version?: string }> {
+async function probeCommand(command: string): Promise<{ healthy: boolean; version?: string; error?: string }> {
   try {
     const { stdout, stderr } = await execFileAsync(command, ['--version'], { timeout: 10_000 })
     const version = parseVersion(stdout || stderr)
     return { healthy: true, version }
-  } catch {
-    return { healthy: false }
+  } catch (err) {
+    return { healthy: false, error: err instanceof Error ? err.message : String(err) }
   }
 }
 
-async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ healthy: boolean }> {
+async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ healthy: boolean; error?: string }> {
   let cwd: string | undefined
   try {
     const adapter = createAdapter({ ...config, timeout: Math.min(config.timeout ?? 60_000, 60_000) })
@@ -303,9 +368,10 @@ async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ heal
     cwd = await mkdtemp(join(tmpdir(), 'turing-agent-smoke-'))
     const output = await adapter.send(smokeSession(cwd), 'Reply exactly with TURING_READY and nothing else.')
     const content = typeof output === 'string' ? output : output.content
-    return { healthy: content.trim() === 'TURING_READY' }
-  } catch {
-    return { healthy: false }
+    const healthy = content.trim() === 'TURING_READY'
+    return { healthy, error: healthy ? undefined : `Unexpected smoke output: ${content.slice(0, 200)}` }
+  } catch (err) {
+    return { healthy: false, error: err instanceof Error ? err.message : String(err) }
   } finally {
     if (cwd) {
       await rm(cwd, { recursive: true, force: true })

@@ -47,6 +47,8 @@ const state = {
   agents: [],
   templates: [],
   apiKeys: [],
+  apiDocs: null,
+  deployCheck: null,
   stats: null,
   config: null,
   currentView: 'sessions',
@@ -550,6 +552,24 @@ async function loadConfig() {
     state.config = await api('/api/config')
   } catch (err) {
     console.error('Failed to load config:', err)
+  }
+}
+
+async function loadApiDocs() {
+  try {
+    state.apiDocs = await api('/api/docs')
+  } catch (err) {
+    console.error('Failed to load API docs:', err)
+    state.apiDocs = null
+  }
+}
+
+async function loadDeployCheck() {
+  try {
+    state.deployCheck = await api('/api/deploy/check')
+  } catch (err) {
+    console.error('Failed to load deploy check:', err)
+    state.deployCheck = null
   }
 }
 
@@ -1705,6 +1725,8 @@ async function renderSettings() {
   await loadConfig()
   await loadAgents()
   await loadApiKeys()
+  await loadApiDocs()
+  await loadDeployCheck()
   const localCliTab = '<button class="tab-btn" data-tab="local-cli" onclick="window.switchSettingsTab(\'local-cli\')">Local CLI Agents</button>'
   const localCliPanel = `
             <div id="tab-local-cli" class="tab-panel" data-tab="local-cli">
@@ -1739,6 +1761,8 @@ async function renderSettings() {
               <button class="tab-btn active" data-tab="agents" onclick="window.switchSettingsTab('agents')">API Assistants</button>
               <button class="tab-btn" data-tab="apikeys" onclick="window.switchSettingsTab('apikeys')">Provider Keys</button>
               ${localCliTab}
+              <button class="tab-btn" data-tab="diagnostics" onclick="window.switchSettingsTab('diagnostics')">Diagnostics</button>
+              <button class="tab-btn" data-tab="api-docs" onclick="window.switchSettingsTab('api-docs')">API Docs</button>
               <button class="tab-btn" data-tab="general" onclick="window.switchSettingsTab('general')">General</button>
             </div>
 
@@ -1767,6 +1791,22 @@ async function renderSettings() {
 
             ${localCliPanel}
 
+            <div id="tab-diagnostics" class="tab-panel" data-tab="diagnostics">
+              <div class="flex-between mb-24">
+                <div>
+                  <h3>Diagnostics</h3>
+                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Check deployment and CLI agent runtime status</p>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="window.refreshDiagnostics()">Refresh</button>
+              </div>
+              <div id="diagnostics-panel"></div>
+            </div>
+
+            <div id="tab-api-docs" class="tab-panel" data-tab="api-docs">
+              <h3 class="mb-24">Session HTTP API</h3>
+              <pre class="code-block" style="white-space: pre-wrap;">${escapeHtml(JSON.stringify(state.apiDocs || {}, null, 2))}</pre>
+            </div>
+
             <div id="tab-general" class="tab-panel" data-tab="general">
               <h3 class="mb-24">General Settings</h3>
 
@@ -1785,6 +1825,11 @@ async function renderSettings() {
                 </select>
               </div>
 
+              <div class="form-group">
+                <label>Allowed Workspaces</label>
+                <textarea class="input" id="allowed-workspaces-input" rows="4" placeholder="/home/turing/projects&#10;/Users/me/Projects">${escapeHtml((state.config?.policy?.allowedWorkspaces || []).join('\n'))}</textarea>
+              </div>
+
               <button class="btn btn-primary" onclick="window.saveGeneralSettings()">Save Settings</button>
             </div>
           </div>
@@ -1796,6 +1841,7 @@ async function renderSettings() {
   renderAgentsList()
   renderApiKeysList()
   renderLocalCliAgentsList()
+  renderDiagnosticsPanel()
   updateThemeButton()
 }
 
@@ -1878,6 +1924,7 @@ function renderLocalCliAgentsList() {
       <span class="badge badge-${badgeClass}">${escapeHtml(agent.status)}</span>
       <div class="agent-actions">
         ${canAdd ? `<button class="btn btn-primary btn-sm" onclick='window.addLocalCliAgent(${jsString(agent.name)})'>Add</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>Diagnose</button>
         ${canDelete ? `<button class="btn btn-ghost btn-sm" onclick='window.showLocalCliAgentModal(${jsString(agent.name)})'>Edit</button>` : ''}
         ${canDelete ? `<button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteLocalCliAgent(${jsString(agent.name)})'>Delete</button>` : ''}
       </div>
@@ -1900,6 +1947,67 @@ window.addLocalCliAgent = async function(name) {
     await loadAgents()
     renderAgentsList()
     renderLocalCliAgentsList()
+    const saved = state.agents.find(item => item.kind === 'local' && item.name === name)
+    if (saved?.status === 'invalid') {
+      window.showLocalCliAgentDiagnostics(name, 'Agent was saved but validation failed.')
+    }
+  } catch (err) {
+    showToast(err.message)
+    window.showLocalCliAgentDiagnostics(name, err.message)
+  }
+}
+
+function renderDiagnosticsPanel() {
+  const container = document.getElementById('diagnostics-panel')
+  if (!container) return
+  const localAgents = state.agents.filter(agent => agent.kind === 'local')
+  container.innerHTML = `
+    <div class="agent-list">
+      <div class="agent-item">
+        <div class="agent-icon">D</div>
+        <div class="agent-info">
+          <div class="agent-name">Deployment</div>
+          <div class="agent-model">${state.deployCheck ? `pid ${escapeHtml(state.deployCheck.pid)} · ${escapeHtml(state.deployCheck.node)} · ${escapeHtml(state.deployCheck.durationMs)}ms` : 'not checked'}</div>
+        </div>
+        <span class="badge badge-${state.deployCheck?.ok ? 'active' : 'error'}">${state.deployCheck?.ok ? 'ok' : 'unknown'}</span>
+      </div>
+      ${localAgents.map(agent => `
+        <div class="agent-item">
+          <div class="agent-icon">${escapeHtml(agent.name.charAt(0).toUpperCase())}</div>
+          <div class="agent-info">
+            <div class="agent-name">${escapeHtml(agent.name)}</div>
+            <div class="agent-model">${escapeHtml(agent.command || agent.adapter)}</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>Run</button>
+        </div>
+      `).join('')}
+    </div>
+  `
+}
+
+window.refreshDiagnostics = async function() {
+  await loadDeployCheck()
+  await loadAgents()
+  renderDiagnosticsPanel()
+  renderLocalCliAgentsList()
+}
+
+window.showLocalCliAgentDiagnostics = async function(name, preface = '') {
+  try {
+    const diagnostic = await api(`/api/agents/${encodeURIComponent(name)}/diagnostics?refresh=1`)
+    showModal(`
+      <div class="modal-card">
+        <div class="modal-head">
+          <div>
+            <h3>Agent Diagnostics</h3>
+            <p>${escapeHtml(name)}</p>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+        </div>
+        ${preface ? `<p style="color: var(--red); margin-bottom: 12px;">${escapeHtml(preface)}</p>` : ''}
+        <pre class="code-block" style="white-space: pre-wrap;">${escapeHtml(JSON.stringify(diagnostic, null, 2))}</pre>
+      </div>
+    `)
   } catch (err) {
     showToast(err.message)
   }
@@ -2014,10 +2122,15 @@ window.switchSettingsTab = function(tab) {
 window.saveGeneralSettings = async function() {
   const maxRounds = parseInt(document.getElementById('max-rounds-input').value)
   const mode = document.getElementById('mode-input').value
+  const allowedWorkspaces = String(document.getElementById('allowed-workspaces-input')?.value || '')
+    .split(/\r?\n/)
+    .map(item => item.trim())
+    .filter(Boolean)
 
   try {
     await api('/api/config', 'PUT', {
-      defaults: { maxRounds, mode }
+      defaults: { maxRounds, mode },
+      policy: { allowedWorkspaces },
     })
     showToast('Settings saved successfully', 'success')
   } catch (err) {

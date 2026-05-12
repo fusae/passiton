@@ -13,6 +13,10 @@ class StubAgentCatalog {
   async listAgents(): Promise<unknown[]> {
     return []
   }
+
+  async diagnoseAgent(name: string): Promise<unknown> {
+    return name === 'codex' ? { name, healthy: true } : undefined
+  }
 }
 
 async function withServer(fn: (baseUrl: string) => Promise<void>, options: { allowRegistration?: boolean } = { allowRegistration: true }): Promise<void> {
@@ -38,6 +42,7 @@ async function withServer(fn: (baseUrl: string) => Promise<void>, options: { all
     rmSync(dir, { recursive: true, force: true })
     delete process.env.TURING_JWT_SECRET
     delete process.env.TURING_ALLOW_REGISTRATION
+    delete process.env.TURING_ALLOWED_WORKSPACES
   }
 }
 
@@ -87,6 +92,37 @@ test('GET /health returns unauthenticated liveness payload', async () => {
   })
 })
 
+test('GET /api/docs returns unauthenticated API reference', async () => {
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/docs`)
+    assert.equal(response.status, 200)
+    const payload = await response.json() as { createSession: { path: string } }
+    assert.equal(payload.createSession.path, '/api/sessions')
+  })
+})
+
+test('GET /api/deploy/check returns authenticated deployment status', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'deploy-check@example.com')
+    const response = await fetch(`${baseUrl}/api/deploy/check`, { headers: authHeaders(auth.token) })
+    assert.equal(response.status, 200)
+    const payload = await response.json() as { ok: boolean; pid: number }
+    assert.equal(payload.ok, true)
+    assert.equal(typeof payload.pid, 'number')
+  })
+})
+
+test('GET /api/agents/:name/diagnostics returns agent details', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'agent-diag@example.com')
+    const response = await fetch(`${baseUrl}/api/agents/codex/diagnostics`, { headers: authHeaders(auth.token) })
+    assert.equal(response.status, 200)
+    const payload = await response.json() as { name: string; healthy: boolean }
+    assert.equal(payload.name, 'codex')
+    assert.equal(payload.healthy, true)
+  })
+})
+
 test('POST /api/auth/register is disabled by default', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/auth/register`, {
@@ -113,6 +149,32 @@ test('POST /api/auth/local returns a local user token', async () => {
     const stats = await fetch(`${baseUrl}/api/stats`, { headers: authHeaders(payload.token) })
     assert.equal(stats.status, 200)
   }, { allowRegistration: false })
+})
+
+test('POST /api/sessions rejects cwd outside allowed workspaces', async () => {
+  const allowed = mkdtempSync(join(tmpdir(), 'turing-allowed-workspace-'))
+  const denied = mkdtempSync(join(tmpdir(), 'turing-denied-workspace-'))
+  process.env.TURING_ALLOWED_WORKSPACES = allowed
+  try {
+    await withServer(async (baseUrl) => {
+      const auth = await register(baseUrl, 'workspace@example.com')
+      const response = await fetch(`${baseUrl}/api/sessions`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          from: { adapter: 'codex' },
+          to: { adapter: 'claude-code' },
+          initialPrompt: 'test',
+          cwd: denied,
+        }),
+      })
+      assert.equal(response.status, 403)
+    })
+  } finally {
+    rmSync(allowed, { recursive: true, force: true })
+    rmSync(denied, { recursive: true, force: true })
+    delete process.env.TURING_ALLOWED_WORKSPACES
+  }
 })
 
 test('agent CRUD stores user API model configs', async () => {

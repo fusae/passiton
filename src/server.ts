@@ -21,7 +21,7 @@ import {
   revokeUserToken,
   type AuthUser,
 } from './auth.js'
-import { activeAgents, loadConfig, writeConfig } from './config.js'
+import { activeAgents, getConfigPath, loadConfig, writeConfig } from './config.js'
 import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
@@ -243,15 +243,17 @@ function parseEnv(value: unknown, field: string): Record<string, string> | undef
   return parsed
 }
 
-function parseGlobalConfigBody(body: unknown): { maxRounds: number; mode: SessionMode; port: number } {
+function parseGlobalConfigBody(body: unknown): { maxRounds: number; mode: SessionMode; port: number; allowedWorkspaces?: string[] } {
   const data = requireRecord(body, 'body')
   const defaults = isRecord(data.defaults) ? data.defaults : data
   const server = isRecord(data.server) ? data.server : data
+  const policy = isRecord(data.policy) ? data.policy : data
 
   return {
     maxRounds: optionalPositiveInt(defaults.maxRounds, 'defaults.maxRounds') ?? optionalPositiveInt(data.maxRounds, 'maxRounds') ?? 20,
     mode: requireSessionMode(defaults.mode ?? data.mode, 'defaults.mode'),
     port: optionalPort(server.port, 'server.port') ?? optionalPort(data.port, 'port') ?? portDefault(),
+    allowedWorkspaces: optionalStringArray(policy.allowedWorkspaces, 'policy.allowedWorkspaces'),
   }
 }
 
@@ -624,6 +626,67 @@ function parseSessionBody(body: unknown) {
   }
 }
 
+function optionalStringArray(value: unknown, field: string): string[] | undefined {
+  if (value === undefined) return undefined
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+    throw new HttpError(400, `"${field}" must be a string array`)
+  }
+  return value.map((item) => item.trim()).filter(Boolean)
+}
+
+function assertAllowedWorkspace(cwd: string | undefined, field = 'cwd'): void {
+  if (!cwd) return
+  const allowed = loadConfig().policy.allowedWorkspaces ?? []
+  if (allowed.length === 0) return
+  const target = path.resolve(cwd)
+  const matched = allowed.some((root) => {
+    const resolvedRoot = path.resolve(root)
+    return target === resolvedRoot || target.startsWith(`${resolvedRoot}${path.sep}`)
+  })
+  if (!matched) {
+    throw new HttpError(403, `"${field}" is outside allowed workspaces`)
+  }
+}
+
+function sessionApiDocs() {
+  return {
+    auth: {
+      localLogin: 'POST /api/auth/local',
+      header: 'Authorization: Bearer <token>',
+    },
+    createSession: {
+      method: 'POST',
+      path: '/api/sessions',
+      body: {
+        from: { adapter: 'opencode' },
+        to: { adapter: 'claude-code' },
+        initialPrompt: 'Write the article from this brief...',
+        mode: 'freeform',
+        maxRounds: 1,
+        cwd: '/optional/project/path',
+        context: {
+          text: 'Background context',
+          rules: 'Output markdown only',
+          files: ['docs/brief.md'],
+        },
+      },
+    },
+    readSession: 'GET /api/sessions/:id',
+    control: [
+      'POST /api/sessions/:id/message',
+      'POST /api/sessions/:id/nudge',
+      'POST /api/sessions/:id/pause',
+      'POST /api/sessions/:id/resume',
+      'POST /api/sessions/:id/stop',
+    ],
+    agents: {
+      list: 'GET /api/agents',
+      refreshList: 'GET /api/agents?refresh=1',
+      diagnostics: 'GET /api/agents/:name/diagnostics?refresh=1',
+    },
+  }
+}
+
 function parsePipelineBody(body: unknown) {
   const data = requireRecord(body, 'body')
   const stepsValue = data.steps
@@ -721,6 +784,11 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return json(res, 200, { ok: true })
       }
 
+      // GET /api/docs — public machine-readable HTTP API reference.
+      if (pathname === '/api/docs' && method === 'GET') {
+        return json(res, 200, sessionApiDocs())
+      }
+
       // POST /api/auth/login
       if (pathname === '/api/auth/login' && method === 'POST') {
         const { email, password } = parseAuthBody(await parseBody(req))
@@ -800,6 +868,15 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const refresh = url.searchParams.get('refresh') === '1'
         const agents = await listAgentModels(authUser!.userId, agentCatalog, { refresh })
         return json(res, 200, agents)
+      }
+
+      // GET /api/agents/:name/diagnostics
+      const agentDiagnosticsMatch = pathname.match(/^\/api\/agents\/([^/]+)\/diagnostics$/)
+      if (agentDiagnosticsMatch && method === 'GET') {
+        const refresh = url.searchParams.get('refresh') !== '0'
+        const diagnostic = await agentCatalog.diagnoseAgent(decodeURIComponent(agentDiagnosticsMatch[1]), refresh)
+        if (!diagnostic) return json(res, 404, { error: 'Not found' })
+        return json(res, 200, diagnostic)
       }
 
       // POST /api/agents
@@ -891,10 +968,30 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           ...current,
           server: { ...current.server, port: global.port },
           defaults: { maxRounds: global.maxRounds, mode: global.mode },
-          policy: { ...current.policy, maxRounds: global.maxRounds },
+          policy: {
+            ...current.policy,
+            maxRounds: global.maxRounds,
+            ...(global.allowedWorkspaces !== undefined ? { allowedWorkspaces: global.allowedWorkspaces } : {}),
+          },
         }
         writeConfig(updated)
         return json(res, 200, loadConfig())
+      }
+
+      // GET /api/deploy/check
+      if (pathname === '/api/deploy/check' && method === 'GET') {
+        const startedAt = Date.now()
+        const agents = await listAgentModels(authUser!.userId, agentCatalog)
+        return json(res, 200, {
+          ok: true,
+          node: process.version,
+          pid: process.pid,
+          uptimeMs: Math.round(process.uptime() * 1000),
+          configPath: getConfigPath(),
+          agents: agents.length,
+          checkedAt: Date.now(),
+          durationMs: Date.now() - startedAt,
+        })
       }
 
       // POST /api/config/agents
@@ -955,6 +1052,9 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       if (pathname === '/api/pipelines' && method === 'POST') {
         const defaults = loadConfig().defaults
         const params = parsePipelineBody(await parseBody(req))
+        for (const [index, step] of params.steps.entries()) {
+          assertAllowedWorkspace(step.cwd, `steps[${index}].cwd`)
+        }
         const pipeline = router.startPipeline({
           userId: authUser!.userId,
           name: params.name,
@@ -1011,6 +1111,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       if (pathname === '/api/sessions' && method === 'POST') {
         const defaults = loadConfig().defaults
         const params = parseSessionBody(await parseBody(req))
+        assertAllowedWorkspace(params.cwd)
         const template = params.templateId ? templates.find((item) => item.id === params.templateId) : undefined
         if (params.templateId && !template) {
           throw new HttpError(400, 'Unknown template_id')

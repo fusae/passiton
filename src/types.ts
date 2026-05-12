@@ -214,6 +214,7 @@ export interface PolicyConfig {
   messageRetentionMs: number // ms, default 30 days, 0 disables GC
   sessionTimeout: number   // ms, default 2 * 60 * 60 * 1000
   retries: number          // default 1
+  allowedWorkspaces?: string[] // empty means unrestricted
 }
 
 // Agent registration config

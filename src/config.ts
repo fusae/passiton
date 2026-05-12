@@ -1,7 +1,7 @@
 // Config module — load ~/.turing/config.json and merge with defaults
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
-import { join, dirname } from 'path'
+import { delimiter, join, dirname } from 'path'
 import { homedir } from 'os'
 import type { AppConfig, SessionMode } from './types.js'
 import { defaultClaudeCodeArgs } from './adapters/claude-code.js'
@@ -34,6 +34,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     messageRetentionMs: 30 * 24 * 60 * 60 * 1000,
     sessionTimeout: 7_200_000,
     retries: 1,
+    allowedWorkspaces: [],
   },
 }
 
@@ -103,6 +104,7 @@ function validateConfig(config: AppConfig): AppConfig {
   assertNonNegativeInt(config.policy.messageRetentionMs, 'policy.messageRetentionMs')
   assertPositiveInt(config.policy.sessionTimeout, 'policy.sessionTimeout')
   assertNonNegativeInt(config.policy.retries, 'policy.retries')
+  assertStringArray(config.policy.allowedWorkspaces ?? [], 'policy.allowedWorkspaces')
 
   if (!isPlainObject(config.agents)) {
     throw new Error('[config] "agents" must be an object')
@@ -183,6 +185,7 @@ function normalizeConfig(config: AppConfig): AppConfig {
     policy: {
       ...config.policy,
       maxRounds: defaults.maxRounds,
+      allowedWorkspaces: parseListEnv(process.env.TURING_ALLOWED_WORKSPACES) ?? config.policy?.allowedWorkspaces ?? [],
     },
   }
 }
@@ -248,6 +251,11 @@ function parseBooleanEnv(value: string | undefined): boolean | undefined {
   if (['1', 'true', 'yes', 'on'].includes(value.toLowerCase())) return true
   if (['0', 'false', 'no', 'off'].includes(value.toLowerCase())) return false
   return undefined
+}
+
+function parseListEnv(value: string | undefined): string[] | undefined {
+  if (value === undefined) return undefined
+  return value.split(delimiter).map((item) => item.trim()).filter(Boolean)
 }
 
 export function writeConfig(config: AppConfig): void {
