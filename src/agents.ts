@@ -168,8 +168,8 @@ export class AgentCatalog {
       JSON.stringify(entry.config?.env ?? {}),
     ].join(':')
     const cached = this.probeCache.get(cacheKey)
-    if (!refresh && cached && cached.expiresAt > Date.now()) {
-      return cached.value
+    if (!refresh) {
+      return cached?.value ?? { healthy: entry.source === 'discovered' || entry.availableForSessions }
     }
 
     const versionProbe = await probeCommand(entry.command!)

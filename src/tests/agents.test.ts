@@ -116,6 +116,34 @@ echo TURING_READY
   }
 })
 
+test('configured local agents skip command probes unless refreshed', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-agent-no-probe-'))
+  const command = join(dir, 'codex')
+  writeExecutable(command, `
+if [ "$1" = "--version" ]; then exit 2; fi
+exit 2
+`)
+
+  try {
+    const catalog = new AgentCatalog({
+      codex: {
+        adapter: 'codex',
+        command,
+        args: ['{prompt}'],
+        timeout: 1_000,
+      },
+    }, true)
+    const agents = await catalog.listAgents()
+    const codex = agents.find((agent) => agent.name === 'codex')
+
+    assert.equal(codex?.source, 'configured')
+    assert.equal(codex?.healthy, true)
+    assert.equal(codex?.version, undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('configured local agents fail health when smoke run fails', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-smoke-fail-'))
   const command = join(dir, 'codex')
