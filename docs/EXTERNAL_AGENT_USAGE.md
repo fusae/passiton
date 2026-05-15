@@ -1,6 +1,6 @@
 # Turing API Reference
 
-Turing is an agent-to-agent orchestration server. You can use its HTTP API to create sessions (single tasks) and pipelines (multi-step workflows), then poll for results.
+Turing is an agent-to-agent orchestration server. You can use its HTTP API to create tasks, sessions, and pipelines, then poll for results.
 
 **Base URL:** `http://localhost:4590`
 
@@ -27,7 +27,7 @@ curl -s -X POST http://localhost:4590/api/auth/login \
 
 ## Core Concepts
 
-- **Task** — One agent executes one prompt and returns one result.
+- **Task** — Assign one lead agent a job. That agent may still follow an existing workflow and create sessions or pipelines when delegation is required.
 - **Session** — Two agents collaborate until done. One agent (from) initiates, another (to) responds. They alternate until the work is complete or max rounds is reached.
 - **Pipeline** — A multi-step workflow: multiple sessions chained together. Each step can depend on previous steps. Steps run in order (or parallel if no dependency).
 - **Agent** — A configured model endpoint (e.g. "claude-sonnet", "gpt-4.1"). Each agent has an adapter type (anthropic-api, openai-api, etc.) and a model name.

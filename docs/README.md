@@ -69,7 +69,7 @@ GET /api/agents
 
 ---
 
-### 2. 创建单任务 Task
+### 2. 创建 Task
 
 ```
 POST /api/tasks
@@ -90,14 +90,14 @@ POST /api/tasks
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `agent.adapter` | ✅ | 执行任务的 agent 名称 |
+| `agent.adapter` | ✅ | 负责接单和调度的主 agent 名称 |
 | `prompt` | ✅ | 任务内容 |
 | `agent.label` | ❌ | 显示用名称 |
 | `context.files` | ❌ | 文件路径列表，创建任务时读取并注入 |
 | `context.rules` | ❌ | 约束 / 规则文本 |
 | `context.text` | ❌ | 背景信息 |
 | `cwd` | ❌ | agent 工作目录 |
-| `systemPrompt` | ❌ | 覆盖默认单任务系统提示 |
+| `systemPrompt` | ❌ | 覆盖默认任务系统提示 |
 
 **返回**：创建好的 task 对象，初始状态为 `queued`。
 

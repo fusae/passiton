@@ -199,7 +199,7 @@ test('POST /api/sessions rejects cwd outside allowed workspaces', async () => {
   }
 })
 
-test('POST /api/tasks runs a single-agent task and exposes its result', async () => {
+test('POST /api/tasks runs a lead-agent task and exposes its result', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'tasks@example.com')
     const create = await fetch(`${baseUrl}/api/tasks`, {
@@ -236,7 +236,8 @@ test('POST /api/tasks runs a single-agent task and exposes its result', async ()
     configureRouter: (router) => {
       router.registerAdapter(new StubAdapter('opencode', async (_session, message, opts) => {
         assert.equal(message, 'write article')
-        assert.match(opts?.systemPrompt ?? '', /single task inside Turing/)
+        assert.match(opts?.systemPrompt ?? '', /lead agent for a task inside Turing/)
+        assert.match(opts?.systemPrompt ?? '', /requires delegation/)
         assert.match(opts?.systemPrompt ?? '', /markdown only/)
         return '[RESULT]article ready[/RESULT]'
       }))

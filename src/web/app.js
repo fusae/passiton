@@ -949,7 +949,7 @@ function renderTasks() {
             <div class="stat-card">
               <div class="label">Completed</div>
               <div class="stat-value" id="task-stat-done">0</div>
-              <div class="stat-sub">single-agent tasks</div>
+              <div class="stat-sub">lead-agent tasks</div>
             </div>
             <div class="stat-card">
               <div class="label">Failed</div>
@@ -2596,7 +2596,7 @@ window.showNewTaskModal = async function() {
       <div class="modal-head">
         <div>
           <h3>New Task</h3>
-          <p>Run one agent on one task.</p>
+          <p>Assign one lead agent to run the workflow.</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
       </div>

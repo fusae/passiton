@@ -16,8 +16,10 @@ const TURING_AWARENESS = 'You are operating inside Turing, an agent-to-agent orc
 
 export function generateTaskSystemPrompt(context?: SessionContext): string {
   return [
-    `You are executing a single task inside Turing.`,
-    `Complete the task directly and do not wait for another agent.`,
+    `You are the lead agent for a task inside Turing.`,
+    `Follow the existing workflow and repository instructions for this task.`,
+    `If the workflow requires delegation, create the necessary Turing sessions or pipelines and use their outputs instead of collapsing the work into one-agent execution.`,
+    `Do not assume you must do every step yourself just because this task was assigned to you.`,
     `When the task is complete, wrap your final result or summary in [RESULT]...[/RESULT] tags.`,
     formatContextBlock(context),
   ].filter(Boolean).join('\n')
