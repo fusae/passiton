@@ -43,6 +43,7 @@ const MODEL_OPTIONS_BY_ADAPTER = {
 const state = {
   user: null,
   sessions: [],
+  tasks: [],
   pipelines: [],
   agents: [],
   templates: [],
@@ -54,6 +55,8 @@ const state = {
   currentView: 'sessions',
   currentSessionId: null,
   currentSession: null,
+  currentTaskId: null,
+  currentTask: null,
   currentPipelineId: null,
   currentPipeline: null,
   expandedWorkflowStep: null,
@@ -78,6 +81,8 @@ const routes = {
   '/': 'landing',
   '/sessions': 'sessions',
   '/session/:id': 'session',
+  '/tasks': 'tasks',
+  '/task/:id': 'task',
   '/workflows': 'workflows',
   '/workflow/:id': 'workflow',
   '/settings': 'settings',
@@ -107,6 +112,11 @@ function render() {
   } else if (path.startsWith('/session/')) {
     const id = path.split('/')[2]
     renderSession(id)
+  } else if (path === '/tasks') {
+    renderTasks()
+  } else if (path.startsWith('/task/')) {
+    const id = path.split('/')[2]
+    renderTask(id)
   } else if (path === '/workflows') {
     renderWorkflows()
   } else if (path.startsWith('/workflow/')) {
@@ -256,6 +266,9 @@ function renderSidebar(active) {
         <a href="/sessions" class="${active === 'sessions' ? 'active' : ''}">
           <span class="nav-icon">◉</span> Sessions
         </a>
+        <a href="/tasks" class="${active === 'tasks' ? 'active' : ''}">
+          <span class="nav-icon">▣</span> Tasks
+        </a>
         <a href="/workflows" class="${active === 'workflows' ? 'active' : ''}">
           <span class="nav-icon">⛓</span> Workflows
         </a>
@@ -321,6 +334,12 @@ function handleWsEvent(event) {
     case 'session:paused':
     case 'session:resumed':
       applySessionUpdate(event.payload)
+      break
+    case 'task:created':
+    case 'task:updated':
+    case 'task:error':
+    case 'task:done':
+      applyTaskUpdate(event.payload)
       break
     case 'session:deleted':
       removeSessionFromList(event.payload.id)
@@ -390,6 +409,25 @@ function applyPipelineUpdate(pipeline) {
   }
 
   renderPipelineCards()
+}
+
+function applyTaskUpdate(task) {
+  if (!task?.id) return
+  const index = state.tasks.findIndex(item => item.id === task.id)
+  if (index >= 0) {
+    state.tasks[index] = { ...state.tasks[index], ...task }
+  } else {
+    state.tasks.unshift(task)
+  }
+
+  if (state.currentTaskId === task.id) {
+    state.currentTask = { ...(state.currentTask || {}), ...task }
+    renderTaskHeader(state.currentTask)
+    renderTaskContent(state.currentTask)
+  }
+
+  renderTaskStats()
+  renderTaskCards()
 }
 
 function removeSessionFromList(id) {
@@ -501,6 +539,15 @@ async function loadSessions() {
     state.sessions = await api('/api/sessions')
   } catch (err) {
     console.error('Failed to load sessions:', err)
+  }
+}
+
+async function loadTasks() {
+  try {
+    state.tasks = await api('/api/tasks')
+  } catch (err) {
+    console.error('Failed to load tasks:', err)
+    state.tasks = []
   }
 }
 
@@ -806,6 +853,8 @@ window.handleLocalLogin = async function() {
 }
 
 function renderSessions() {
+  state.currentTaskId = null
+  state.currentTask = null
   document.body.innerHTML = `
     <div class="app-layout">
       ${renderSidebar('sessions')}
@@ -860,6 +909,108 @@ function renderSessions() {
 
   updateThemeButton()
   loadSessionsData()
+}
+
+function renderTasks() {
+  state.currentSessionId = null
+  state.currentSession = null
+  state.currentTaskId = null
+  state.currentTask = null
+  state.currentPipelineId = null
+  state.currentPipeline = null
+  document.body.innerHTML = `
+    <div class="app-layout">
+      ${renderSidebar('tasks')}
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-left">
+            <h2>Tasks</h2>
+          </div>
+          <div class="topbar-right">
+            <button class="btn btn-primary btn-sm" onclick="window.showNewTaskModal()">+ New Task</button>
+            <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
+            ${renderUserMenu()}
+          </div>
+        </header>
+
+        <div class="content">
+          <div class="stats-row">
+            <div class="stat-card">
+              <div class="label">Running Tasks</div>
+              <div class="stat-value grad-text" id="task-stat-running">0</div>
+              <div class="stat-sub">running right now</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">Queued</div>
+              <div class="stat-value" id="task-stat-queued">0</div>
+              <div class="stat-sub">waiting to start</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">Completed</div>
+              <div class="stat-value" id="task-stat-done">0</div>
+              <div class="stat-sub">single-agent tasks</div>
+            </div>
+            <div class="stat-card">
+              <div class="label">Failed</div>
+              <div class="stat-value" id="task-stat-error">0</div>
+              <div class="stat-sub">need attention</div>
+            </div>
+          </div>
+
+          <div class="flex-between mb-24">
+            <h3>Recent Tasks</h3>
+          </div>
+          <div id="task-cards" class="session-cards task-cards"></div>
+        </div>
+      </div>
+    </div>
+  `
+
+  updateThemeButton()
+  loadTasksData()
+}
+
+async function loadTasksData() {
+  await Promise.all([
+    loadTasks(),
+    loadAgents(),
+  ])
+  renderTaskStats()
+  renderTaskCards()
+}
+
+function renderTaskStats() {
+  const running = document.getElementById('task-stat-running')
+  const queued = document.getElementById('task-stat-queued')
+  const done = document.getElementById('task-stat-done')
+  const error = document.getElementById('task-stat-error')
+  if (running) running.textContent = state.tasks.filter(task => task.status === 'running').length
+  if (queued) queued.textContent = state.tasks.filter(task => task.status === 'queued').length
+  if (done) done.textContent = state.tasks.filter(task => task.status === 'done').length
+  if (error) error.textContent = state.tasks.filter(task => task.status === 'error').length
+}
+
+function renderTaskCards() {
+  const container = document.getElementById('task-cards')
+  if (!container) return
+  if (state.tasks.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No tasks yet. Create your first one!</p>'
+    return
+  }
+  container.innerHTML = state.tasks.map(task => `
+    <a href="/task/${task.id}" class="card session-card task-card">
+      <div class="session-card-header">
+        <span class="session-card-title">${escapeHtml(agentLabel(task.agent))}</span>
+        <span class="badge ${taskBadgeClass(task.status)}">${escapeHtml(task.status)}</span>
+      </div>
+      <div class="task-card-prompt">${escapeHtml(task.prompt)}</div>
+      <div class="session-card-meta">
+        <span>⏱ ${formatTime(task.updatedAt)}</span>
+        ${task.cwd ? `<span>⌂ ${escapeHtml(task.cwd)}</span>` : ''}
+      </div>
+    </a>
+  `).join('')
 }
 
 async function loadSessionsData() {
@@ -921,6 +1072,8 @@ function renderSessionCards() {
 function renderWorkflows() {
   state.currentSessionId = null
   state.currentSession = null
+  state.currentTaskId = null
+  state.currentTask = null
   state.currentPipelineId = null
   state.currentPipeline = null
   document.body.innerHTML = `
@@ -951,6 +1104,120 @@ function renderWorkflows() {
 
   updateThemeButton()
   loadWorkflowsData()
+}
+
+async function renderTask(id) {
+  state.currentSessionId = null
+  state.currentSession = null
+  state.currentTaskId = id
+  state.currentPipelineId = null
+  state.currentPipeline = null
+
+  let task = null
+  try {
+    task = await api(`/api/tasks/${id}`)
+  } catch {
+    document.body.innerHTML = '<div>Task not found</div>'
+    return
+  }
+  state.currentTask = task
+
+  document.body.innerHTML = `
+    <div class="app-layout">
+      ${renderSidebar('tasks')}
+
+      <div class="main">
+        <header class="topbar">
+          <div class="topbar-left">
+            <a href="/tasks" class="btn btn-ghost btn-sm">← Back</a>
+            <h2>${escapeHtml(agentLabel(task.agent))}</h2>
+            <span id="task-status-badge" class="badge ${taskBadgeClass(task.status)}">${escapeHtml(task.status)}</span>
+          </div>
+          <div class="topbar-right" id="task-actions">
+            ${renderTaskActions(task)}
+            <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
+            ${renderUserMenu()}
+          </div>
+        </header>
+
+        <div class="content task-detail" id="task-content"></div>
+      </div>
+    </div>
+  `
+
+  renderTaskContent(task)
+  updateThemeButton()
+}
+
+function renderTaskActions(task) {
+  return task.status === 'queued' || task.status === 'running'
+    ? '<button class="btn btn-danger btn-sm" onclick="window.stopCurrentTask()">■ Stop</button>'
+    : ''
+}
+
+function renderTaskHeader(task) {
+  const badge = document.getElementById('task-status-badge')
+  if (badge) {
+    badge.className = `badge ${taskBadgeClass(task.status)}`
+    badge.textContent = task.status
+  }
+  const actions = document.getElementById('task-actions')
+  if (actions) {
+    actions.innerHTML = `
+      ${renderTaskActions(task)}
+      <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
+      ${renderUserMenu()}
+    `
+    updateThemeButton()
+  }
+}
+
+function renderTaskContent(task) {
+  const container = document.getElementById('task-content')
+  if (!container || !task) return
+  container.innerHTML = `
+    <div class="task-main">
+      <section class="card task-section">
+        <div class="label mb-8">Prompt</div>
+        <div class="task-copy">${renderMarkdown(task.prompt || '')}</div>
+      </section>
+      ${task.result ? `
+        <section class="card task-section">
+          <div class="label mb-8">Result</div>
+          <div class="task-copy">${renderMarkdown(task.result)}</div>
+        </section>
+      ` : ''}
+      ${task.output ? `
+        <section class="card task-section">
+          <div class="label mb-8">Full Output</div>
+          <div class="task-copy">${renderMarkdown(task.output)}</div>
+        </section>
+      ` : ''}
+      ${task.errorMessage ? `
+        <section class="error-box">
+          <div class="error-title">Task error</div>
+          <div class="error-detail">${escapeHtml(task.errorMessage)}</div>
+        </section>
+      ` : ''}
+    </div>
+    <aside class="card task-meta">
+      <div class="label mb-16">Task Info</div>
+      <div class="panel-kv">
+        <div class="panel-kv-row"><span class="kv-label">Task ID</span><span class="kv-value mono">${escapeHtml(task.id.slice(0, 12))}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">Agent</span><span class="kv-value">${escapeHtml(agentLabel(task.agent))}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">Status</span><span class="badge ${taskBadgeClass(task.status)}">${escapeHtml(task.status)}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">Created</span><span class="kv-value">${new Date(task.createdAt).toLocaleString()}</span></div>
+        ${task.startedAt ? `<div class="panel-kv-row"><span class="kv-label">Started</span><span class="kv-value">${new Date(task.startedAt).toLocaleString()}</span></div>` : ''}
+        ${task.finishedAt ? `<div class="panel-kv-row"><span class="kv-label">Finished</span><span class="kv-value">${new Date(task.finishedAt).toLocaleString()}</span></div>` : ''}
+        ${task.cwd ? `<div class="panel-kv-row"><span class="kv-label">CWD</span><span class="kv-value mono">${escapeHtml(task.cwd)}</span></div>` : ''}
+      </div>
+      ${task.lastAgentOutput ? `
+        <div class="divider"></div>
+        <div class="label mb-8">Last Agent Output</div>
+        <pre class="code-block">${escapeHtml(task.lastAgentOutput)}</pre>
+      ` : ''}
+    </aside>
+  `
 }
 
 async function loadWorkflowsData() {
@@ -2317,6 +2584,98 @@ window.createSession = async function(e) {
   }
 }
 
+window.showNewTaskModal = async function() {
+  if (!state.agents.length) await loadAgents()
+  const readyAgents = state.agents.filter(agent => agent.status === 'ready')
+  const agents = readyAgents.length ? readyAgents : state.agents
+  const noAgents = agents.length === 0
+  const options = agents.map(agent => `<option value="${escapeAttr(agent.name)}">${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
+
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3>New Task</h3>
+          <p>Run one agent on one task.</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+      </div>
+      ${noAgents ? `
+        <div class="template-empty-agents" style="margin-bottom: 20px;">
+          <span>No assistants configured yet.</span>
+          <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
+        </div>
+      ` : ''}
+      <form onsubmit="window.createTask(event)">
+        <div class="form-group">
+          <label>Agent</label>
+          <select class="input" name="agent" required ${noAgents ? 'disabled' : ''}>${options}</select>
+        </div>
+        <div class="form-group">
+          <label>Working Directory</label>
+          <input class="input" name="cwd" placeholder="/path/to/project">
+        </div>
+        <div class="form-group">
+          <label>Prompt</label>
+          <textarea class="input" name="prompt" rows="6" required placeholder="Describe the task..."></textarea>
+        </div>
+        <details class="context-details">
+          <summary>Context</summary>
+          <div class="form-group">
+            <label>Rules / Constraints</label>
+            <textarea class="input" name="contextRules" rows="3"></textarea>
+          </div>
+          <div class="form-group">
+            <label>Background</label>
+            <textarea class="input" name="contextText" rows="3"></textarea>
+          </div>
+          <div class="form-group">
+            <label>Files</label>
+            <textarea class="input" name="contextFiles" rows="2" placeholder="docs/brief.md, src/index.ts"></textarea>
+          </div>
+        </details>
+        <div class="form-group">
+          <label>System Prompt</label>
+          <textarea class="input" name="systemPrompt" rows="4" placeholder="Optional override"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary" ${noAgents ? 'disabled' : ''}>Create</button>
+        </div>
+      </form>
+    </div>
+  `)
+}
+
+window.createTask = async function(e) {
+  e.preventDefault()
+  const fd = new FormData(e.target)
+  const body = {
+    agent: { adapter: fd.get('agent') },
+    prompt: String(fd.get('prompt') || '').trim(),
+    cwd: String(fd.get('cwd') || '').trim() || undefined,
+    context: buildContextFromForm(fd),
+    systemPrompt: String(fd.get('systemPrompt') || '').trim() || undefined,
+  }
+  try {
+    const task = await api('/api/tasks', 'POST', compactObject(body))
+    closeModal()
+    navigate(`/task/${task.id}`)
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.stopCurrentTask = async function() {
+  if (!state.currentTaskId) return
+  try {
+    const task = await api(`/api/tasks/${state.currentTaskId}/stop`, 'POST')
+    applyTaskUpdate(task)
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
 window.showNewWorkflowModal = async function() {
   if (!state.config) await loadConfig()
   if (!state.agents.length) await loadAgents()
@@ -2958,6 +3317,12 @@ function preferredAgentName(agents, preferredAdapter, avoidName) {
   if (preferred) return preferred.name
   const firstDifferent = agents.find(agent => agent.name !== avoidName)
   return (firstDifferent || agents[0]).name
+}
+
+function taskBadgeClass(status) {
+  if (status === 'running') return 'badge-running'
+  if (status === 'queued') return 'badge-queued'
+  return `badge-${status}`
 }
 
 function providerIcon(provider) {

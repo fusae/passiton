@@ -185,6 +185,10 @@ h3 { font-size: 1.15rem; font-weight: 600; }
 .badge-error::before   { background: var(--red); }
 .badge-paused  { background: rgba(234,179,8,0.12); color: var(--yellow); }
 .badge-paused::before  { background: var(--yellow); }
+.badge-running { background: rgba(34,197,94,0.12); color: var(--green); }
+.badge-running::before { background: var(--green); }
+.badge-queued { background: rgba(234,179,8,0.12); color: var(--yellow); }
+.badge-queued::before { background: var(--yellow); }
 .badge-stopped { background: rgba(148,163,184,0.14); color: var(--text-muted); }
 .badge-stopped::before { background: var(--text-muted); }
 .badge-pending, .badge-no_key { background: rgba(234,179,8,0.12); color: var(--yellow); }
@@ -1038,6 +1042,50 @@ textarea.input { resize: vertical; min-height: 80px; }
   cursor: grab;
 }
 
+/* --- Task UI --- */
+.task-card-prompt {
+  min-height: 48px;
+  margin-bottom: 14px;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.task-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  align-items: start;
+}
+.task-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.task-section.card:hover,
+.task-meta.card:hover {
+  transform: none;
+}
+.task-copy {
+  color: var(--text-secondary);
+  word-break: break-word;
+}
+.task-copy > :last-child {
+  margin-bottom: 0;
+}
+.task-meta .panel-kv-row {
+  gap: 12px;
+}
+.task-meta .kv-value {
+  max-width: 190px;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
 /* ============================================================
    Landing-specific
    ============================================================ */
@@ -1531,6 +1579,9 @@ textarea.input { resize: vertical; min-height: 80px; }
     grid-template-columns: 1fr;
   }
   .workflow-step-grid {
+    grid-template-columns: 1fr;
+  }
+  .task-detail {
     grid-template-columns: 1fr;
   }
   .workflow-log div {

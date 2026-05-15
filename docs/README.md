@@ -69,7 +69,53 @@ GET /api/agents
 
 ---
 
-### 2. 创建对话 Session
+### 2. 创建单任务 Task
+
+```
+POST /api/tasks
+```
+
+**请求体**：
+```json
+{
+  "agent": { "adapter": "opencode", "label": "OpenCode" },
+  "prompt": "把这条推荐写成一篇公众号文章",
+  "context": {
+    "rules": "按 media-management 的写文规程执行",
+    "text": "推荐标题、摘要、原文链接、建议角度"
+  },
+  "cwd": "/path/to/media-management"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `agent.adapter` | ✅ | 执行任务的 agent 名称 |
+| `prompt` | ✅ | 任务内容 |
+| `agent.label` | ❌ | 显示用名称 |
+| `context.files` | ❌ | 文件路径列表，创建任务时读取并注入 |
+| `context.rules` | ❌ | 约束 / 规则文本 |
+| `context.text` | ❌ | 背景信息 |
+| `cwd` | ❌ | agent 工作目录 |
+| `systemPrompt` | ❌ | 覆盖默认单任务系统提示 |
+
+**返回**：创建好的 task 对象，初始状态为 `queued`。
+
+### 3. 查看 Task
+
+```
+GET /api/tasks
+GET /api/tasks/:id
+GET /api/tasks?status=done
+POST /api/tasks/:id/stop
+```
+
+状态：`queued` / `running` / `done` / `error` / `stopped`。  
+完成后，`output` 是完整输出，`result` 是 `[RESULT]...[/RESULT]` 中提取出的最终结果。
+
+---
+
+### 4. 创建对话 Session
 
 ```
 POST /api/sessions
@@ -129,7 +175,7 @@ POST /api/sessions
 
 ---
 
-### 3. 查看所有 Session
+### 5. 查看所有 Session
 
 ```
 GET /api/sessions
@@ -144,7 +190,7 @@ GET /api/sessions?status=active
 
 ---
 
-### 4. 查看单个 Session（含消息）
+### 6. 查看单个 Session（含消息）
 
 ```
 GET /api/sessions/:id
@@ -181,7 +227,7 @@ GET /api/sessions/:id
 
 ---
 
-### 5. 暂停对话
+### 7. 暂停对话
 
 ```
 POST /api/sessions/:id/pause
@@ -191,7 +237,7 @@ POST /api/sessions/:id/pause
 
 ---
 
-### 6. 继续对话
+### 8. 继续对话
 
 ```
 POST /api/sessions/:id/resume
@@ -208,7 +254,7 @@ POST /api/sessions/:id/resume
 
 ---
 
-### 7. 停止对话
+### 9. 停止对话
 
 ```
 POST /api/sessions/:id/stop
@@ -218,7 +264,7 @@ POST /api/sessions/:id/stop
 
 ---
 
-### 8. 人类插入消息
+### 10. 人类插入消息
 
 ```
 POST /api/sessions/:id/message
@@ -239,7 +285,7 @@ POST /api/sessions/:id/message
 
 ---
 
-### 9. 接管对话（Takeover）
+### 11. 接管对话（Takeover）
 
 ```
 POST /api/sessions/:id/takeover
@@ -249,7 +295,7 @@ POST /api/sessions/:id/takeover
 
 ---
 
-### 10. 释放对话（Release）
+### 12. 释放对话（Release）
 
 ```
 POST /api/sessions/:id/release

@@ -5,7 +5,7 @@ import { execFile, execFileSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
-import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts } from './types.js'
+import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts, Task } from './types.js'
 import * as state from './state.js'
 import { decryptKey } from './keyvault.js'
 import {
@@ -13,7 +13,7 @@ import {
   detectCompletion,
   DEFAULT_POLICY,
 } from './policy.js'
-import { generateSystemPrompts } from './prompts.js'
+import { generateSystemPrompts, generateTaskSystemPrompt } from './prompts.js'
 
 const MAX_HISTORY_MESSAGES = 20
 const DISCUSS_MIN_ROUNDS = 3
@@ -71,6 +71,143 @@ export class Router extends EventEmitter {
 
   listAdapters(): Adapter[] {
     return Array.from(this.adapters.values())
+  }
+
+  // ── Task control ────────────────────────────────────────────────────────────
+
+  startTask(params: {
+    userId?: string
+    agent: AgentRef
+    prompt: string
+    context?: SessionContext
+    systemPrompt?: string
+    cwd?: string
+  }): Task {
+    const task = state.createTask({
+      id: uuidv4(),
+      userId: params.userId,
+      agent: params.agent,
+      prompt: params.prompt,
+      context: params.context,
+      systemPrompt: params.systemPrompt,
+      cwd: params.cwd,
+    })
+
+    this.emit('event', { type: 'task:created', payload: task } satisfies WsEvent)
+
+    setImmediate(() => {
+      this.runTask(task.id).catch((err) => {
+        console.error(`[router] task error ${task.id}:`, err)
+      })
+    })
+
+    return task
+  }
+
+  recoverTasks(): void {
+    for (const task of state.listTasks({ status: 'running' })) {
+      const failed = state.updateTask(task.id, {
+        status: 'error',
+        errorMessage: 'Task interrupted by server restart',
+        finishedAt: Date.now(),
+      }, task.userId)
+      this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
+    }
+    for (const task of state.listTasks({ status: 'queued' })) {
+      setImmediate(() => {
+        this.runTask(task.id).catch((err) => {
+          console.error(`[router] recovered task error ${task.id}:`, err)
+        })
+      })
+    }
+  }
+
+  async stopTask(id: string): Promise<Task> {
+    const task = state.getTask(id)
+    if (!task) throw new Error(`Task ${id} not found`)
+    if (task.status === 'done' || task.status === 'error' || task.status === 'stopped') return task
+    const stopped = state.updateTask(id, {
+      status: 'stopped',
+      finishedAt: Date.now(),
+    }, task.userId)
+    this.emit('event', { type: 'task:updated', payload: stopped } satisfies WsEvent)
+    return stopped
+  }
+
+  private async runTask(taskId: string): Promise<void> {
+    const task = state.getTask(taskId)
+    if (!task || task.status !== 'queued') return
+
+    const adapter = this.resolveAdapter(task.agent.adapter, task.userId)
+    if (!adapter) {
+      if (state.getTask(task.id, task.userId)?.status === 'stopped') return
+      const failed = state.updateTask(task.id, {
+        status: 'error',
+        errorMessage: `Adapter not found: ${task.agent.adapter}`,
+        finishedAt: Date.now(),
+      }, task.userId)
+      this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
+      return
+    }
+
+    const running = state.updateTask(task.id, {
+      status: 'running',
+      startedAt: Date.now(),
+    }, task.userId)
+    this.emit('event', { type: 'task:updated', payload: running } satisfies WsEvent)
+
+    let lastOutput = ''
+    const opts: AdapterSendOpts = {
+      systemPrompt: task.systemPrompt ?? generateTaskSystemPrompt(task.context),
+      onOutput: (line) => {
+        if (state.getTask(task.id, task.userId)?.status === 'stopped') return
+        lastOutput = line
+        state.updateTask(task.id, { lastAgentOutput: line }, task.userId)
+      },
+    }
+    this.applyAdapterSecret(adapter, task.userId, opts)
+
+    try {
+      const result = await this.callTaskWithRetry(adapter, task, opts)
+      if (state.getTask(task.id, task.userId)?.status === 'stopped') return
+      const output = result.content
+      const done = state.updateTask(task.id, {
+        status: 'done',
+        output,
+        result: extractResultSummary(output),
+        lastAgentOutput: lastOutput || output,
+        finishedAt: Date.now(),
+      }, task.userId)
+      this.emit('event', { type: 'task:done', payload: done } satisfies WsEvent)
+    } catch (err) {
+      if (state.getTask(task.id, task.userId)?.status === 'stopped') return
+      const failed = state.updateTask(task.id, {
+        status: 'error',
+        errorMessage: err instanceof Error ? err.message : String(err),
+        lastAgentOutput: readLastAgentOutput(err) || lastOutput,
+        finishedAt: Date.now(),
+      }, task.userId)
+      this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
+    }
+  }
+
+  private async callTaskWithRetry(adapter: Adapter, task: Task, opts?: AdapterSendOpts): Promise<AdapterResponse> {
+    const pseudoSession = buildTaskSession(task)
+    let lastErr: unknown
+
+    for (let attempt = 0; attempt <= this.policy.retries; attempt++) {
+      try {
+        const result = await adapter.send(pseudoSession, task.prompt, opts)
+        return normalizeAdapterResponse(result)
+      } catch (err) {
+        lastErr = err
+        if (attempt < this.policy.retries) {
+          await sleep(1000)
+        }
+      }
+    }
+
+    throw lastErr
   }
 
   // ── Session control ─────────────────────────────────────────────────────────
@@ -526,11 +663,15 @@ export class Router extends EventEmitter {
 
     const opts: AdapterSendOpts = { systemPrompt, history }
     opts.getTimeoutExtensionMs = () => this.timeoutExtensions.get(session.id) ?? 0
-    const keyId = typeof adapter.config.keyId === 'string' ? adapter.config.keyId : undefined
-    if (keyId && session.userId) {
-      opts.apiKey = decryptKey(session.userId, keyId).key
-    }
+    this.applyAdapterSecret(adapter, session.userId, opts)
     return opts
+  }
+
+  private applyAdapterSecret(adapter: Adapter, userId: string | undefined, opts: AdapterSendOpts): void {
+    const keyId = typeof adapter.config.keyId === 'string' ? adapter.config.keyId : undefined
+    if (keyId && userId) {
+      opts.apiKey = decryptKey(userId, keyId).key
+    }
   }
 
   private resolveAdapter(name: string, userId?: string): Adapter | undefined {
@@ -1006,6 +1147,38 @@ function normalizeAdapterResponse(result: string | AdapterResponse): AdapterResp
     content: result.content,
     metadata: result.metadata,
   }
+}
+
+function buildTaskSession(task: Task): Session {
+  return {
+    id: task.id,
+    userId: task.userId,
+    from: task.agent,
+    to: task.agent,
+    status: 'active',
+    mode: 'freeform',
+    nextTurn: 'to',
+    maxRounds: 1,
+    currentRound: 0,
+    approveMode: false,
+    cwd: task.cwd,
+    context: task.context,
+    systemPrompts: task.systemPrompt ? { from: task.systemPrompt, to: task.systemPrompt } : undefined,
+    resumeCount: 0,
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  }
+}
+
+function extractResultSummary(content: string): string {
+  const resultMatch = content.match(/\[RESULT\]([\s\S]*?)\[\/RESULT\]/i)
+  return (resultMatch?.[1] ?? content).trim()
+}
+
+function readLastAgentOutput(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') return undefined
+  const value = (error as { lastAgentOutput?: unknown }).lastAgentOutput
+  return typeof value === 'string' ? value : undefined
 }
 
 function adapterCanUseTools(adapter: Adapter | undefined): boolean {

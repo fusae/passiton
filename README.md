@@ -72,6 +72,10 @@ node dist/index.js
 主要接口：
 
 - `GET /api/agents`
+- `GET /api/tasks`
+- `POST /api/tasks`
+- `GET /api/tasks/:id`
+- `POST /api/tasks/:id/stop`
 - `GET /api/sessions`
 - `POST /api/sessions`
 - `GET /api/sessions/:id`

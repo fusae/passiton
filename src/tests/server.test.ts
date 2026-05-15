@@ -8,6 +8,7 @@ import WebSocket from 'ws'
 import { Router } from '../router.js'
 import { createServer } from '../server.js'
 import * as state from '../state.js'
+import type { Adapter, AdapterSendOpts, Session } from '../types.js'
 
 class StubAgentCatalog {
   async listAgents(): Promise<unknown[]> {
@@ -19,7 +20,27 @@ class StubAgentCatalog {
   }
 }
 
-async function withServer(fn: (baseUrl: string) => Promise<void>, options: { allowRegistration?: boolean } = { allowRegistration: true }): Promise<void> {
+class StubAdapter implements Adapter {
+  readonly config: Record<string, unknown> = {}
+
+  constructor(
+    readonly name: string,
+    private readonly handler: (session: Session, message: string, opts?: AdapterSendOpts) => Promise<string>
+  ) {}
+
+  send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string> {
+    return this.handler(session, message, opts)
+  }
+
+  async healthCheck(): Promise<boolean> {
+    return true
+  }
+}
+
+async function withServer(
+  fn: (baseUrl: string) => Promise<void>,
+  options: { allowRegistration?: boolean; configureRouter?: (router: Router) => void } = { allowRegistration: true }
+): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'turing-server-'))
   process.env.TURING_JWT_SECRET = 'server-test-jwt-secret'
   if (options.allowRegistration !== false) {
@@ -27,6 +48,7 @@ async function withServer(fn: (baseUrl: string) => Promise<void>, options: { all
   }
   state.initDb(join(dir, 'turing.db'))
   const router = new Router()
+  options.configureRouter?.(router)
   const server = createServer(router, 0, new StubAgentCatalog() as never)
   await once(server, 'listening')
   const address = server.address()
@@ -176,6 +198,99 @@ test('POST /api/sessions rejects cwd outside allowed workspaces', async () => {
     delete process.env.TURING_ALLOWED_WORKSPACES
   }
 })
+
+test('POST /api/tasks runs a single-agent task and exposes its result', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'tasks@example.com')
+    const create = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        agent: { adapter: 'opencode' },
+        prompt: 'write article',
+        context: { rules: 'markdown only' },
+      }),
+    })
+    assert.equal(create.status, 201)
+    const task = await create.json() as { id: string; status: string }
+    assert.equal(task.status, 'queued')
+
+    await waitFor(async () => {
+      const response = await fetch(`${baseUrl}/api/tasks/${task.id}`, {
+        headers: authHeaders(auth.token),
+      })
+      const payload = await response.json() as { status: string }
+      return payload.status === 'done'
+    })
+
+    const response = await fetch(`${baseUrl}/api/tasks/${task.id}`, {
+      headers: authHeaders(auth.token),
+    })
+    assert.equal(response.status, 200)
+    const completed = await response.json() as { status: string; result: string; output: string }
+    assert.equal(completed.status, 'done')
+    assert.equal(completed.result, 'article ready')
+    assert.match(completed.output, /\[RESULT\]article ready\[\/RESULT\]/)
+  }, {
+    allowRegistration: true,
+    configureRouter: (router) => {
+      router.registerAdapter(new StubAdapter('opencode', async (_session, message, opts) => {
+        assert.equal(message, 'write article')
+        assert.match(opts?.systemPrompt ?? '', /single task inside Turing/)
+        assert.match(opts?.systemPrompt ?? '', /markdown only/)
+        return '[RESULT]article ready[/RESULT]'
+      }))
+    },
+  })
+})
+
+test('POST /api/tasks/:id/stop stops a running task', async () => {
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'task-stop@example.com')
+    const create = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        agent: { adapter: 'opencode' },
+        prompt: 'slow task',
+      }),
+    })
+    const task = await create.json() as { id: string }
+
+    await waitFor(async () => {
+      const response = await fetch(`${baseUrl}/api/tasks/${task.id}`, { headers: authHeaders(auth.token) })
+      const payload = await response.json() as { status: string }
+      return payload.status === 'running'
+    })
+
+    const stop = await fetch(`${baseUrl}/api/tasks/${task.id}/stop`, {
+      method: 'POST',
+      headers: authHeaders(auth.token),
+    })
+    assert.equal(stop.status, 200)
+    assert.equal((await stop.json() as { status: string }).status, 'stopped')
+    release()
+  }, {
+    allowRegistration: true,
+    configureRouter: (router) => {
+      router.registerAdapter(new StubAdapter('opencode', async () => {
+        await gate
+        return '[RESULT]late[/RESULT]'
+      }))
+    },
+  })
+})
+
+async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    if (await check()) return
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+  throw new Error('Timed out waiting for condition')
+}
 
 test('agent CRUD stores user API model configs', async () => {
   await withServer(async (baseUrl) => {

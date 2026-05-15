@@ -113,6 +113,57 @@ function withTempDb(fn: () => Promise<void>): Promise<void> {
   })
 }
 
+test('recoverTasks resumes queued tasks and fails interrupted running tasks', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('opencode', async () => '[RESULT]done[/RESULT]'))
+
+    state.createTask({
+      id: 'queued-task',
+      agent: { adapter: 'opencode' },
+      prompt: 'queued',
+    })
+    state.createTask({
+      id: 'running-task',
+      agent: { adapter: 'opencode' },
+      prompt: 'running',
+    })
+    state.updateTask('running-task', { status: 'running' })
+
+    router.recoverTasks()
+
+    await waitFor(() => state.getTask('queued-task')?.status === 'done')
+    assert.equal(state.getTask('queued-task')?.result, 'done')
+    assert.equal(state.getTask('running-task')?.status, 'error')
+    assert.equal(state.getTask('running-task')?.errorMessage, 'Task interrupted by server restart')
+  })
+})
+
+test('stopTask keeps stopped status when a late agent result arrives', async () => {
+  await withTempDb(async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('opencode', async () => {
+      await gate
+      return '[RESULT]late[/RESULT]'
+    }))
+
+    const task = router.startTask({
+      agent: { adapter: 'opencode' },
+      prompt: 'slow',
+    })
+    await waitFor(() => state.getTask(task.id)?.status === 'running')
+
+    await router.stopTask(task.id)
+    release()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    assert.equal(state.getTask(task.id)?.status, 'stopped')
+    assert.equal(state.getTask(task.id)?.result, undefined)
+  })
+})
+
 test('resume sends the paused reply to the pending side', async () => {
   await withTempDb(async () => {
     const fromCalls: string[] = []

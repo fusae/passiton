@@ -23,6 +23,7 @@ async function main(): Promise<void> {
   // Register adapters based on config
   registerConfiguredAdapters(router, agents)
   registerPersistedUserAgents(router)
+  router.recoverTasks()
 
   // Start HTTP + WebSocket server
   const server = createServer(router, config.server.port, agentCatalog)

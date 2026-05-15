@@ -25,7 +25,7 @@ import { activeAgents, getConfigPath, loadConfig, writeConfig } from './config.j
 import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, SessionMode, SessionContext, SessionContextInput, WsEvent } from './types.js'
+import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, SessionMode, SessionContext, SessionContextInput, TaskStatus, WsEvent } from './types.js'
 import { templates } from './templates.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -523,6 +523,16 @@ function parseSessionStatus(value: string | null): 'active' | 'paused' | 'done' 
   throw new HttpError(400, '"status" must be one of active, paused, done, error, stopped')
 }
 
+function parseTaskStatus(value: string | null): TaskStatus | null {
+  if (value === null) {
+    return null
+  }
+  if (value === 'queued' || value === 'running' || value === 'done' || value === 'error' || value === 'stopped') {
+    return value
+  }
+  throw new HttpError(400, '"status" must be one of queued, running, done, error, stopped')
+}
+
 function parseSessionMode(value: unknown): SessionMode | undefined {
   if (value === undefined) {
     return undefined
@@ -626,6 +636,17 @@ function parseSessionBody(body: unknown) {
   }
 }
 
+function parseTaskBody(body: unknown) {
+  const data = requireRecord(body, 'body')
+  return {
+    agent: parseAgentRef(data.agent, 'agent'),
+    prompt: requireNonEmptyString(data.prompt, 'prompt'),
+    context: parseSessionContext(data.context, 'context'),
+    systemPrompt: optionalString(data.systemPrompt, 'systemPrompt'),
+    cwd: optionalString(data.cwd, 'cwd'),
+  }
+}
+
 function optionalStringArray(value: unknown, field: string): string[] | undefined {
   if (value === undefined) return undefined
   if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
@@ -671,7 +692,22 @@ function sessionApiDocs() {
         },
       },
     },
+    createTask: {
+      method: 'POST',
+      path: '/api/tasks',
+      body: {
+        agent: { adapter: 'opencode' },
+        prompt: 'Write the article from this brief...',
+        cwd: '/optional/project/path',
+        context: {
+          text: 'Background context',
+          rules: 'Output markdown only',
+          files: ['docs/brief.md'],
+        },
+      },
+    },
     readSession: 'GET /api/sessions/:id',
+    stopTask: 'POST /api/tasks/:id/stop',
     control: [
       'POST /api/sessions/:id/message',
       'POST /api/sessions/:id/nudge',
@@ -1107,6 +1143,25 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return json(res, 200, sessions)
       }
 
+      // GET /api/tasks
+      if (pathname === '/api/tasks' && method === 'GET') {
+        const statusFilter = parseTaskStatus(url.searchParams.get('status'))
+        const tasks = state.listTasks({ ...(statusFilter ? { status: statusFilter } : {}), userId: authUser!.userId })
+        return json(res, 200, tasks)
+      }
+
+      // POST /api/tasks
+      if (pathname === '/api/tasks' && method === 'POST') {
+        const params = parseTaskBody(await parseBody(req))
+        assertAllowedWorkspace(params.cwd)
+        const task = router.startTask({
+          userId: authUser!.userId,
+          ...params,
+          context: resolveSessionContext(params.context, params.cwd),
+        })
+        return json(res, 201, task)
+      }
+
       // POST /api/sessions
       if (pathname === '/api/sessions' && method === 'POST') {
         const defaults = loadConfig().defaults
@@ -1135,6 +1190,21 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         if (!session) return json(res, 404, { error: 'Not found' })
         const messages = state.getMessages(session.id)
         return json(res, 200, { ...session, messages })
+      }
+
+      // GET /api/tasks/:id
+      const taskMatch = pathname.match(/^\/api\/tasks\/([^/]+)$/)
+      if (taskMatch && method === 'GET') {
+        const task = state.getTask(taskMatch[1], authUser!.userId)
+        if (!task) return json(res, 404, { error: 'Not found' })
+        return json(res, 200, task)
+      }
+
+      // POST /api/tasks/:id/stop
+      const taskStopMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/stop$/)
+      if (taskStopMatch && method === 'POST') {
+        if (!state.getTask(taskStopMatch[1], authUser!.userId)) return json(res, 404, { error: 'Not found' })
+        return json(res, 200, await router.stopTask(taskStopMatch[1]))
       }
 
       // GET /api/sessions/:id/logs

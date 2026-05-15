@@ -91,6 +91,44 @@ test('session logs are deleted with their session', () => {
   }
 })
 
+test('task CRUD persists prompt, context, and result', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
+
+  try {
+    state.initDb(join(dir, 'turing.db'))
+    const task = state.createTask({
+      id: 'task-1',
+      agent: { adapter: 'opencode', label: 'OpenCode' },
+      prompt: 'write article',
+      cwd: '/tmp/project',
+      context: {
+        text: 'background',
+        rules: 'markdown only',
+      },
+      systemPrompt: 'single task',
+    })
+
+    assert.equal(task.status, 'queued')
+    assert.equal(task.agent.adapter, 'opencode')
+    assert.equal(task.context?.rules, 'markdown only')
+
+    const updated = state.updateTask('task-1', {
+      status: 'done',
+      output: '[RESULT]finished[/RESULT]',
+      result: 'finished',
+      startedAt: 10,
+      finishedAt: 20,
+    })
+
+    assert.equal(updated.status, 'done')
+    assert.equal(updated.result, 'finished')
+    assert.deepEqual(state.listTasks().map((item) => item.id), ['task-1'])
+  } finally {
+    state.closeDb()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('reopen keeps the existing round count', () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
 

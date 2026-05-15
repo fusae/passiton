@@ -14,6 +14,15 @@ export interface PromptCapabilities {
 
 const TURING_AWARENESS = 'You are operating inside Turing, an agent-to-agent orchestration system. If the task should be split into parallel or dependent sub-tasks, explicitly propose a Turing pipeline/session plan instead of losing scope in one thread. When your task is complete, wrap your final result or summary in [RESULT]...[/RESULT] tags.'
 
+export function generateTaskSystemPrompt(context?: SessionContext): string {
+  return [
+    `You are executing a single task inside Turing.`,
+    `Complete the task directly and do not wait for another agent.`,
+    `When the task is complete, wrap your final result or summary in [RESULT]...[/RESULT] tags.`,
+    formatContextBlock(context),
+  ].filter(Boolean).join('\n')
+}
+
 /**
  * Generate system prompts for both agents based on session mode.
  *
@@ -154,7 +163,7 @@ export function generateSystemPrompts(
 /**
  * Format the cached session context for injection into system prompts.
  */
-function formatContextBlock(context?: SessionContext): string {
+export function formatContextBlock(context?: SessionContext): string {
   if (!context) return ''
 
   const parts: string[] = []

@@ -211,6 +211,7 @@ async function serverStart() {
   await agentCatalog.discover()
   registerConfiguredAdapters(router, config.agents)
   registerPersistedUserAgents(router)
+  router.recoverTasks()
 
   const server = createServer(router, config.server.port, agentCatalog)
   installGracefulShutdown(server)

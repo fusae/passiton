@@ -1,6 +1,7 @@
 // Core type definitions for Turing
 
 export type SessionStatus = 'active' | 'paused' | 'done' | 'error' | 'stopped'
+export type TaskStatus = 'queued' | 'running' | 'done' | 'error' | 'stopped'
 
 // Session modes determine the system prompts and interaction style
 export type SessionMode = 'collaborate' | 'discuss' | 'review' | 'freeform'
@@ -87,6 +88,25 @@ export interface Session {
 
 export interface SessionWithMessages extends Session {
   messages: Message[]
+}
+
+export interface Task {
+  id: string
+  userId?: string
+  agent: AgentRef
+  prompt: string
+  status: TaskStatus
+  cwd?: string
+  context?: SessionContext
+  systemPrompt?: string
+  output?: string
+  result?: string
+  errorMessage?: string
+  lastAgentOutput?: string
+  createdAt: number
+  updatedAt: number
+  startedAt?: number
+  finishedAt?: number
 }
 
 export interface Pipeline {
@@ -278,6 +298,10 @@ export interface AppConfig {
 
 // WebSocket event payloads
 export type WsEventType =
+  | 'task:created'
+  | 'task:updated'
+  | 'task:done'
+  | 'task:error'
   | 'session:created'
   | 'session:updated'
   | 'session:done'

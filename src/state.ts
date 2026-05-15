@@ -21,6 +21,8 @@ import type {
   TuringStats,
   AgentUsageStats,
   AgentConfig,
+  Task,
+  TaskStatus,
 } from './types.js'
 
 const DB_DIR = join(homedir(), '.turing')
@@ -170,6 +172,26 @@ function createTables(): void {
       updated_at   INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS tasks (
+      id                TEXT PRIMARY KEY,
+      user_id           TEXT NOT NULL DEFAULT 'local',
+      agent_adapter     TEXT NOT NULL,
+      agent_label       TEXT,
+      prompt            TEXT NOT NULL,
+      status            TEXT NOT NULL DEFAULT 'queued',
+      cwd               TEXT,
+      context           TEXT,
+      system_prompt     TEXT,
+      output            TEXT,
+      result            TEXT,
+      error_message     TEXT,
+      last_agent_output TEXT,
+      created_at        INTEGER NOT NULL,
+      updated_at        INTEGER NOT NULL,
+      started_at        INTEGER,
+      finished_at       INTEGER
+    );
+
     CREATE TABLE IF NOT EXISTS messages (
       id          TEXT PRIMARY KEY,
       session_id  TEXT NOT NULL REFERENCES sessions(id),
@@ -219,6 +241,7 @@ function createTables(): void {
     CREATE INDEX IF NOT EXISTS idx_session_logs_session ON session_logs(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots(session_id, round, timestamp);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+    CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
     CREATE INDEX IF NOT EXISTS idx_pipeline_steps_session ON pipeline_steps(session_id);
     CREATE INDEX IF NOT EXISTS idx_pipeline_steps_pipeline ON pipeline_steps(pipeline_id, position);
   `)
@@ -275,6 +298,7 @@ function createTables(): void {
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_pipelines_user ON pipelines(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
     CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
@@ -506,6 +530,120 @@ export function userAgentRecordToConfig(record: UserAgentRecord, apiKey?: string
     timeout: record.timeout,
     ...(apiKey ? { apiKey } : {}),
   }
+}
+
+// ── Tasks ─────────────────────────────────────────────────────────────────────
+
+function rowToTask(row: Record<string, unknown>): Task {
+  let context: SessionContext | undefined
+  if (row.context) {
+    try { context = JSON.parse(row.context as string) } catch { /* ignore */ }
+  }
+  return {
+    id: row.id as string,
+    userId: (row.user_id as string | null) ?? undefined,
+    agent: {
+      adapter: row.agent_adapter as string,
+      label: (row.agent_label as string | null) ?? undefined,
+    },
+    prompt: row.prompt as string,
+    status: row.status as TaskStatus,
+    cwd: (row.cwd as string | null) ?? undefined,
+    context,
+    systemPrompt: (row.system_prompt as string | null) ?? undefined,
+    output: (row.output as string | null) ?? undefined,
+    result: (row.result as string | null) ?? undefined,
+    errorMessage: (row.error_message as string | null) ?? undefined,
+    lastAgentOutput: (row.last_agent_output as string | null) ?? undefined,
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+    startedAt: (row.started_at as number | null) ?? undefined,
+    finishedAt: (row.finished_at as number | null) ?? undefined,
+  }
+}
+
+export function createTask(params: {
+  id: string
+  userId?: string
+  agent: AgentRef
+  prompt: string
+  cwd?: string
+  context?: SessionContext
+  systemPrompt?: string
+}): Task {
+  const now = Date.now()
+  db.prepare(`
+    INSERT INTO tasks (
+      id, user_id, agent_adapter, agent_label, prompt, status, cwd, context, system_prompt, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)
+  `).run(
+    params.id,
+    params.userId ?? DEFAULT_USER_ID,
+    params.agent.adapter,
+    params.agent.label ?? null,
+    params.prompt,
+    params.cwd ?? null,
+    params.context ? JSON.stringify(params.context) : null,
+    params.systemPrompt ?? null,
+    now,
+    now
+  )
+  return getTask(params.id, params.userId)!
+}
+
+export function getTask(id: string, userId?: string): Task | undefined {
+  const row = userId
+    ? db.prepare('SELECT * FROM tasks WHERE id = ? AND user_id = ?').get(id, userId) as Record<string, unknown> | undefined
+    : db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
+  return row ? rowToTask(row) : undefined
+}
+
+export function listTasks(filter?: { status?: TaskStatus; userId?: string }): Task[] {
+  if (filter?.status && filter.userId) {
+    const rows = db.prepare('SELECT * FROM tasks WHERE status = ? AND user_id = ? ORDER BY created_at DESC').all(filter.status, filter.userId) as Record<string, unknown>[]
+    return rows.map(rowToTask)
+  }
+  if (filter?.status) {
+    const rows = db.prepare('SELECT * FROM tasks WHERE status = ? ORDER BY created_at DESC').all(filter.status) as Record<string, unknown>[]
+    return rows.map(rowToTask)
+  }
+  if (filter?.userId) {
+    const rows = db.prepare('SELECT * FROM tasks WHERE user_id = ? ORDER BY created_at DESC').all(filter.userId) as Record<string, unknown>[]
+    return rows.map(rowToTask)
+  }
+  const rows = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as Record<string, unknown>[]
+  return rows.map(rowToTask)
+}
+
+export function updateTask(id: string, updates: Partial<Pick<Task,
+  'status' |
+  'output' |
+  'result' |
+  'errorMessage' |
+  'lastAgentOutput' |
+  'startedAt' |
+  'finishedAt'
+>>, userId?: string): Task {
+  const fields: string[] = ['updated_at = ?']
+  const values: unknown[] = [Date.now()]
+
+  if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status) }
+  if (updates.output !== undefined) { fields.push('output = ?'); values.push(updates.output) }
+  if (updates.result !== undefined) { fields.push('result = ?'); values.push(updates.result) }
+  if (updates.errorMessage !== undefined) { fields.push('error_message = ?'); values.push(updates.errorMessage) }
+  if (updates.lastAgentOutput !== undefined) { fields.push('last_agent_output = ?'); values.push(updates.lastAgentOutput) }
+  if (updates.startedAt !== undefined) { fields.push('started_at = ?'); values.push(updates.startedAt) }
+  if (updates.finishedAt !== undefined) { fields.push('finished_at = ?'); values.push(updates.finishedAt) }
+
+  values.push(id)
+  if (userId) {
+    values.push(userId)
+    db.prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...values)
+  } else {
+    db.prepare(`UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+  }
+  return getTask(id, userId)!
 }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────

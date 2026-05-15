@@ -27,9 +27,71 @@ curl -s -X POST http://localhost:4590/api/auth/login \
 
 ## Core Concepts
 
-- **Session** — A single task: two agents collaborate until done. One agent (from) initiates, another (to) responds. They alternate until the task is complete or max rounds reached.
+- **Task** — One agent executes one prompt and returns one result.
+- **Session** — Two agents collaborate until done. One agent (from) initiates, another (to) responds. They alternate until the work is complete or max rounds is reached.
 - **Pipeline** — A multi-step workflow: multiple sessions chained together. Each step can depend on previous steps. Steps run in order (or parallel if no dependency).
 - **Agent** — A configured model endpoint (e.g. "claude-sonnet", "gpt-4.1"). Each agent has an adapter type (anthropic-api, openai-api, etc.) and a model name.
+
+---
+
+## Tasks
+
+### Create a Task
+
+```
+POST /api/tasks
+```
+
+```json
+{
+  "agent": { "adapter": "opencode" },
+  "prompt": "Write the article from this brief.",
+  "cwd": "/path/to/project",
+  "context": {
+    "rules": "Write in Chinese. Output markdown only.",
+    "text": "Background information here"
+  }
+}
+```
+
+**Response:** Task object with `id` and `status: "queued"`.
+
+### Get Task
+
+```
+GET /api/tasks/<id>
+GET /api/tasks?status=done
+POST /api/tasks/<id>/stop
+```
+
+Status values: `queued`, `running`, `done`, `error`, `stopped`.
+
+When `status` is `done`:
+- `output` contains the complete agent output
+- `result` contains the extracted `[RESULT]...[/RESULT]` block, or the full output if no block was used
+
+### Create a task and wait for the result
+
+```bash
+TASK_ID=$(curl -s -X POST http://localhost:4590/api/tasks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent": {"adapter": "opencode"},
+    "prompt": "Write the article from this brief.",
+    "cwd": "/path/to/project"
+  }' | jq -r '.id')
+
+while true; do
+  STATUS=$(curl -s http://localhost:4590/api/tasks/$TASK_ID \
+    -H "Authorization: Bearer $TOKEN" | jq -r '.status')
+  [ "$STATUS" = "done" ] || [ "$STATUS" = "error" ] && break
+  sleep 5
+done
+
+curl -s http://localhost:4590/api/tasks/$TASK_ID \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.result'
+```
 
 ---
 
@@ -198,7 +260,7 @@ curl -s http://localhost:4590/api/sessions/$SESSION_ID \
 
 ### Delegate a writing task
 
-When you need content written but want a specialized agent to handle it:
+When you need collaborative writing and revision:
 
 ```bash
 curl -s -X POST http://localhost:4590/api/sessions \
