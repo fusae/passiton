@@ -11,15 +11,17 @@ import { loadConfig } from './config.js'
 // ── Config / base URL ─────────────────────────────────────────────────────────
 
 const config = loadConfig()
-const BASE = `http://localhost:${config.server.port}`
+const BASE = process.env.TURING_BASE_URL ?? `http://localhost:${config.server.port}`
 const PID_FILE = '/tmp/turing-server.pid'
+let authToken = process.env.TURING_TOKEN
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
-function request(
+function rawRequest(
   method: string,
   path: string,
-  body?: unknown
+  body?: unknown,
+  token?: string
 ): Promise<{ status: number; data: unknown }> {
   return new Promise((resolve, reject) => {
     const url = new URL(BASE + path)
@@ -34,6 +36,7 @@ function request(
         method,
         headers: {
           'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
         },
       },
@@ -54,6 +57,29 @@ function request(
     if (payload) req.write(payload)
     req.end()
   })
+}
+
+async function ensureAuthToken(): Promise<string> {
+  if (authToken) return authToken
+  const response = await rawRequest('POST', '/api/auth/local', {})
+  if (response.status !== 200) {
+    throw new Error(`Local authentication failed: ${JSON.stringify(response.data)}`)
+  }
+  const token = (response.data as { token?: unknown }).token
+  if (typeof token !== 'string' || token.length === 0) {
+    throw new Error('Local authentication did not return a token')
+  }
+  authToken = token
+  return token
+}
+
+async function request(
+  method: string,
+  path: string,
+  body?: unknown
+): Promise<{ status: number; data: unknown }> {
+  const token = path === '/api/auth/local' ? undefined : await ensureAuthToken()
+  return rawRequest(method, path, body, token)
 }
 
 async function get(path: string) {
@@ -85,6 +111,7 @@ interface Flags {
   mode?: string
   side?: string
   status?: string
+  agent?: string
   contextRules?: string
   contextText?: string
   contextFiles?: string
@@ -111,6 +138,7 @@ function parseArgs(argv: string[]): Flags {
     else if (a === '--mode' && argv[i + 1]) { flags.mode = argv[++i] }
     else if (a === '--side' && argv[i + 1]) { flags.side = argv[++i] }
     else if (a === '--status' && argv[i + 1]) { flags.status = argv[++i] }
+    else if (a === '--agent' && argv[i + 1]) { flags.agent = argv[++i] }
     else if (a === '--context-rules' && argv[i + 1]) { flags.contextRules = argv[++i] }
     else if (a === '--context-text' && argv[i + 1]) { flags.contextText = argv[++i] }
     else if (a === '--context-files' && argv[i + 1]) { flags.contextFiles = argv[++i] }
@@ -182,6 +210,22 @@ function buildContext(flags: Flags) {
   if (flags.contextText) context.text = flags.contextText
   if (files.length > 0) context.files = files
   return Object.keys(context).length > 0 ? context : undefined
+}
+
+type CliTask = {
+  id: string
+  agent: { adapter: string; label?: string }
+  prompt: string
+  status: string
+  cwd?: string
+  result?: string
+  output?: string
+  errorMessage?: string
+  lastAgentOutput?: string
+  createdAt: number
+  updatedAt: number
+  startedAt?: number
+  finishedAt?: number
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
@@ -339,6 +383,101 @@ async function listSessions() {
     )
   }
   console.log()
+}
+
+// ── tasks ─────────────────────────────────────────────────────────────────────
+async function createTask(flags: Flags) {
+  if (!flags.agent) die('--agent <agent> is required')
+  const prompt = flags._.join(' ')
+  if (!prompt) die('prompt text is required')
+
+  const r = await post('/api/tasks', {
+    agent: { adapter: flags.agent },
+    prompt,
+    context: buildContext(flags),
+    cwd: flags.cwd,
+  }).catch(() => die(`Cannot reach server at ${BASE}`))
+
+  const response = r as { status: number; data: unknown }
+  if (response.status !== 201) {
+    console.error('Failed to create task:', response.data)
+    process.exit(1)
+  }
+
+  const task = response.data as CliTask
+  console.log(`\n  Task     ${task.id}`)
+  console.log(`  Agent    ${agentLabel(task.agent)}`)
+  console.log(`  Status   ${statusColor(task.status)}\n`)
+}
+
+async function listTasks(flags: Flags) {
+  const query = flags.status ? `?status=${encodeURIComponent(flags.status)}` : ''
+  const r = await get(`/api/tasks${query}`).catch(() => die(`Cannot reach server at ${BASE}`))
+  const tasks = (r as { data: unknown }).data as CliTask[]
+  if (!tasks.length) {
+    console.log('No tasks.')
+    return
+  }
+
+  console.log()
+  for (const task of tasks) {
+    console.log(
+      `  ${task.id.slice(0, 8)}  ${statusColor(task.status).padEnd(20)}  ` +
+      `${agentLabel(task.agent).padEnd(18)} ${timeAgo(task.updatedAt)}`
+    )
+  }
+  console.log()
+}
+
+async function showTask(taskId: string) {
+  const r = await get(`/api/tasks/${taskId}`).catch(() => die(`Cannot reach server at ${BASE}`))
+  const response = r as { status: number; data: unknown }
+  if (response.status === 404) die(`Task ${taskId} not found`)
+  if (response.status !== 200) {
+    console.error('Error:', response.data)
+    process.exit(1)
+  }
+
+  const task = response.data as CliTask
+  console.log(`\n  Task     ${task.id}`)
+  console.log(`  Agent    ${agentLabel(task.agent)}`)
+  console.log(`  Status   ${statusColor(task.status)}`)
+  if (task.cwd) fmt('CWD', task.cwd)
+  fmt('Created', new Date(task.createdAt).toLocaleString())
+  if (task.startedAt) fmt('Started', new Date(task.startedAt).toLocaleString())
+  if (task.finishedAt) fmt('Finished', new Date(task.finishedAt).toLocaleString())
+  console.log('\n  ── Prompt ─────────────────────────────')
+  printIndented(task.prompt)
+  if (task.result) {
+    console.log('\n  ── Result ─────────────────────────────')
+    printIndented(task.result)
+  }
+  if (task.output) {
+    console.log('\n  ── Output ─────────────────────────────')
+    printIndented(task.output)
+  }
+  if (task.lastAgentOutput) {
+    console.log('\n  ── Last Output ────────────────────────')
+    printIndented(task.lastAgentOutput)
+  }
+  if (task.errorMessage) {
+    console.log('\n  ── Error ──────────────────────────────')
+    printIndented(task.errorMessage)
+  }
+  console.log()
+}
+
+async function stopTask(taskId: string) {
+  const r = await post(`/api/tasks/${taskId}/stop`).catch(() => die('Cannot reach server'))
+  const response = r as { status: number; data: unknown }
+  if (response.status === 200) console.log(`Stopped task ${taskId.slice(0, 8)}`)
+  else console.error('Error:', response.data)
+}
+
+function printIndented(content: string) {
+  for (const line of content.split('\n')) {
+    console.log(`    ${line}`)
+  }
 }
 
 // ── log ───────────────────────────────────────────────────────────────────────
@@ -699,7 +838,8 @@ async function followSession(sessionId: string): Promise<void> {
 
   // Then stream via WebSocket
   const { default: WebSocket } = await import('ws') as unknown as { default: typeof import('ws').WebSocket }
-  const wsUrl = BASE.replace('http://', 'ws://').replace('https://', 'wss://') + '/ws'
+  const token = await ensureAuthToken()
+  const wsUrl = BASE.replace('http://', 'ws://').replace('https://', 'wss://') + `/ws?token=${encodeURIComponent(token)}`
   const ws = new (WebSocket as unknown as new (url: string) => import('ws').WebSocket)(wsUrl)
 
   return new Promise((resolve) => {
@@ -829,6 +969,13 @@ function usage() {
                 [--context-rules <text>] [--context-text <text>] [--context-files <paths>]
                 "<prompt>"
 
+    turing task create --agent <agent> [--cwd <path>]
+                       [--context-rules <text>] [--context-text <text>] [--context-files <paths>]
+                       "<prompt>"
+    turing tasks [--status <queued|running|done|error|stopped>]
+    turing task show <task-id>
+    turing task stop <task-id>
+
     turing sessions [--status <active|paused|done|error|stopped>]
     turing log <session-id>
     turing delete <session-id>
@@ -857,7 +1004,7 @@ function usage() {
 const argv = process.argv.slice(2)
 const cmd  = argv[0]
 const sub  = argv[1]
-const flags = parseArgs(argv.slice(cmd === 'server' ? 2 : 1))
+const flags = parseArgs(argv.slice(cmd === 'server' || cmd === 'task' ? 2 : 1))
 
 async function main() {
   switch (cmd) {
@@ -876,6 +1023,32 @@ async function main() {
 
     case 'sessions':
       await listSessions()
+      break
+
+    case 'tasks':
+      await listTasks(flags)
+      break
+
+    case 'task':
+      switch (sub) {
+        case 'create':
+          await createTask(flags)
+          break
+        case 'show': {
+          const id = argv[2]
+          if (!id) die('Usage: turing task show <task-id>')
+          await showTask(id)
+          break
+        }
+        case 'stop': {
+          const id = argv[2]
+          if (!id) die('Usage: turing task stop <task-id>')
+          await stopTask(id)
+          break
+        }
+        default:
+          die(`Unknown task command "${sub}". Try: create | show | stop`)
+      }
       break
 
     case 'templates':

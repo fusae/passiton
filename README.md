@@ -67,6 +67,20 @@ npm run test
 node dist/index.js
 ```
 
+## 全局 CLI
+
+```bash
+npm run build
+npm link
+
+turing agents
+turing task create --agent opencode "执行现有写文工作流"
+turing tasks
+turing task show <task-id>
+```
+
+默认连接本机 `http://localhost:4590`，并自动走本地登录；需要远程时可显式设置 `TURING_BASE_URL` 和 `TURING_TOKEN`。
+
 ## API
 
 主要接口：

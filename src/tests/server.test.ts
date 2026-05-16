@@ -4,6 +4,9 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
+import { execFile } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import WebSocket from 'ws'
 import { Router } from '../router.js'
 import { createServer } from '../server.js'
@@ -19,6 +22,8 @@ class StubAgentCatalog {
     return name === 'codex' ? { name, healthy: true } : undefined
   }
 }
+
+const execFileAsync = promisify(execFile)
 
 class StubAdapter implements Adapter {
   readonly config: Record<string, unknown> = {}
@@ -171,6 +176,26 @@ test('POST /api/auth/local returns a local user token', async () => {
     const stats = await fetch(`${baseUrl}/api/stats`, { headers: authHeaders(payload.token) })
     assert.equal(stats.status, 200)
   }, { allowRegistration: false })
+})
+
+test('CLI task create authenticates locally and creates a task', async () => {
+  await withServer(async (baseUrl) => {
+    const cliPath = fileURLToPath(new URL('../cli.js', import.meta.url))
+    const result = await execFileAsync(process.execPath, [cliPath, 'task', 'create', '--agent', 'opencode', 'write', 'article'], {
+      env: {
+        ...process.env,
+        TURING_BASE_URL: baseUrl,
+      },
+    })
+
+    assert.match(result.stdout, /Task/)
+    assert.equal(state.listTasks().length, 1)
+    assert.equal(state.listTasks()[0]?.prompt, 'write article')
+  }, {
+    configureRouter: (router) => {
+      router.registerAdapter(new StubAdapter('opencode', async () => '[RESULT]done[/RESULT]'))
+    },
+  })
 })
 
 test('POST /api/sessions rejects cwd outside allowed workspaces', async () => {
