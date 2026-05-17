@@ -179,6 +179,23 @@ DELETE /api/sessions/<id>
 
 ## Pipelines (Workflows)
 
+### List Pipeline Templates
+
+```
+GET /api/pipeline-templates
+```
+
+Returns built-in reusable workflow templates. The Web UI can use them to prefill pipeline steps.
+
+### Create / Delete User Pipeline Templates
+
+```
+POST /api/pipeline-templates
+DELETE /api/pipeline-templates/<id>
+```
+
+User templates persist reusable pipeline structure and are returned together with built-in templates.
+
 ### Create a Pipeline
 
 ```

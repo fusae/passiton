@@ -25,8 +25,8 @@ import { activeAgents, getConfigPath, loadConfig, writeConfig } from './config.j
 import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, SessionMode, SessionContext, SessionContextInput, TaskStatus, WsEvent } from './types.js'
-import { templates } from './templates.js'
+import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, PipelineTemplateRecord, SessionMode, SessionContext, SessionContextInput, TaskStatus, WsEvent } from './types.js'
+import { pipelineTemplates, templates } from './templates.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(__dirname, 'web')
@@ -720,17 +720,16 @@ function sessionApiDocs() {
       refreshList: 'GET /api/agents?refresh=1',
       diagnostics: 'GET /api/agents/:name/diagnostics?refresh=1',
     },
+    pipelineTemplates: 'GET /api/pipeline-templates',
   }
 }
 
-function parsePipelineBody(body: unknown) {
-  const data = requireRecord(body, 'body')
-  const stepsValue = data.steps
+function parsePipelineSteps(stepsValue: unknown) {
   if (!Array.isArray(stepsValue) || stepsValue.length === 0) {
     throw new HttpError(400, '"steps" must be a non-empty array')
   }
 
-  const steps = stepsValue.map((value, index) => {
+  return stepsValue.map((value, index) => {
     const step = requireRecord(value, `steps[${index}]`)
     let dependsOn: number[] | undefined
     if (step.dependsOn !== undefined) {
@@ -757,11 +756,44 @@ function parsePipelineBody(body: unknown) {
       dependsOn,
     }
   })
+}
+
+function parsePipelineBody(body: unknown) {
+  const data = requireRecord(body, 'body')
 
   return {
     name: requireNonEmptyString(data.name, 'name'),
-    steps,
+    steps: parsePipelineSteps(data.steps),
   }
+}
+
+function parsePipelineTemplateBody(body: unknown): Omit<PipelineTemplateRecord, 'id' | 'userId' | 'source' | 'createdAt' | 'updatedAt'> {
+  const data = requireRecord(body, 'body')
+  return {
+    name: requireNonEmptyString(data.name, 'name'),
+    description: optionalString(data.description, 'description'),
+    steps: parsePipelineSteps(data.steps),
+  }
+}
+
+function builtInPipelineTemplateRecords(): PipelineTemplateRecord[] {
+  return pipelineTemplates.map((template) => ({
+    id: template.id,
+    name: template.name,
+    description: template.description,
+    steps: template.steps.map((step) => ({
+      title: step.title,
+      from: step.from,
+      to: step.to,
+      initialPrompt: step.initialPrompt,
+      mode: step.mode,
+      maxRounds: step.maxRounds,
+      dependsOn: step.dependsOn,
+    })),
+    source: 'builtin',
+    createdAt: 0,
+    updatedAt: 0,
+  }))
 }
 
 function parseResumeBody(body: unknown): { extraRounds?: number } {
@@ -984,6 +1016,33 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // GET /api/templates
       if (pathname === '/api/templates' && method === 'GET') {
         return json(res, 200, templates)
+      }
+
+      // GET /api/pipeline-templates
+      if (pathname === '/api/pipeline-templates' && method === 'GET') {
+        return json(res, 200, [
+          ...state.listPipelineTemplates(authUser!.userId),
+          ...builtInPipelineTemplateRecords(),
+        ])
+      }
+
+      // POST /api/pipeline-templates
+      if (pathname === '/api/pipeline-templates' && method === 'POST') {
+        const params = parsePipelineTemplateBody(await parseBody(req))
+        return json(res, 201, state.createPipelineTemplate({
+          id: crypto.randomUUID(),
+          userId: authUser!.userId,
+          ...params,
+        }))
+      }
+
+      // DELETE /api/pipeline-templates/:id
+      const pipelineTemplateMatch = pathname.match(/^\/api\/pipeline-templates\/([^/]+)$/)
+      if (pipelineTemplateMatch && method === 'DELETE') {
+        if (!state.deletePipelineTemplate(pipelineTemplateMatch[1], authUser!.userId)) {
+          return json(res, 404, { error: 'Not found' })
+        }
+        return json(res, 200, { success: true })
       }
 
       // GET /api/stats

@@ -47,6 +47,7 @@ const state = {
   pipelines: [],
   agents: [],
   templates: [],
+  pipelineTemplates: [],
   apiKeys: [],
   apiDocs: null,
   deployCheck: null,
@@ -574,6 +575,15 @@ async function loadTemplates() {
   } catch (err) {
     console.error('Failed to load templates:', err)
     state.templates = []
+  }
+}
+
+async function loadPipelineTemplates() {
+  try {
+    state.pipelineTemplates = await api('/api/pipeline-templates')
+  } catch (err) {
+    console.error('Failed to load pipeline templates:', err)
+    state.pipelineTemplates = []
   }
 }
 
@@ -2679,6 +2689,7 @@ window.stopCurrentTask = async function() {
 window.showNewWorkflowModal = async function() {
   if (!state.config) await loadConfig()
   if (!state.agents.length) await loadAgents()
+  if (!state.pipelineTemplates.length) await loadPipelineTemplates()
   const readyAgents = state.agents.filter(agent => agent.status === 'ready')
   const agents = readyAgents.length ? readyAgents : state.agents
   const noAgents = agents.length === 0
@@ -2702,6 +2713,15 @@ window.showNewWorkflowModal = async function() {
       ` : ''}
       <form onsubmit="window.createWorkflow(event)">
         <div class="form-group">
+          <label>Template</label>
+          <select class="input" name="templateId" onchange="window.applyWorkflowTemplate(this.value)">
+            <option value="">Custom workflow</option>
+            ${state.pipelineTemplates.map(template => `
+              <option value="${escapeAttr(template.id)}">${escapeHtml(template.nameEn || template.name)}${template.source === 'user' ? ' · mine' : ''}</option>
+            `).join('')}
+          </select>
+        </div>
+        <div class="form-group">
           <label>Pipeline name</label>
           <input class="input" name="name" required placeholder="Release workflow">
         </div>
@@ -2712,6 +2732,8 @@ window.showNewWorkflowModal = async function() {
         <div id="workflow-step-editor" class="workflow-step-editor" data-from="${escapeAttr(defaultFrom)}" data-to="${escapeAttr(defaultTo)}" data-count="0"></div>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+          <button type="button" class="btn btn-secondary" onclick="window.saveWorkflowTemplate()">Save as Template</button>
+          <button type="button" class="btn btn-danger" id="delete-workflow-template" style="display:none" onclick="window.deleteWorkflowTemplate()">Delete Template</button>
           <button type="submit" class="btn btn-primary" ${noAgents ? 'disabled' : ''}>Create</button>
         </div>
       </form>
@@ -2721,7 +2743,7 @@ window.showNewWorkflowModal = async function() {
   window.addWorkflowStep()
 }
 
-window.addWorkflowStep = function() {
+window.addWorkflowStep = function(step = {}) {
   const editor = document.getElementById('workflow-step-editor')
   if (!editor) return
   const index = Number(editor.dataset.count || '0')
@@ -2731,7 +2753,7 @@ window.addWorkflowStep = function() {
   const row = document.createElement('div')
   row.className = 'workflow-edit-step'
   row.draggable = true
-  row.innerHTML = renderWorkflowEditStep(index, defaultFrom, defaultTo)
+  row.innerHTML = renderWorkflowEditStep(index, step, defaultFrom, defaultTo)
   row.addEventListener('dragstart', event => {
     event.dataTransfer.setData('text/plain', String([...editor.children].indexOf(row)))
   })
@@ -2749,8 +2771,13 @@ window.addWorkflowStep = function() {
   refreshWorkflowStepEditor()
 }
 
-function renderWorkflowEditStep(index, defaultFrom, defaultTo) {
+function renderWorkflowEditStep(index, step, defaultFrom, defaultTo) {
   const options = state.agents.map(agent => `<option value="${escapeAttr(agent.name)}">${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
+  const from = resolveWorkflowAgentName(step.from, step.fromAdapter, defaultFrom)
+  const to = resolveWorkflowAgentName(step.to, step.toAdapter, defaultTo, from)
+  const mode = step.mode || 'collaborate'
+  const maxRounds = step.maxRounds || state.config?.defaults?.maxRounds || 5
+  const prompt = step.initialPrompt || ''
   return `
     <div class="workflow-edit-title">
       <span class="drag-handle">↕</span>
@@ -2760,37 +2787,130 @@ function renderWorkflowEditStep(index, defaultFrom, defaultTo) {
     <div class="form-row">
       <div class="form-group">
         <label>Agent A</label>
-        <select class="input" name="from" required>${options.replace(`value="${escapeAttr(defaultFrom)}"`, `value="${escapeAttr(defaultFrom)}" selected`)}</select>
+        <select class="input" name="from" required>${options.replace(`value="${escapeAttr(from)}"`, `value="${escapeAttr(from)}" selected`)}</select>
       </div>
       <div class="form-group">
         <label>Agent B</label>
-        <select class="input" name="to" required>${options.replace(`value="${escapeAttr(defaultTo)}"`, `value="${escapeAttr(defaultTo)}" selected`)}</select>
+        <select class="input" name="to" required>${options.replace(`value="${escapeAttr(to)}"`, `value="${escapeAttr(to)}" selected`)}</select>
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
         <label>Mode</label>
         <select class="input" name="mode">
-          <option value="collaborate">Collaboration</option>
-          <option value="discuss">Discuss</option>
-          <option value="review">Review</option>
-          <option value="freeform">Freeform</option>
+          <option value="collaborate" ${mode === 'collaborate' ? 'selected' : ''}>Collaboration</option>
+          <option value="discuss" ${mode === 'discuss' ? 'selected' : ''}>Discuss</option>
+          <option value="review" ${mode === 'review' ? 'selected' : ''}>Review</option>
+          <option value="freeform" ${mode === 'freeform' ? 'selected' : ''}>Freeform</option>
         </select>
       </div>
       <div class="form-group">
         <label>Max Turns</label>
-        <input class="input" type="number" name="maxRounds" min="1" value="${state.config?.defaults?.maxRounds || 5}">
+        <input class="input" type="number" name="maxRounds" min="1" value="${escapeAttr(String(maxRounds))}">
       </div>
     </div>
     <div class="form-group">
       <label>Prompt</label>
-      <textarea class="input" name="initialPrompt" rows="3" required placeholder="Describe this step..."></textarea>
+      <textarea class="input" name="initialPrompt" rows="3" required placeholder="Describe this step...">${escapeHtml(prompt)}</textarea>
     </div>
     <div class="form-group">
       <label>Depends on</label>
       <select class="input" name="dependsOn" multiple data-deps></select>
     </div>
   `
+}
+
+function resolveWorkflowAgentName(ref, preferredAdapter, fallback, avoidName) {
+  if (ref?.adapter && state.agents.some(agent => agent.name === ref.adapter)) return ref.adapter
+  return preferredAgentName(state.agents, preferredAdapter || ref?.adapter, avoidName) || fallback
+}
+
+window.applyWorkflowTemplate = function(templateId) {
+  const template = state.pipelineTemplates.find(item => item.id === templateId)
+  const editor = document.getElementById('workflow-step-editor')
+  const nameInput = document.querySelector('form [name="name"]')
+  const deleteButton = document.getElementById('delete-workflow-template')
+  if (!editor) return
+  editor.innerHTML = ''
+  editor.dataset.count = '0'
+  if (!template) {
+    window.addWorkflowStep()
+    window.addWorkflowStep()
+    if (nameInput) nameInput.value = ''
+    if (deleteButton) deleteButton.style.display = 'none'
+    return
+  }
+  if (nameInput) nameInput.value = template.name
+  template.steps.forEach(step => window.addWorkflowStep(step))
+  if (deleteButton) deleteButton.style.display = template.source === 'user' ? '' : 'none'
+  const rows = [...editor.querySelectorAll('.workflow-edit-step')]
+  rows.forEach((row, index) => {
+    const deps = row.querySelector('[data-deps]')
+    const dependsOn = template.steps[index]?.dependsOn || []
+    ;[...deps.options].forEach(option => {
+      option.selected = dependsOn.includes(Number(option.value))
+    })
+  })
+}
+
+function collectWorkflowSteps() {
+  const rows = [...document.querySelectorAll('#workflow-step-editor .workflow-edit-step')]
+  return rows.map(row => {
+    const dependsOn = [...row.querySelector('[name="dependsOn"]').selectedOptions]
+      .map(option => Number(option.value))
+      .filter(value => Number.isInteger(value))
+    return compactObject({
+      from: { adapter: row.querySelector('[name="from"]').value },
+      to: { adapter: row.querySelector('[name="to"]').value },
+      initialPrompt: row.querySelector('[name="initialPrompt"]').value.trim(),
+      mode: row.querySelector('[name="mode"]').value,
+      maxRounds: parseInt(row.querySelector('[name="maxRounds"]').value) || undefined,
+      dependsOn: dependsOn.length ? dependsOn : undefined,
+    })
+  })
+}
+
+window.saveWorkflowTemplate = async function() {
+  const nameInput = document.querySelector('form [name="name"]')
+  const name = nameInput?.value.trim()
+  if (!name) {
+    showToast('Pipeline name is required')
+    return
+  }
+  try {
+    const template = await api('/api/pipeline-templates', 'POST', {
+      name,
+      steps: collectWorkflowSteps(),
+    })
+    state.pipelineTemplates.unshift(template)
+    const select = document.querySelector('select[name="templateId"]')
+    if (select) {
+      select.insertAdjacentHTML('beforeend', `<option value="${escapeAttr(template.id)}">${escapeHtml(template.name)} · mine</option>`)
+      select.value = template.id
+    }
+    const deleteButton = document.getElementById('delete-workflow-template')
+    if (deleteButton) deleteButton.style.display = ''
+    showToast('Template saved')
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.deleteWorkflowTemplate = async function() {
+  const select = document.querySelector('select[name="templateId"]')
+  const id = select?.value
+  const template = state.pipelineTemplates.find(item => item.id === id)
+  if (!template || template.source !== 'user') return
+  try {
+    await api(`/api/pipeline-templates/${id}`, 'DELETE')
+    state.pipelineTemplates = state.pipelineTemplates.filter(item => item.id !== id)
+    select.querySelector(`option[value="${CSS.escape(id)}"]`)?.remove()
+    select.value = ''
+    window.applyWorkflowTemplate('')
+    showToast('Template deleted')
+  } catch (err) {
+    showToast(err.message)
+  }
 }
 
 window.removeWorkflowStep = function(button) {
@@ -2818,20 +2938,7 @@ function refreshWorkflowStepEditor() {
 window.createWorkflow = async function(e) {
   e.preventDefault()
   const fd = new FormData(e.target)
-  const rows = [...document.querySelectorAll('#workflow-step-editor .workflow-edit-step')]
-  const steps = rows.map(row => {
-    const dependsOn = [...row.querySelector('[name="dependsOn"]').selectedOptions]
-      .map(option => Number(option.value))
-      .filter(value => Number.isInteger(value))
-    return compactObject({
-      from: { adapter: row.querySelector('[name="from"]').value },
-      to: { adapter: row.querySelector('[name="to"]').value },
-      initialPrompt: row.querySelector('[name="initialPrompt"]').value.trim(),
-      mode: row.querySelector('[name="mode"]').value,
-      maxRounds: parseInt(row.querySelector('[name="maxRounds"]').value) || undefined,
-      dependsOn: dependsOn.length ? dependsOn : undefined,
-    })
-  })
+  const steps = collectWorkflowSteps()
 
   try {
     const pipeline = await api('/api/pipelines', 'POST', {

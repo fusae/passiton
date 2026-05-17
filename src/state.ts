@@ -17,6 +17,7 @@ import type {
   DiffSnapshot,
   Pipeline,
   PipelineStep,
+  PipelineTemplateRecord,
   PipelineWithSessions,
   TuringStats,
   AgentUsageStats,
@@ -237,6 +238,16 @@ function createTables(): void {
       PRIMARY KEY (pipeline_id, session_id)
     );
 
+    CREATE TABLE IF NOT EXISTS pipeline_templates (
+      id          TEXT PRIMARY KEY,
+      user_id     TEXT NOT NULL DEFAULT 'local',
+      name        TEXT NOT NULL,
+      description TEXT,
+      steps       TEXT NOT NULL,
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_session_logs_session ON session_logs(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots(session_id, round, timestamp);
@@ -244,6 +255,7 @@ function createTables(): void {
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
     CREATE INDEX IF NOT EXISTS idx_pipeline_steps_session ON pipeline_steps(session_id);
     CREATE INDEX IF NOT EXISTS idx_pipeline_steps_pipeline ON pipeline_steps(pipeline_id, position);
+    CREATE INDEX IF NOT EXISTS idx_pipeline_templates_user ON pipeline_templates(user_id, created_at);
   `)
 
   // Migrate: add new columns if they don't exist (for existing DBs)
@@ -303,6 +315,7 @@ function createTables(): void {
     CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
     CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
     CREATE INDEX IF NOT EXISTS idx_user_agents_user ON user_agents(user_id);
+    CREATE INDEX IF NOT EXISTS idx_pipeline_templates_user ON pipeline_templates(user_id, created_at);
   `)
 }
 
@@ -906,6 +919,62 @@ export function listPipelines(userId?: string): Pipeline[] {
     ? db.prepare('SELECT * FROM pipelines WHERE user_id = ? ORDER BY created_at DESC').all(userId) as Record<string, unknown>[]
     : db.prepare('SELECT * FROM pipelines ORDER BY created_at DESC').all() as Record<string, unknown>[]
   return rows.map(rowToPipeline)
+}
+
+function rowToPipelineTemplate(row: Record<string, unknown>): PipelineTemplateRecord {
+  return {
+    id: row.id as string,
+    userId: row.user_id as string,
+    name: row.name as string,
+    description: row.description as string | undefined,
+    steps: JSON.parse(row.steps as string) as PipelineTemplateRecord['steps'],
+    source: 'user',
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+  }
+}
+
+export function createPipelineTemplate(params: {
+  id: string
+  userId?: string
+  name: string
+  description?: string
+  steps: PipelineTemplateRecord['steps']
+}): PipelineTemplateRecord {
+  const now = Date.now()
+  db.prepare(`
+    INSERT INTO pipeline_templates (id, user_id, name, description, steps, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    params.id,
+    params.userId ?? DEFAULT_USER_ID,
+    params.name,
+    params.description ?? null,
+    JSON.stringify(params.steps),
+    now,
+    now
+  )
+  return getPipelineTemplate(params.id, params.userId)!
+}
+
+export function getPipelineTemplate(id: string, userId?: string): PipelineTemplateRecord | undefined {
+  const row = userId
+    ? db.prepare('SELECT * FROM pipeline_templates WHERE id = ? AND user_id = ?').get(id, userId) as Record<string, unknown> | undefined
+    : db.prepare('SELECT * FROM pipeline_templates WHERE id = ?').get(id) as Record<string, unknown> | undefined
+  return row ? rowToPipelineTemplate(row) : undefined
+}
+
+export function listPipelineTemplates(userId?: string): PipelineTemplateRecord[] {
+  const rows = userId
+    ? db.prepare('SELECT * FROM pipeline_templates WHERE user_id = ? ORDER BY created_at DESC').all(userId) as Record<string, unknown>[]
+    : db.prepare('SELECT * FROM pipeline_templates ORDER BY created_at DESC').all() as Record<string, unknown>[]
+  return rows.map(rowToPipelineTemplate)
+}
+
+export function deletePipelineTemplate(id: string, userId?: string): boolean {
+  return userId
+    ? db.prepare('DELETE FROM pipeline_templates WHERE id = ? AND user_id = ?').run(id, userId).changes > 0
+    : db.prepare('DELETE FROM pipeline_templates WHERE id = ?').run(id).changes > 0
 }
 
 export function updatePipeline(id: string, updates: Partial<Pick<Pipeline, 'name' | 'status' | 'sessions'>>, userId?: string): Pipeline {

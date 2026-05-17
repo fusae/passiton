@@ -125,6 +125,30 @@ export interface PipelineStep {
   status: 'pending' | 'active' | 'done' | 'error'
 }
 
+export interface PipelineTemplateRecordStep {
+  title?: string
+  from: AgentRef
+  to: AgentRef
+  initialPrompt: string
+  mode?: SessionMode
+  maxRounds?: number
+  approveMode?: boolean
+  cwd?: string
+  context?: SessionContextInput
+  dependsOn?: number[]
+}
+
+export interface PipelineTemplateRecord {
+  id: string
+  userId?: string
+  name: string
+  description?: string
+  steps: PipelineTemplateRecordStep[]
+  source: 'builtin' | 'user'
+  createdAt: number
+  updatedAt: number
+}
+
 export interface PipelineWithSessions extends Pipeline {
   sessionDetails: Session[]
 }

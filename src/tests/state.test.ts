@@ -129,6 +129,33 @@ test('task CRUD persists prompt, context, and result', () => {
   }
 })
 
+test('pipeline template CRUD persists reusable workflow steps', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
+
+  try {
+    state.initDb(join(dir, 'turing.db'))
+    const template = state.createPipelineTemplate({
+      id: 'template-1',
+      name: 'Video workflow',
+      steps: [{
+        from: { adapter: 'opencode' },
+        to: { adapter: 'claude-code' },
+        initialPrompt: 'write script',
+        mode: 'collaborate',
+      }],
+    })
+
+    assert.equal(template.source, 'user')
+    assert.equal(state.listPipelineTemplates().length, 1)
+    assert.equal(state.getPipelineTemplate('template-1')?.steps[0]?.initialPrompt, 'write script')
+    assert.equal(state.deletePipelineTemplate('template-1'), true)
+    assert.equal(state.listPipelineTemplates().length, 0)
+  } finally {
+    state.closeDb()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('reopen keeps the existing round count', () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
 

@@ -90,6 +90,9 @@ turing task show <task-id>
 - `POST /api/tasks`
 - `GET /api/tasks/:id`
 - `POST /api/tasks/:id/stop`
+- `GET /api/pipeline-templates`
+- `POST /api/pipeline-templates`
+- `DELETE /api/pipeline-templates/:id`
 - `GET /api/sessions`
 - `POST /api/sessions`
 - `GET /api/sessions/:id`

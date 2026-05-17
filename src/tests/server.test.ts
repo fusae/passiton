@@ -128,6 +128,48 @@ test('GET /api/docs returns unauthenticated API reference', async () => {
   })
 })
 
+test('GET /api/pipeline-templates returns reusable workflow templates', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'pipeline-templates@example.com')
+    const response = await fetch(`${baseUrl}/api/pipeline-templates`, { headers: authHeaders(auth.token) })
+    assert.equal(response.status, 200)
+    const payload = await response.json() as Array<{ id: string; steps: unknown[] }>
+    assert.ok(payload.some((template) => template.id === 'douyin-video-production' && template.steps.length === 3))
+  })
+})
+
+test('pipeline template API creates, lists, and deletes user templates', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'user-pipeline-templates@example.com')
+    const created = await fetch(`${baseUrl}/api/pipeline-templates`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'My workflow',
+        steps: [{
+          from: { adapter: 'opencode' },
+          to: { adapter: 'claude-code' },
+          initialPrompt: 'write script',
+          mode: 'collaborate',
+        }],
+      }),
+    })
+    assert.equal(created.status, 201)
+    const template = await created.json() as { id: string; source: string }
+    assert.equal(template.source, 'user')
+
+    const listed = await fetch(`${baseUrl}/api/pipeline-templates`, { headers: authHeaders(auth.token) })
+    const payload = await listed.json() as Array<{ id: string; source: string }>
+    assert.ok(payload.some((item) => item.id === template.id && item.source === 'user'))
+
+    const deleted = await fetch(`${baseUrl}/api/pipeline-templates/${template.id}`, {
+      method: 'DELETE',
+      headers: authHeaders(auth.token),
+    })
+    assert.equal(deleted.status, 200)
+  })
+})
+
 test('GET /api/deploy/check returns authenticated deployment status', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'deploy-check@example.com')
