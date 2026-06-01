@@ -134,7 +134,7 @@ test('GET /api/pipeline-templates returns reusable workflow templates', async ()
     const response = await fetch(`${baseUrl}/api/pipeline-templates`, { headers: authHeaders(auth.token) })
     assert.equal(response.status, 200)
     const payload = await response.json() as Array<{ id: string; steps: unknown[] }>
-    assert.ok(payload.some((template) => template.id === 'douyin-video-production' && template.steps.length === 3))
+    assert.deepEqual(payload, [])
   })
 })
 
@@ -264,6 +264,23 @@ test('POST /api/sessions rejects cwd outside allowed workspaces', async () => {
     rmSync(denied, { recursive: true, force: true })
     delete process.env.TURING_ALLOWED_WORKSPACES
   }
+})
+
+test('POST /api/sessions rejects trusted permission mode without cwd', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'trusted-cwd@example.com')
+    const response = await fetch(`${baseUrl}/api/sessions`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from: { adapter: 'codex' },
+        to: { adapter: 'claude-code' },
+        initialPrompt: 'test',
+        permissionMode: 'trusted',
+      }),
+    })
+    assert.equal(response.status, 400)
+  })
 })
 
 test('POST /api/tasks runs a lead-agent task and exposes its result', async () => {
@@ -458,16 +475,25 @@ test('GET /api/pipelines/:id returns pipeline with session details', async () =>
         { sessionId: 'server-pipeline-session', status: 'active' },
       ],
     })
+    state.addMessage({
+      id: 'server-pipeline-message',
+      sessionId: 'server-pipeline-session',
+      from: 'human',
+      content: 'Pipeline input',
+      timestamp: Date.now(),
+      round: 0,
+    })
 
     const response = await fetch(`${baseUrl}/api/pipelines/server-pipeline`, { headers: authHeaders(auth.token) })
     assert.equal(response.status, 200)
     const payload = await response.json() as {
       id: string
-      sessionDetails: Array<{ id: string }>
+      sessionDetails: Array<{ id: string; messages: Array<{ content: string }> }>
     }
     assert.equal(payload.id, 'server-pipeline')
     assert.equal(payload.sessionDetails.length, 1)
     assert.equal(payload.sessionDetails[0].id, 'server-pipeline-session')
+    assert.equal(payload.sessionDetails[0].messages[0].content, 'Pipeline input')
   })
 })
 

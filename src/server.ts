@@ -25,12 +25,14 @@ import { activeAgents, getConfigPath, loadConfig, writeConfig } from './config.j
 import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, PipelineTemplateRecord, SessionMode, SessionContext, SessionContextInput, TaskStatus, WsEvent } from './types.js'
+import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, PipelineTemplateRecord, AgentRef, Session, SessionMode, SessionContext, SessionContextInput, TaskStatus, WsEvent } from './types.js'
 import { pipelineTemplates, templates } from './templates.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(__dirname, 'web')
 const MAX_BODY_SIZE = 1024 * 1024
+const MAX_FILE_PREVIEW_SIZE = 1024 * 1024
+const MAX_IMAGE_FILE_PREVIEW_SIZE = 10 * 1024 * 1024
 const WS_HEARTBEAT_MS = 30_000
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const API_ADAPTERS = new Set(['anthropic-api', 'openai-api', 'zhipu-api', 'custom-api'])
@@ -123,8 +125,8 @@ function parseTokenBody(body: unknown): { name?: string } {
 function parseApiKeyBody(body: unknown): { provider: string; key: string; name?: string } {
   const data = requireRecord(body, 'body')
   const provider = requireNonEmptyString(data.provider, 'provider').toLowerCase()
-  if (provider !== 'anthropic' && provider !== 'openai' && provider !== 'zhipu') {
-    throw new HttpError(400, '"provider" must be one of anthropic, openai, zhipu')
+  if (provider !== 'anthropic' && provider !== 'openai' && provider !== 'deepseek' && provider !== 'zhipu') {
+    throw new HttpError(400, '"provider" must be one of anthropic, openai, deepseek, zhipu')
   }
   return {
     provider,
@@ -326,6 +328,41 @@ function agentNameFromPath(pathname: string): string | undefined {
   return match ? decodeURIComponent(match[1]) : undefined
 }
 
+function sessionDisplayTitle(session: Session): string {
+  const pipeline = state.getPipelineBySession(session.id, session.userId)
+  const stepTitle = pipeline?.sessions.find((step) => step.sessionId === session.id)?.title?.trim()
+  if (stepTitle) return stepTitle
+
+  const initial = state.getMessages(session.id).find((msg) => msg.from === 'human' && msg.round === 0)?.content ?? ''
+  const firstLine = initial
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean)
+  if (firstLine) {
+    return compactSessionTitle(firstLine)
+  }
+  return `${agentLabel(session.from)} → ${agentLabel(session.to)}`
+}
+
+function agentLabel(ref: AgentRef): string {
+  return ref.label ?? ref.adapter
+}
+
+function compactSessionTitle(line: string): string {
+  const quotedStep = line.match(/[“"]([^”"]{2,40})[”"]/)?.[1]?.trim()
+  if (quotedStep) return quotedStep
+  const beforeColon = line.match(/^([^:：]{2,40})[:：]/)?.[1]?.trim()
+  if (beforeColon) return beforeColon
+  return line.length > 56 ? `${line.slice(0, 56)}...` : line
+}
+
+function sessionForClient(session: Session): Session & { displayTitle: string } {
+  return {
+    ...session,
+    displayTitle: sessionDisplayTitle(session),
+  }
+}
+
 async function reloadAgents(router: Router, agentCatalog: AgentCatalog, config: AppConfig): Promise<void> {
   const agents = activeAgents(config)
   router.clearAdapters()
@@ -422,7 +459,7 @@ function apiAgentInfoFromConfig(name: string, cfg: AgentConfig): ApiAgentInfo {
     name,
     adapter: cfg.adapter,
     model: cfg.model,
-    provider: providerForAdapter(cfg.adapter),
+    provider: providerForAdapter(cfg.adapter, cfg.baseUrl),
     baseUrl: cfg.baseUrl ?? DEFAULT_BASE_URLS[cfg.adapter],
     hasKey,
     keyMasked: cfg.apiKey ? maskAgentKey(cfg.apiKey) : undefined,
@@ -453,7 +490,7 @@ function providerKeyList(userId: string): ProviderKeyInfo[] {
     if (!apiKey) continue
     result.push({
       id: `assistant:${record.name}`,
-      provider: providerValueForAdapter(record.adapter),
+      provider: providerValueForAdapter(record.adapter, record.baseUrl),
       name: `${record.name} key`,
       maskedKey: maskAgentKey(apiKey),
       createdAt: record.createdAt,
@@ -466,7 +503,7 @@ function providerKeyList(userId: string): ProviderKeyInfo[] {
     if (!API_ADAPTERS.has(cfg.adapter) || !cfg.apiKey) continue
     result.push({
       id: `global:${name}`,
-      provider: providerValueForAdapter(cfg.adapter),
+      provider: providerValueForAdapter(cfg.adapter, cfg.baseUrl),
       name: `${name} key`,
       maskedKey: maskAgentKey(cfg.apiKey),
       createdAt: 0,
@@ -486,23 +523,30 @@ function apiConfigHealthy(cfg: AgentConfig): boolean {
   }
 }
 
-function providerForAdapter(adapter: string): string {
+function providerForAdapter(adapter: string, baseUrl?: string): string {
+  if (baseUrl?.includes('api.deepseek.com')) return 'DeepSeek'
   return PROVIDER_BY_ADAPTER[adapter] ?? 'Custom'
 }
 
-function providerValueForAdapter(adapter: string): state.StoredApiKeyRecord['provider'] {
+function providerValueForAdapter(adapter: string, baseUrl?: string): state.StoredApiKeyRecord['provider'] {
+  if (baseUrl?.includes('api.deepseek.com')) return 'deepseek'
   if (adapter === 'anthropic-api') return 'anthropic'
   if (adapter === 'openai-api' || adapter === 'custom-api') return 'openai'
   if (adapter === 'zhipu-api') return 'zhipu'
   return 'openai'
 }
 
-function resolveApiKeySelection(userId: string, parsed: { keyId?: string }): string | undefined {
+function resolveApiKeySelection(userId: string, parsed: { keyId?: string; adapter: string; baseUrl?: string }): string | undefined {
   if (!parsed.keyId) return undefined
   if (parsed.keyId.startsWith('assistant:') || parsed.keyId.startsWith('global:')) {
     throw new HttpError(400, 'Read-only keys cannot be rebound; choose a saved Provider Key')
   }
-  return decryptKey(userId, parsed.keyId).key
+  const selected = decryptKey(userId, parsed.keyId)
+  const expectedProvider = providerValueForAdapter(parsed.adapter, parsed.baseUrl)
+  if (selected.provider !== expectedProvider) {
+    throw new HttpError(400, `Choose a ${expectedProvider} Provider Key`)
+  }
+  return selected.key
 }
 
 function parseAgentRef(value: unknown, field: string): { adapter: string; label?: string } {
@@ -546,6 +590,16 @@ function parseSessionMode(value: unknown): SessionMode | undefined {
     return value
   }
   throw new HttpError(400, '"mode" must be one of collaborate, discuss, review, freeform')
+}
+
+function parsePermissionMode(value: unknown, field = 'permissionMode'): 'safe' | 'trusted' | undefined {
+  if (value === undefined || value === null || value === '') {
+    return undefined
+  }
+  if (value === 'safe' || value === 'trusted') {
+    return value
+  }
+  throw new HttpError(400, `"${field}" must be one of safe, trusted`)
 }
 
 function parseSessionContext(value: unknown, field: string): SessionContextInput | undefined {
@@ -618,6 +672,18 @@ function resolveSessionContext(context: SessionContextInput | undefined, cwd?: s
   return Object.keys(result).length > 0 ? result : undefined
 }
 
+function appendOutputDirContext(context: SessionContext | undefined, outputDir?: string): SessionContext | undefined {
+  if (!outputDir) return context
+  const text = [
+    context?.text,
+    `[[Turing Output Directory]]\nSave this step's durable outputs under: ${outputDir}\n[[End Turing Output Directory]]`,
+  ].filter(Boolean).join('\n\n')
+  return {
+    ...(context ?? {}),
+    text,
+  }
+}
+
 function parseSessionBody(body: unknown) {
   const data = requireRecord(body, 'body')
   const templateId = optionalString(data.template_id ?? data.templateId, 'template_id')
@@ -632,6 +698,7 @@ function parseSessionBody(body: unknown) {
     context: parseSessionContext(data.context, 'context'),
     maxRounds: optionalPositiveInt(data.maxRounds, 'maxRounds'),
     approveMode: optionalBoolean(data.approveMode, 'approveMode'),
+    permissionMode: parsePermissionMode(data.permissionMode),
     cwd: optionalString(data.cwd, 'cwd'),
   }
 }
@@ -644,6 +711,31 @@ function parseTaskBody(body: unknown) {
     context: parseSessionContext(data.context, 'context'),
     systemPrompt: optionalString(data.systemPrompt, 'systemPrompt'),
     cwd: optionalString(data.cwd, 'cwd'),
+  }
+}
+
+function parseFilePreviewBody(body: unknown): { path: string; cwd?: string } {
+  const data = requireRecord(body, 'body')
+  return {
+    path: requireNonEmptyString(data.path, 'path'),
+    cwd: optionalString(data.cwd, 'cwd'),
+  }
+}
+
+function previewMimeType(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase()
+  switch (ext) {
+    case '.png': return 'image/png'
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg'
+    case '.webp': return 'image/webp'
+    case '.gif': return 'image/gif'
+    case '.svg': return 'image/svg+xml'
+    case '.md': return 'text/markdown; charset=utf-8'
+    case '.json': return 'application/json; charset=utf-8'
+    case '.yaml':
+    case '.yml': return 'application/yaml; charset=utf-8'
+    default: return 'text/plain; charset=utf-8'
   }
 }
 
@@ -669,6 +761,12 @@ function assertAllowedWorkspace(cwd: string | undefined, field = 'cwd'): void {
   }
 }
 
+function assertPermissionModeAllowed(permissionMode: 'safe' | 'trusted' | undefined, cwd: string | undefined, field = 'permissionMode'): void {
+  if (permissionMode === 'trusted' && !cwd) {
+    throw new HttpError(400, `"${field}" trusted mode requires cwd`)
+  }
+}
+
 function sessionApiDocs() {
   return {
     auth: {
@@ -684,6 +782,7 @@ function sessionApiDocs() {
         initialPrompt: 'Write the article from this brief...',
         mode: 'freeform',
         maxRounds: 1,
+        permissionMode: 'safe',
         cwd: '/optional/project/path',
         context: {
           text: 'Background context',
@@ -745,6 +844,7 @@ function parsePipelineSteps(stepsValue: unknown) {
     }
 
     return {
+      title: optionalString(step.title, `steps[${index}].title`),
       from: parseAgentRef(step.from, `steps[${index}].from`),
       to: parseAgentRef(step.to, `steps[${index}].to`),
       initialPrompt: requireNonEmptyString(step.initialPrompt, `steps[${index}].initialPrompt`),
@@ -752,7 +852,9 @@ function parsePipelineSteps(stepsValue: unknown) {
       context: parseSessionContext(step.context, `steps[${index}].context`),
       maxRounds: optionalPositiveInt(step.maxRounds, `steps[${index}].maxRounds`),
       approveMode: optionalBoolean(step.approveMode, `steps[${index}].approveMode`),
+      permissionMode: parsePermissionMode(step.permissionMode, `steps[${index}].permissionMode`),
       cwd: optionalString(step.cwd, `steps[${index}].cwd`),
+      outputDir: optionalString(step.outputDir, `steps[${index}].outputDir`),
       dependsOn,
     }
   })
@@ -788,7 +890,12 @@ function builtInPipelineTemplateRecords(): PipelineTemplateRecord[] {
       initialPrompt: step.initialPrompt,
       mode: step.mode,
       maxRounds: step.maxRounds,
+      approveMode: step.approveMode,
+      permissionMode: step.permissionMode,
       dependsOn: step.dependsOn,
+      cwd: step.cwd,
+      outputDir: step.outputDir,
+      context: step.context,
     })),
     source: 'builtin',
     createdAt: 0,
@@ -1073,6 +1180,34 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return json(res, 200, loadConfig())
       }
 
+      // POST /api/files/preview
+      if (pathname === '/api/files/preview' && method === 'POST') {
+        const body = parseFilePreviewBody(await parseBody(req))
+        assertAllowedWorkspace(body.cwd, 'cwd')
+        const baseDir = body.cwd ? path.resolve(body.cwd) : process.cwd()
+        const filePath = path.isAbsolute(body.path) ? path.resolve(body.path) : path.resolve(baseDir, body.path)
+        assertAllowedWorkspace(filePath, 'path')
+        if (!fs.existsSync(filePath)) throw new HttpError(404, 'File not found')
+        const stat = fs.statSync(filePath)
+        if (!stat.isFile()) throw new HttpError(400, '"path" must be a file')
+        const mimeType = previewMimeType(filePath)
+        const isImage = mimeType.startsWith('image/')
+        const maxPreviewSize = isImage ? MAX_IMAGE_FILE_PREVIEW_SIZE : MAX_FILE_PREVIEW_SIZE
+        if (stat.size > maxPreviewSize) throw new HttpError(413, `File too large to preview (max ${maxPreviewSize} bytes)`)
+        const content = isImage
+          ? fs.readFileSync(filePath).toString('base64')
+          : fs.readFileSync(filePath, 'utf-8')
+        return json(res, 200, {
+          path: filePath,
+          name: path.basename(filePath),
+          size: stat.size,
+          mtime: stat.mtimeMs,
+          mimeType,
+          encoding: isImage ? 'base64' : 'utf-8',
+          content,
+        })
+      }
+
       // GET /api/deploy/check
       if (pathname === '/api/deploy/check' && method === 'GET') {
         const startedAt = Date.now()
@@ -1149,13 +1284,15 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const params = parsePipelineBody(await parseBody(req))
         for (const [index, step] of params.steps.entries()) {
           assertAllowedWorkspace(step.cwd, `steps[${index}].cwd`)
+          assertAllowedWorkspace(step.outputDir, `steps[${index}].outputDir`)
+          assertPermissionModeAllowed(step.permissionMode, step.cwd, `steps[${index}].permissionMode`)
         }
         const pipeline = router.startPipeline({
           userId: authUser!.userId,
           name: params.name,
           steps: params.steps.map((step) => ({
             ...step,
-            context: resolveSessionContext(step.context, step.cwd),
+            context: appendOutputDirContext(resolveSessionContext(step.context, step.cwd), step.outputDir),
             mode: step.mode ?? defaults.mode,
             maxRounds: step.maxRounds ?? defaults.maxRounds,
           })),
@@ -1199,7 +1336,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       if (pathname === '/api/sessions' && method === 'GET') {
         const statusFilter = parseSessionStatus(url.searchParams.get('status'))
         const sessions = state.listSessions({ ...(statusFilter ? { status: statusFilter } : {}), userId: authUser!.userId })
-        return json(res, 200, sessions)
+        return json(res, 200, sessions.map(sessionForClient))
       }
 
       // GET /api/tasks
@@ -1226,6 +1363,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const defaults = loadConfig().defaults
         const params = parseSessionBody(await parseBody(req))
         assertAllowedWorkspace(params.cwd)
+        assertPermissionModeAllowed(params.permissionMode, params.cwd)
         const template = params.templateId ? templates.find((item) => item.id === params.templateId) : undefined
         if (params.templateId && !template) {
           throw new HttpError(400, 'Unknown template_id')
@@ -1248,7 +1386,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const session = state.getSession(sessionMatch[1], authUser!.userId)
         if (!session) return json(res, 404, { error: 'Not found' })
         const messages = state.getMessages(session.id)
-        return json(res, 200, { ...session, messages })
+        return json(res, 200, { ...sessionForClient(session), messages })
       }
 
       // GET /api/tasks/:id
@@ -1426,7 +1564,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
     ws.on('close', () => clients.delete(ws))
     ws.on('error', () => clients.delete(ws))
     // Send current sessions on connect
-    ws.send(JSON.stringify({ type: 'init', payload: state.listSessions({ userId: authUser.userId }) }))
+    ws.send(JSON.stringify({ type: 'init', payload: state.listSessions({ userId: authUser.userId }).map(sessionForClient) }))
   })
 
   server.on('close', () => {

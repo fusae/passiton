@@ -1,6 +1,6 @@
 // Session templates — predefined scenario presets
 
-import type { SessionMode } from './types.js'
+import type { PermissionMode, SessionContextInput, SessionMode } from './types.js'
 
 export interface SessionTemplate {
   id: string
@@ -37,6 +37,11 @@ export interface PipelineTemplateStep {
   initialPrompt: string
   mode: SessionMode
   maxRounds: number
+  approveMode?: boolean
+  permissionMode?: PermissionMode
+  cwd?: string
+  outputDir?: string
+  context?: SessionContextInput
   dependsOn?: number[]
 }
 
@@ -142,41 +147,4 @@ export const templates: SessionTemplate[] = [
   },
 ]
 
-export const pipelineTemplates: PipelineTemplate[] = [
-  {
-    id: 'douyin-video-production',
-    name: '抖音视频生成',
-    nameEn: 'Douyin Video Production',
-    description: '改编文案、生成分镜与 prompt、再生成视频素材',
-    icon: '🎬',
-    tags: ['video', 'douyin', 'content'],
-    steps: [
-      {
-        title: '改编文案',
-        from: { adapter: 'opencode' },
-        to: { adapter: 'claude-code' },
-        initialPrompt: '基于给定的对标视频或原文案，按现有视频工作流完成改编文案，保留结构、节奏和笑点，输出可继续制作的版本。',
-        mode: 'collaborate',
-        maxRounds: 3,
-      },
-      {
-        title: '生成分镜与 Prompt',
-        from: { adapter: 'opencode' },
-        to: { adapter: 'claude-code' },
-        initialPrompt: '基于上一步结果，按现有视频工作流生成 reference.md、script.md 和 prompt.txt；prompt 中不要生成字幕，目录和命名遵循仓库约定。',
-        mode: 'collaborate',
-        maxRounds: 3,
-        dependsOn: [0],
-      },
-      {
-        title: '生成视频素材',
-        from: { adapter: 'opencode' },
-        to: { adapter: 'claude-code' },
-        initialPrompt: '基于上一步产物，按现有视频工作流调用生成命令产出视频素材，保存到约定目录，并汇总生成结果、文件路径和后续剪映处理事项。',
-        mode: 'collaborate',
-        maxRounds: 3,
-        dependsOn: [1],
-      },
-    ],
-  },
-]
+export const pipelineTemplates: PipelineTemplate[] = []
