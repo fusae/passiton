@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
@@ -116,6 +116,37 @@ test('GET /health returns unauthenticated liveness payload', async () => {
     const response = await fetch(`${baseUrl}/health`)
     assert.equal(response.status, 200)
     assert.deepEqual(await response.json(), { ok: true })
+  })
+})
+
+test('video preview returns stream metadata and supports range requests', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'video-preview@example.com')
+    const dir = mkdtempSync(join(tmpdir(), 'turing-video-preview-'))
+    try {
+      const filePath = join(dir, 'clip.mp4')
+      writeFileSync(filePath, Buffer.from('0123456789'))
+      const preview = await fetch(`${baseUrl}/api/files/preview`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ path: filePath }),
+      })
+      assert.equal(preview.status, 200)
+      const payload = await preview.json() as { encoding: string; mimeType: string; streamUrl: string; content?: string }
+      assert.equal(payload.encoding, 'stream')
+      assert.equal(payload.mimeType, 'video/mp4')
+      assert.equal(payload.content, undefined)
+
+      const streamed = await fetch(`${baseUrl}${payload.streamUrl}`, {
+        headers: { ...authHeaders(auth.token), range: 'bytes=2-5' },
+      })
+      assert.equal(streamed.status, 206)
+      assert.equal(streamed.headers.get('content-type'), 'video/mp4')
+      assert.equal(streamed.headers.get('content-range'), 'bytes 2-5/10')
+      assert.equal(await streamed.text(), '2345')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

@@ -1435,6 +1435,7 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
   const messages = session?.messages || []
   const output = workflowOutputMessage(messages)
   const cleaned = output ? output.replace(/\[DONE\]/gi, '').trim() : ''
+  const waitingForHumanApproval = /等待人工(?:确认|审核|回复|输入)|请回复[“"'` ]*(?:OK|通过|确认保存)/i.test(cleaned)
   const files = cleaned ? workflowArtifactFiles(cleaned) : []
 
   return `
@@ -1483,7 +1484,7 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
 
         ${canResumeStep || canRequestChanges || step.sessionId ? `
           <div class="step-actions">
-            ${canResumeStep ? `<button class="action-btn primary" onclick='window.resumeWorkflowStep(${jsString(step.sessionId)})'>${approvalDependencies.length ? `✓ 批准 ${escapeHtml(approvalDependencyLabel)}，执行本步骤` : '✓ 通过，继续'}</button>` : ''}
+            ${canResumeStep ? `<button class="action-btn primary" onclick='window.approveWorkflowStep(${jsString(step.sessionId)}, ${waitingForHumanApproval})'>${waitingForHumanApproval ? '✓ 通过，确认保存' : approvalDependencies.length ? `✓ 批准 ${escapeHtml(approvalDependencyLabel)}，执行本步骤` : '✓ 通过，继续'}</button>` : ''}
             ${canRequestChanges ? `<button class="action-btn secondary" onclick='window.requestWorkflowStepChanges(${jsString(step.sessionId)}, ${jsString(`Step ${index + 1}`)})'>✎ 要求修改上游产物</button>` : ''}
             <button class="action-btn secondary" onclick='window.openWorkflowStepMessage(${jsString(step.sessionId)}, ${jsString(`Step ${index + 1}：${title}`)})'>＋ 插入对话</button>
           </div>
@@ -1743,9 +1744,12 @@ window.previewWorkflowFile = async function(filePath, cwd) {
     const file = await api('/api/files/preview', 'POST', { path: filePath, cwd: cwd || undefined })
     const isMarkdown = /\.md$/i.test(file.name || file.path || '')
     const isImage = /^image\//i.test(file.mimeType || '') && file.encoding === 'base64'
+    const isVideo = /^video\//i.test(file.mimeType || '') && file.encoding === 'stream'
     const nestedFiles = isMarkdown ? extractWorkflowArtifactFiles(file.content || '').filter(path => path !== file.path) : []
     const body = isImage
       ? `<img class="file-preview-image" src="data:${escapeAttr(file.mimeType)};base64,${escapeAttr(file.content || '')}" alt="${escapeAttr(file.name || filePath)}">`
+      : isVideo
+        ? `<video class="file-preview-video" src="${escapeAttr(file.streamUrl || '')}" controls preload="metadata"></video>`
       : isMarkdown
         ? renderWorkflowMarkdown(file.content || '', cwd || '')
         : `<pre>${escapeHtml(file.content || '')}</pre>`
@@ -3428,6 +3432,19 @@ window.toggleWorkflowStep = function(sessionId) {
 window.resumeWorkflowStep = async function(sessionId) {
   try {
     await api(`/api/sessions/${sessionId}/resume`, 'POST')
+    if (state.currentPipelineId) {
+      const pipeline = await api(`/api/pipelines/${state.currentPipelineId}`)
+      applyPipelineUpdate(pipeline)
+    }
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.approveWorkflowStep = async function(sessionId, waitingForHumanApproval) {
+  if (!waitingForHumanApproval) return window.resumeWorkflowStep(sessionId)
+  try {
+    await api(`/api/sessions/${sessionId}/confirm`, 'POST')
     if (state.currentPipelineId) {
       const pipeline = await api(`/api/pipelines/${state.currentPipelineId}`)
       applyPipelineUpdate(pipeline)

@@ -825,6 +825,15 @@ export function updateSession(id: string, updates: Partial<Pick<Session, 'status
   return getSession(id, userId)!
 }
 
+export function clearSessionError(id: string): Session {
+  db.prepare(`
+    UPDATE sessions
+    SET error_type = NULL, error_round = NULL, error_message = NULL, updated_at = ?
+    WHERE id = ?
+  `).run(Date.now(), id)
+  return getSession(id)!
+}
+
 export function reopenSession(id: string, userId?: string): Session {
   const now = Date.now()
   if (userId) {

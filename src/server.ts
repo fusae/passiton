@@ -731,12 +731,58 @@ function previewMimeType(filePath: string): string {
     case '.webp': return 'image/webp'
     case '.gif': return 'image/gif'
     case '.svg': return 'image/svg+xml'
+    case '.mp4': return 'video/mp4'
+    case '.mov': return 'video/quicktime'
+    case '.webm': return 'video/webm'
     case '.md': return 'text/markdown; charset=utf-8'
     case '.json': return 'application/json; charset=utf-8'
     case '.yaml':
     case '.yml': return 'application/yaml; charset=utf-8'
     default: return 'text/plain; charset=utf-8'
   }
+}
+
+function resolvePreviewFile(filePath: string, cwd?: string): string {
+  assertAllowedWorkspace(cwd, 'cwd')
+  const baseDir = cwd ? path.resolve(cwd) : process.cwd()
+  const resolved = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath)
+  assertAllowedWorkspace(resolved, 'path')
+  if (!fs.existsSync(resolved)) throw new HttpError(404, 'File not found')
+  if (!fs.statSync(resolved).isFile()) throw new HttpError(400, '"path" must be a file')
+  return resolved
+}
+
+function streamPreviewFile(req: http.IncomingMessage, res: http.ServerResponse, filePath: string): void {
+  const stat = fs.statSync(filePath)
+  const mimeType = previewMimeType(filePath)
+  const range = req.headers.range
+  if (!range) {
+    res.writeHead(200, {
+      'Content-Type': mimeType,
+      'Content-Length': stat.size,
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'no-store',
+    })
+    fs.createReadStream(filePath).pipe(res)
+    return
+  }
+
+  const match = range.match(/^bytes=(\d*)-(\d*)$/)
+  if (!match) throw new HttpError(416, 'Invalid Range header')
+  const start = match[1] ? Number(match[1]) : 0
+  const end = match[2] ? Number(match[2]) : stat.size - 1
+  if (start < 0 || end < start || start >= stat.size || end >= stat.size) {
+    res.setHeader('Content-Range', `bytes */${stat.size}`)
+    throw new HttpError(416, 'Range not satisfiable')
+  }
+  res.writeHead(206, {
+    'Content-Type': mimeType,
+    'Content-Length': end - start + 1,
+    'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-store',
+  })
+  fs.createReadStream(filePath, { start, end }).pipe(res)
 }
 
 function optionalStringArray(value: unknown, field: string): string[] | undefined {
@@ -1180,21 +1226,28 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return json(res, 200, loadConfig())
       }
 
+      // GET /api/files/content
+      if (pathname === '/api/files/content' && method === 'GET') {
+        const filePath = resolvePreviewFile(
+          requireNonEmptyString(url.searchParams.get('path'), 'path'),
+          optionalString(url.searchParams.get('cwd'), 'cwd')
+        )
+        return streamPreviewFile(req, res, filePath)
+      }
+
       // POST /api/files/preview
       if (pathname === '/api/files/preview' && method === 'POST') {
         const body = parseFilePreviewBody(await parseBody(req))
-        assertAllowedWorkspace(body.cwd, 'cwd')
-        const baseDir = body.cwd ? path.resolve(body.cwd) : process.cwd()
-        const filePath = path.isAbsolute(body.path) ? path.resolve(body.path) : path.resolve(baseDir, body.path)
-        assertAllowedWorkspace(filePath, 'path')
-        if (!fs.existsSync(filePath)) throw new HttpError(404, 'File not found')
+        const filePath = resolvePreviewFile(body.path, body.cwd)
         const stat = fs.statSync(filePath)
-        if (!stat.isFile()) throw new HttpError(400, '"path" must be a file')
         const mimeType = previewMimeType(filePath)
         const isImage = mimeType.startsWith('image/')
+        const isVideo = mimeType.startsWith('video/')
         const maxPreviewSize = isImage ? MAX_IMAGE_FILE_PREVIEW_SIZE : MAX_FILE_PREVIEW_SIZE
-        if (stat.size > maxPreviewSize) throw new HttpError(413, `File too large to preview (max ${maxPreviewSize} bytes)`)
-        const content = isImage
+        if (!isVideo && stat.size > maxPreviewSize) throw new HttpError(413, `File too large to preview (max ${maxPreviewSize} bytes)`)
+        const content = isVideo
+          ? undefined
+          : isImage
           ? fs.readFileSync(filePath).toString('base64')
           : fs.readFileSync(filePath, 'utf-8')
         return json(res, 200, {
@@ -1203,7 +1256,8 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           size: stat.size,
           mtime: stat.mtimeMs,
           mimeType,
-          encoding: isImage ? 'base64' : 'utf-8',
+          encoding: isVideo ? 'stream' : isImage ? 'base64' : 'utf-8',
+          ...(isVideo ? { streamUrl: `/api/files/content?path=${encodeURIComponent(filePath)}` } : {}),
           content,
         })
       }
@@ -1438,6 +1492,13 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           ? await router.resumeErrorSession(resumeMatch[1])
           : await router.resumeSession(resumeMatch[1], extraRounds)
         return json(res, 200, session)
+      }
+
+      // POST /api/sessions/:id/confirm
+      const confirmMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/confirm$/)
+      if (confirmMatch && method === 'POST') {
+        if (!state.getSession(confirmMatch[1], authUser!.userId)) return json(res, 404, { error: 'Not found' })
+        return json(res, 200, await router.confirmSession(confirmMatch[1]))
       }
 
       // POST /api/sessions/:id/extend-timeout

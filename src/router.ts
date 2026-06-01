@@ -26,6 +26,8 @@ const PIPELINE_DEP_FILE_CHARS = 12_000
 const PIPELINE_DEP_TEXT_CHARS = 4_000
 const DREAMINA_COMMAND = process.env.TURING_DREAMINA_COMMAND ?? '/Users/jamesyu/.local/bin/dreamina'
 const DREAMINA_POLL_INTERVAL_MS = 10_000
+const CURL_COMMAND = process.env.TURING_CURL_COMMAND ?? 'curl'
+const FFMPEG_COMMAND = process.env.TURING_FFMPEG_COMMAND ?? 'ffmpeg'
 
 type DreaminaQueryResult = {
   status: 'querying' | 'success' | 'error'
@@ -345,6 +347,9 @@ export class Router extends EventEmitter {
     const messages = state.getMessages(id)
     const lastMessage = messages.at(-1)
     if (!lastMessage) throw new Error(`Session ${id} has no messages`)
+    if (lastMessage.from !== 'human' && detectHumanInputWait(lastMessage.content)) {
+      throw new Error(`Session ${id} is waiting for human input; insert a reply instead of resuming`)
+    }
 
     const updated = state.updateSession(id, {
       status: 'active',
@@ -365,6 +370,10 @@ export class Router extends EventEmitter {
     const session = state.getSession(id)
     if (!session) throw new Error(`Session ${id} not found`)
     if (session.status !== 'error') throw new Error(`Session ${id} is not error`)
+    const lastMessage = state.getMessages(id).at(-1)
+    if (lastMessage?.from !== 'human' && detectHumanInputWait(lastMessage?.content ?? session.lastAgentOutput ?? '')) {
+      throw new Error(`Session ${id} is waiting for human input; insert a reply instead of resuming`)
+    }
 
     const failedRound = session.errorRound ?? this.inferFailedRound(session)
     const resumePrompt = this.buildCheckpointResumePrompt(session, failedRound)
@@ -402,6 +411,41 @@ export class Router extends EventEmitter {
     this.emit('event', { type: 'session:updated', payload: session } satisfies WsEvent)
     this.emitLog('info', `Session stopped [${id.slice(0, 8)}]`, id)
     return session
+  }
+
+  async confirmSession(id: string): Promise<Session> {
+    const session = state.getSession(id)
+    if (!session) throw new Error(`Session ${id} not found`)
+    const messages = state.getMessages(id)
+    const approvalRequest = [...messages].reverse().find((message) => (
+      message.from !== 'human' && detectHumanInputWait(message.content)
+    ))
+    if (!approvalRequest) throw new Error(`Session ${id} is not waiting for human approval`)
+
+    this.runningLoops.delete(id)
+    this.timeoutExtensions.delete(id)
+    this.nextRunEpoch(id)
+    this.abortActiveTurn(id)
+    state.clearSessionError(id)
+    this.recordMessage(id, 'human', '通过，确认保存。', session.currentRound)
+
+    const videoPaths = extractVideoPaths(approvalRequest.content)
+    const content = [
+      '[RESULT]',
+      '成片已通过人工审核，确认为最终保存版。',
+      '',
+      ...(videoPaths.length ? ['最终视频：', ...videoPaths.map((filePath) => `\`${filePath}\``), ''] : []),
+      '后处理事项：在剪映中完成字幕识别、字幕校对和样式微调后导出。',
+      '[/RESULT]',
+      '[DONE]',
+    ].join('\n')
+    this.recordMessage(id, 'turing', content, session.currentRound)
+    state.updateSession(id, { lastAgentOutput: content })
+    const completed = await this.completeSession(id)
+    this.emit('event', { type: 'session:done', payload: completed } satisfies WsEvent)
+    this.emitLog('info', `Session confirmed by human [${id.slice(0, 8)}]`, id)
+    this.handlePipelineSessionFinished(id, 'done')
+    return completed
   }
 
   extendSessionTimeout(id: string, extensionMs = 5 * 60 * 1000): { session: Session; extensionMs: number; totalExtensionMs: number } {
@@ -726,6 +770,11 @@ export class Router extends EventEmitter {
         this.registerDreaminaJob(sessionId, pendingJob)
         return { done: false, waiting: true, nextMessage: content }
       }
+      if (detectHumanInputWait(content)) {
+        await this.pauseSession(sessionId)
+        this.emitLog('info', `Waiting for human input [${sessionId.slice(0, 8)}]`, sessionId)
+        return { done: false, waiting: true, nextMessage: content }
+      }
       return { done: false, nextMessage: content }
     }
 
@@ -733,6 +782,11 @@ export class Router extends EventEmitter {
     const pendingJob = detectDreaminaSubmittedJob(content, session)
     if (pendingJob) {
       this.registerDreaminaJob(sessionId, pendingJob)
+      return { done: false, waiting: true, nextMessage: content }
+    }
+    if (detectHumanInputWait(content)) {
+      await this.pauseSession(sessionId)
+      this.emitLog('info', `Waiting for human input [${sessionId.slice(0, 8)}]`, sessionId)
       return { done: false, waiting: true, nextMessage: content }
     }
     if (this.shouldCompleteSession(sessionId, session, content)) {
@@ -1291,22 +1345,44 @@ export function detectDreaminaSubmittedJob(content: string, session: Pick<Sessio
   }
 }
 
+export function detectHumanInputWait(content: string): boolean {
+  return (
+    /等待人工(?:确认|审核|回复|输入)/i.test(content) ||
+    /请回复[“"'` ]*(?:OK|通过|确认保存)/i.test(content)
+  )
+}
+
+function extractVideoPaths(content: string): string[] {
+  return Array.from(new Set(
+    [...content.matchAll(/(?:^|[`(\s])((?:\/|\.{1,2}\/)[^`\s)]+?\.(?:mp4|mov|webm))(?=$|[`\s)])/gi)]
+      .map((match) => match[1])
+  ))
+}
+
 async function queryDreaminaResult(externalId: string, downloadDir: string): Promise<DreaminaQueryResult> {
   fs.mkdirSync(downloadDir, { recursive: true })
   const stdout = await execFileText(DREAMINA_COMMAND, [
     'query_result',
     `--submit_id=${externalId}`,
-    `--download_dir=${downloadDir}`,
   ])
   const payload = JSON.parse(stdout) as {
     gen_status?: string
     message?: string
+    result_json?: {
+      videos?: Array<{ video_url?: string; format?: string }>
+    }
   }
   const status = payload.gen_status?.toLowerCase()
   if (status === 'success') {
-    const paths = fs.readdirSync(downloadDir)
-      .filter((name) => name.includes(externalId) && /\.(?:mp4|mov|webm)$/i.test(name))
-      .map((name) => path.join(downloadDir, name))
+    const videos = payload.result_json?.videos ?? []
+    const paths: string[] = []
+    for (const [index, video] of videos.entries()) {
+      if (!video.video_url) continue
+      const ext = video.format?.toLowerCase() === 'webm' ? 'webm' : 'mp4'
+      const destination = path.join(downloadDir, `${externalId}_video_${index + 1}.${ext}`)
+      await downloadAndValidateVideo(video.video_url, destination)
+      paths.push(destination)
+    }
     if (paths.length > 0) return { status: 'success', paths }
     return { status: 'querying' }
   }
@@ -1316,9 +1392,29 @@ async function queryDreaminaResult(externalId: string, downloadDir: string): Pro
   return { status: 'querying' }
 }
 
-function execFileText(command: string, args: string[]): Promise<string> {
+async function downloadAndValidateVideo(url: string, destination: string): Promise<void> {
+  const partial = `${destination}.part`
+  await execFileText(CURL_COMMAND, [
+    '--location',
+    '--fail',
+    '--retry', '3',
+    '--retry-delay', '2',
+    '--continue-at', '-',
+    '--output', partial,
+    url,
+  ], 20 * 60_000)
+  try {
+    await execFileText(FFMPEG_COMMAND, ['-v', 'error', '-i', partial, '-f', 'null', '-'], 5 * 60_000)
+  } catch (err) {
+    fs.rmSync(partial, { force: true })
+    throw new Error(`Downloaded video failed integrity check: ${errorMessage(err)}`)
+  }
+  fs.renameSync(partial, destination)
+}
+
+function execFileText(command: string, args: string[], timeout = 60_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(command, args, { timeout, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         reject(new Error((stderr || err.message).trim()))
         return

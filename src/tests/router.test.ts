@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Router, detectDreaminaSubmittedJob } from '../router.js'
+import { Router, detectDreaminaSubmittedJob, detectHumanInputWait } from '../router.js'
 import * as state from '../state.js'
 import type { Adapter, AdapterCapabilities, AdapterSendOpts, Session } from '../types.js'
 
@@ -321,6 +321,107 @@ test('detectDreaminaSubmittedJob ignores completed local video output', () => {
     'submit_id: `5db07d3a-4d66-44b7-ac53-b2f9f660ce11`\n本地视频：`/tmp/video.mp4`',
     { cwd: '/tmp/project' }
   ), undefined)
+})
+
+test('detectHumanInputWait recognizes explicit approval requests', () => {
+  assert.equal(detectHumanInputWait('请回复“OK/通过/确认保存”或修改意见。'), true)
+  assert.equal(detectHumanInputWait('本步骤等待人工确认。'), true)
+  assert.equal(detectHumanInputWait('任务已完成。'), false)
+})
+
+test('explicit human approval request pauses the session', async () => {
+  await withTempDb(async () => {
+    let calls = 0
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => {
+      calls += 1
+      return '视频已生成，请回复“OK/通过/确认保存”或修改意见。'
+    }))
+
+    const session = router.startSession({
+      from: { adapter: 'codex' },
+      to: { adapter: 'codex' },
+      initialPrompt: 'review video',
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'paused')
+    assert.equal(calls, 1)
+  })
+})
+
+test('resume rejects sessions waiting for human approval', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    const session = state.createSession({
+      id: 'waiting-human-resume',
+      from: { adapter: 'codex' },
+      to: { adapter: 'codex' },
+    })
+    state.addMessage({
+      id: 'waiting-human-message',
+      sessionId: session.id,
+      from: 'codex',
+      content: '请回复“OK/通过/确认保存”或修改意见。',
+      timestamp: Date.now(),
+      round: 1,
+    })
+    state.updateSession(session.id, { status: 'paused' })
+
+    await assert.rejects(
+      () => router.resumeSession(session.id),
+      /waiting for human input/
+    )
+  })
+})
+
+test('error resume rejects sessions waiting for human approval', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    const session = state.createSession({
+      id: 'waiting-human-error-resume',
+      from: { adapter: 'codex' },
+      to: { adapter: 'codex' },
+    })
+    state.addMessage({
+      id: 'waiting-human-error-message',
+      sessionId: session.id,
+      from: 'codex',
+      content: '请回复“OK/通过/确认保存”或修改意见。',
+      timestamp: Date.now(),
+      round: 1,
+    })
+    state.updateSession(session.id, { status: 'error' })
+
+    await assert.rejects(
+      () => router.resumeErrorSession(session.id),
+      /waiting for human input/
+    )
+  })
+})
+
+test('confirmSession completes human approval without calling an adapter', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    const session = state.createSession({
+      id: 'direct-human-confirm',
+      from: { adapter: 'codex' },
+      to: { adapter: 'codex' },
+    })
+    state.addMessage({
+      id: 'direct-human-confirm-request',
+      sessionId: session.id,
+      from: 'codex',
+      content: '视频：`/tmp/final.mp4`\n请回复“OK/通过/确认保存”或修改意见。',
+      timestamp: Date.now(),
+      round: 1,
+    })
+
+    const completed = await router.confirmSession(session.id)
+
+    assert.equal(completed.status, 'done')
+    assert.match(completed.lastAgentOutput ?? '', /final\.mp4/)
+    assert.deepEqual(state.getMessages(session.id).slice(-2).map((message) => message.from), ['human', 'turing'])
+  })
 })
 
 test('dreamina pending output is reconciled automatically', async () => {
