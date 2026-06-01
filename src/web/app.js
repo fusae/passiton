@@ -5,22 +5,45 @@ const API = ''  // same origin
 const AUTH_TOKEN_KEY = 'turing-jwt'
 const THEME_KEY = 'turing-theme'
 
-const MODEL_OPTIONS_BY_ADAPTER = {
-  'anthropic-api': [
+const PROVIDER_PRESETS = {
+  anthropic: {
+    label: 'Anthropic',
+    adapter: 'anthropic-api',
+    baseUrl: '',
+    models: [
     { value: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
     { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
     { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
     { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5 snapshot' },
-  ],
-  'openai-api': [
+    ],
+  },
+  openai: {
+    label: 'OpenAI',
+    adapter: 'openai-api',
+    baseUrl: '',
+    models: [
     { value: 'gpt-5.5', label: 'GPT-5.5' },
     { value: 'gpt-5.4', label: 'GPT-5.4' },
     { value: 'gpt-5.4-mini', label: 'GPT-5.4 mini' },
     { value: 'gpt-5.4-nano', label: 'GPT-5.4 nano' },
     { value: 'gpt-5.2', label: 'GPT-5.2' },
     { value: 'gpt-4.1', label: 'GPT-4.1' },
-  ],
-  'zhipu-api': [
+    ],
+  },
+  deepseek: {
+    label: 'DeepSeek',
+    adapter: 'custom-api',
+    baseUrl: 'https://api.deepseek.com/chat/completions',
+    models: [
+      { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
+      { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+    ],
+  },
+  zhipu: {
+    label: 'Zhipu',
+    adapter: 'zhipu-api',
+    baseUrl: '',
+    models: [
     { value: 'glm-5.1', label: 'GLM-5.1' },
     { value: 'glm-5', label: 'GLM-5' },
     { value: 'glm-5-turbo', label: 'GLM-5-Turbo' },
@@ -30,13 +53,19 @@ const MODEL_OPTIONS_BY_ADAPTER = {
     { value: 'glm-4.6', label: 'GLM-4.6' },
     { value: 'glm-4.5-air', label: 'GLM-4.5-Air' },
     { value: 'glm-4.5-airx', label: 'GLM-4.5-AirX' },
-  ],
-  'custom-api': [
+    ],
+  },
+  custom: {
+    label: 'Custom OpenAI-compatible',
+    adapter: 'custom-api',
+    baseUrl: '',
+    models: [
     { value: '', label: 'Provider default' },
     { value: 'gpt-5.5', label: 'GPT-5.5 compatible' },
     { value: 'gpt-5.4', label: 'GPT-5.4 compatible' },
     { value: 'gpt-4.1', label: 'GPT-4.1 compatible' },
-  ],
+    ],
+  },
 }
 
 // ── Global State ──────────────────────────────────────────────────────────────
@@ -69,6 +98,8 @@ const state = {
   streamRaw: new Map(),
   streamSteps: new Map(),
   streamStatus: new Map(),
+  workflowFileAliases: new Map(),
+  workflowNestedFiles: new Map(),
   expandedStepDetails: new Set(),
   expandedArtifactFiles: new Set(),
   autoFollowMessages: true,
@@ -120,7 +151,7 @@ function render() {
     renderTask(id)
   } else if (path === '/workflows') {
     renderWorkflows()
-  } else if (path.startsWith('/workflow/')) {
+  } else if (path.startsWith('/workflow/') || path.startsWith('/workflows/')) {
     const id = path.split('/')[2]
     renderWorkflow(id)
   } else if (path === '/settings') {
@@ -366,6 +397,20 @@ function handleWsEvent(event) {
         renderSessionMessages()
         renderSessionPanel(state.currentSession)
       }
+      {
+        const workflowDetail = findCurrentWorkflowSessionDetail(event.payload.sessionId)
+        if (workflowDetail) {
+          workflowDetail.messages = workflowDetail.messages || []
+          const index = workflowDetail.messages.findIndex(message => message.id === event.payload.id)
+          if (index >= 0) {
+            workflowDetail.messages[index] = event.payload
+          } else {
+            workflowDetail.messages.push(event.payload)
+          }
+          renderWorkflowSteps(state.currentPipeline)
+          renderWorkflowTimeline(state.currentPipeline)
+        }
+      }
       break
     case 'heartbeat':
       state.heartbeats.set(event.sessionId, event)
@@ -389,6 +434,12 @@ function applySessionUpdate(session) {
     renderSessionPanel(state.currentSession)
   }
 
+  const workflowDetail = findCurrentWorkflowSessionDetail(session.id)
+  if (workflowDetail) {
+    Object.assign(workflowDetail, session)
+    renderWorkflowSteps(state.currentPipeline)
+  }
+
   renderSessionStats()
   renderSessionCards()
 }
@@ -404,9 +455,12 @@ function applyPipelineUpdate(pipeline) {
 
   if (state.currentPipelineId === pipeline.id) {
     state.currentPipeline = { ...(state.currentPipeline || {}), ...pipeline }
+    state.workflowFileAliases = new Map()
+    state.workflowNestedFiles = new Map()
     renderWorkflowHeader(state.currentPipeline)
     renderWorkflowSteps(state.currentPipeline)
     renderWorkflowTimeline(state.currentPipeline)
+    hydrateWorkflowFileReferences(state.currentPipeline)
   }
 
   renderPipelineCards()
@@ -440,7 +494,6 @@ function removeSessionFromList(id) {
 
 function handleMessageDelta(payload) {
   if (!payload?.sessionId || !payload.content) return
-  if (state.currentSessionId !== payload.sessionId) return
 
   const existing = state.streamDeltas.get(payload.sessionId) || {
     sessionId: payload.sessionId,
@@ -452,7 +505,8 @@ function handleMessageDelta(payload) {
   state.streamDeltas.set(payload.sessionId, existing)
   state.streamRaw.set(payload.sessionId, (state.streamRaw.get(payload.sessionId) || '') + payload.content)
   setStreamStatus(payload.sessionId, summarizeRawStatus(payload.content))
-  scheduleStreamingRender()
+  if (state.currentSessionId === payload.sessionId) scheduleStreamingRender()
+  if (isCurrentWorkflowSession(payload.sessionId)) renderWorkflowSteps(state.currentPipeline)
 }
 
 function handleMessageStep(payload) {
@@ -469,6 +523,7 @@ function handleMessageStep(payload) {
   state.streamSteps.set(payload.sessionId, steps)
   setStreamStatus(payload.sessionId, step.summary)
   if (state.currentSessionId === payload.sessionId) renderSessionMessages()
+  if (isCurrentWorkflowSession(payload.sessionId)) renderWorkflowSteps(state.currentPipeline)
 }
 
 function setStreamStatus(sessionId, status) {
@@ -532,6 +587,18 @@ function updateHeartbeat(hb) {
     if (progressElapsed) progressElapsed.textContent = `${Math.floor(hb.elapsed / 1000)}s`
     if (progressOutput) progressOutput.textContent = hb.lastOutput || 'Processing...'
   }
+  if (isCurrentWorkflowSession(hb.sessionId)) {
+    setStreamStatus(hb.sessionId, summarizeRawStatus(hb.lastOutput || '运行中...'))
+    renderWorkflowSteps(state.currentPipeline)
+  }
+}
+
+function isCurrentWorkflowSession(sessionId) {
+  return Boolean(state.currentPipeline?.sessions?.some(step => step.sessionId === sessionId))
+}
+
+function findCurrentWorkflowSessionDetail(sessionId) {
+  return state.currentPipeline?.sessionDetails?.find(session => session.id === sessionId)
 }
 
 // ── Data Loading ──────────────────────────────────────────────────────────────
@@ -1063,13 +1130,12 @@ function renderSessionCards() {
   container.innerHTML = state.sessions.map(session => `
     <a href="/session/${session.id}" class="card session-card">
       <div class="session-card-header">
-        <span class="session-card-title">${escapeHtml(session.from.label || session.from.adapter)} → ${escapeHtml(session.to.label || session.to.adapter)}</span>
+        <span class="session-card-title">${escapeHtml(sessionTitle(session))}</span>
         <span class="badge badge-${session.status}">${session.status}</span>
       </div>
       <div class="session-card-route">
-        <span>${escapeHtml(session.from.label || session.from.adapter)}</span>
-        <span class="route-arrow">→</span>
-        <span>${escapeHtml(session.to.label || session.to.adapter)}</span>
+        <span>${escapeHtml(session.mode || 'session')}</span>
+        ${session.cwd ? `<span class="route-arrow">·</span><span>${escapeHtml(session.cwd)}</span>` : ''}
       </div>
       <div class="session-card-meta">
         <span>⟳ ${session.currentRound} turns</span>
@@ -1273,6 +1339,8 @@ async function renderWorkflow(id) {
     return
   }
   state.currentPipeline = pipeline
+  state.workflowFileAliases = new Map()
+  state.workflowNestedFiles = new Map()
 
   document.body.innerHTML = `
     <div class="app-layout">
@@ -1302,6 +1370,7 @@ async function renderWorkflow(id) {
 
   renderWorkflowSteps(pipeline)
   renderWorkflowTimeline(pipeline)
+  hydrateWorkflowFileReferences(pipeline)
   updateThemeButton()
 }
 
@@ -1340,37 +1409,369 @@ function renderWorkflowSteps(pipeline) {
   const steps = pipeline.sessions || []
   const details = pipeline.sessionDetails || []
   container.innerHTML = `
-    <div class="workflow-rail-large">${renderStepRail(steps)}</div>
-    <div class="workflow-step-grid">
-      ${steps.map((step, index) => renderWorkflowStepCard(step, details[index], index)).join('')}
+    <div class="workflow-timeline-view">
+      ${steps.map((step, index) => renderWorkflowTimelineStep(step, details[index], index, steps.length)).join('')}
+    </div>
+  `
+}
+
+function renderWorkflowTimelineStep(step, session, index, totalSteps) {
+  const expanded = state.expandedWorkflowStep === step.sessionId
+  const dependsOn = step.dependsOn || []
+  const title = step.title || inferWorkflowStepTitle(session, index)
+  const currentRound = Number(session?.currentRound) || 0
+  const maxRounds = Number(session?.maxRounds) || 0
+  const status = step.status === 'pending' ? 'pending' : (session?.status || step.status)
+  const canResumeStep = step.status === 'active' && (session?.status === 'paused' || session?.status === 'error' || session?.status === 'stopped')
+  const approvalDependencies = dependsOn.map(id => ({ id, index: stepIndexBySessionId(id) }))
+  const approvalDependencyLabel = approvalDependencies.map(dep => `Step ${dep.index + 1}`).join(', ')
+  const canRequestChanges = step.status === 'active' && (session?.status === 'paused' || session?.status === 'stopped') && approvalDependencies.length > 0
+  const runningStatus = status === 'active'
+    ? (state.streamStatus.get(step.sessionId) || summarizeRawStatus(state.heartbeats.get(step.sessionId)?.lastOutput || '运行中...'))
+    : ''
+  const isLast = index === totalSteps - 1
+
+  // Get output
+  const messages = session?.messages || []
+  const output = workflowOutputMessage(messages)
+  const cleaned = output ? output.replace(/\[DONE\]/gi, '').trim() : ''
+  const files = cleaned ? workflowArtifactFiles(cleaned) : []
+
+  return `
+    <div class="timeline-step ${status}" data-step-id="${step.sessionId}">
+      <div class="timeline-axis">
+        <div class="timeline-node ${status}">
+          <span class="node-number">${index + 1}</span>
+        </div>
+        ${!isLast ? '<div class="timeline-connector"></div>' : ''}
+      </div>
+
+      <div class="timeline-content">
+        <div class="step-header">
+          <div class="step-header-main">
+            <h3 class="step-title">${escapeHtml(title)}</h3>
+            <span class="step-badge status-${status}">${escapeHtml(status)}</span>
+          </div>
+          <div class="step-meta">
+            <span class="meta-item">
+              <span class="meta-icon">#</span>
+              Step ${index + 1}: ${escapeHtml(title)}
+            </span>
+            <span class="meta-item">
+              <span class="meta-icon">🔄</span>
+              ${currentRound}${maxRounds ? ` / ${maxRounds}` : ''} rounds
+            </span>
+            <span class="meta-item ${session?.permissionMode === 'trusted' ? 'permission-trusted' : ''}">
+              <span class="meta-icon">⚠</span>
+              ${escapeHtml(session?.permissionMode || 'safe')}
+            </span>
+            ${dependsOn.length ? `
+              <span class="meta-item">
+                <span class="meta-icon">⛓</span>
+                Depends on Step ${dependsOn.map(id => stepIndexBySessionId(id) + 1).join(', ')}
+              </span>
+            ` : ''}
+          </div>
+        </div>
+
+        ${runningStatus ? `
+          <div class="step-running-status">
+            <span class="running-spinner"></span>
+            <span class="running-text">${escapeHtml(runningStatus)}</span>
+          </div>
+        ` : ''}
+
+        ${canResumeStep || canRequestChanges || step.sessionId ? `
+          <div class="step-actions">
+            ${canResumeStep ? `<button class="action-btn primary" onclick='window.resumeWorkflowStep(${jsString(step.sessionId)})'>${approvalDependencies.length ? `✓ 批准 ${escapeHtml(approvalDependencyLabel)}，执行本步骤` : '✓ 通过，继续'}</button>` : ''}
+            ${canRequestChanges ? `<button class="action-btn secondary" onclick='window.requestWorkflowStepChanges(${jsString(step.sessionId)}, ${jsString(`Step ${index + 1}`)})'>✎ 要求修改上游产物</button>` : ''}
+            <button class="action-btn secondary" onclick='window.openWorkflowStepMessage(${jsString(step.sessionId)}, ${jsString(`Step ${index + 1}：${title}`)})'>＋ 插入对话</button>
+          </div>
+        ` : ''}
+
+        ${cleaned ? `
+          <div class="step-output">
+            <div class="output-header">
+              <span class="output-label">
+                <span class="output-icon">▸</span>
+                OUTPUT
+              </span>
+              <div class="output-actions">
+                ${session?.versions?.length ? `<button class="output-copy" onclick='window.showWorkflowStepVersions(${jsString(session.id)})'>Versions ${session.versions.length}</button>` : ''}
+                <button class="output-copy" onclick='window.copyWorkflowStepArtifact(${jsString(cleaned)})'>
+                  <span>⎘</span> Copy
+                </button>
+              </div>
+            </div>
+
+            ${files.length ? `
+              <div class="output-files">
+                <div class="files-label">Generated Files [${files.length}]</div>
+                <div class="files-list">
+                  ${files.map((file, idx) => renderWorkflowFileItem(file, session?.cwd || '', idx === files.length - 1 ? '└─' : '├─')).join('')}
+                </div>
+              </div>
+            ` : ''}
+
+            <div class="output-content">
+              ${renderWorkflowMarkdown(cleaned, session?.cwd || '')}
+            </div>
+          </div>
+        ` : ''}
+
+        ${expanded ? `
+          <div class="step-messages">
+            <button class="messages-toggle" onclick='window.toggleWorkflowStep(${jsString(step.sessionId)})'>
+              ▾ Hide Conversation
+            </button>
+            ${renderWorkflowStepMessages(session)}
+          </div>
+        ` : `
+          <button class="messages-toggle collapsed" onclick='window.toggleWorkflowStep(${jsString(step.sessionId)})'>
+            ▸ View Full Conversation
+          </button>
+        `}
+      </div>
     </div>
   `
 }
 
 function renderWorkflowStepCard(step, session, index) {
-  const expanded = state.expandedWorkflowStep === step.sessionId
-  const dependsOn = step.dependsOn || []
-  const from = agentLabel(session?.from) || 'Agent A'
-  const to = agentLabel(session?.to) || 'Agent B'
-  const currentRound = Number(session?.currentRound) || 0
-  const maxRounds = Number(session?.maxRounds) || 0
+  // Keep old function for compatibility, redirect to timeline
+  return renderWorkflowTimelineStep(step, session, index, 999)
+}
+
+function renderWorkflowStepArtifact(session) {
+  const messages = session?.messages || []
+  const output = workflowOutputMessage(messages)
+  if (!output) return ''
+  const cleaned = output.replace(/\[DONE\]/gi, '').trim()
+  if (!cleaned) return ''
+  const files = workflowArtifactFiles(cleaned)
+  const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false })
   return `
-    <div class="workflow-step-wrap">
-      <button class="workflow-step-card ${expanded ? 'expanded' : ''}" onclick='window.toggleWorkflowStep(${jsString(step.sessionId)})'>
-        <div class="workflow-step-top">
-          <span class="workflow-step-index">Step ${index + 1}</span>
-          <span class="badge badge-${step.status}">${escapeHtml(step.status)}</span>
+    <div class="workflow-step-artifact">
+      <div class="artifact-terminal-header">
+        <div class="terminal-status">
+          <span class="status-dot"></span>
+          <span class="status-text">OUTPUT</span>
+          <span class="status-time">${timestamp}</span>
         </div>
-        <div class="workflow-step-route">${escapeHtml(from)} <span>→</span> ${escapeHtml(to)}</div>
-        <div class="workflow-step-meta">
-          <span>${currentRound}${maxRounds ? ` / ${maxRounds}` : ''} turns</span>
-          <span>${dependsOn.length ? `Depends on ${dependsOn.length}` : 'No dependency'}</span>
+        <button class="terminal-action" onclick='window.copyWorkflowStepArtifact(${jsString(cleaned)})'>
+          <span class="action-icon">⎘</span>
+          <span class="action-label">COPY</span>
+        </button>
+      </div>
+      ${files.length ? `
+        <div class="artifact-files-panel">
+          <div class="files-panel-header">
+            <span class="panel-indicator">▸</span>
+            <span class="panel-title">GENERATED_FILES</span>
+            <span class="panel-count">[${files.length}]</span>
+          </div>
+          <div class="files-tree">
+            ${files.map((file, idx) => renderWorkflowFileItem(file, session?.cwd || '', idx === files.length - 1 ? '└─' : '├─')).join('')}
+          </div>
         </div>
-      </button>
-      ${dependsOn.length ? `<div class="workflow-deps">← ${dependsOn.map(id => `Step ${stepIndexBySessionId(id) + 1 || '?'}`).join(', ')}</div>` : ''}
-      ${expanded ? renderWorkflowStepMessages(session) : ''}
+      ` : ''}
+      <div class="artifact-content-panel">
+        <div class="content-panel-header">
+          <span class="panel-indicator">▸</span>
+          <span class="panel-title">CONTENT</span>
+        </div>
+        <div class="content-display">${renderWorkflowMarkdown(cleaned, session?.cwd || '')}</div>
+      </div>
     </div>
   `
+}
+
+function workflowOutputMessage(messages) {
+  const outputs = [...messages].reverse().filter(msg => msg.from !== 'human' && msg.content)
+  return outputs.find(msg => extractWorkflowArtifactFiles(msg.content).length)?.content || outputs[0]?.content
+}
+
+function extractWorkflowArtifactFiles(content) {
+  const files = new Set()
+  const extensions = 'md|txt|log|json|yaml|yml|png|jpe?g|webp|gif|svg|mp4|mov|webm'
+  const fileExtensionPattern = new RegExp('\\.(' + extensions + ')$', 'i')
+  const patterns = [
+    new RegExp('`([^`]+\\.(' + extensions + '))`', 'gi'),
+    new RegExp('(^|[\\s(（"\\\',])(/[^\\s`\'"<>，。；：；、)）,=\\\\]+?\\.(' + extensions + '))(?=$|[\\s`\'"<>，。；：；、)）,=\\\\])', 'gim'),
+    new RegExp('(^|[\\s(（"\\\'])([\\w.\\-/\\u4e00-\\u9fa5]+/[^\\s`\'"<>，。；：；、)）]+\\.(' + extensions + '))(?=$|[\\s`\'"<>，。；：；、)）])', 'gim'),
+  ]
+  for (const pattern of patterns) {
+    for (const match of content.matchAll(pattern)) {
+      const file = match.slice(1).map(value => (value || '').trim()).find(value => fileExtensionPattern.test(value))
+      if (file && !/^https?:\/\//i.test(file)) files.add(file)
+    }
+  }
+  const extracted = [...files]
+  const absoluteNames = new Set(extracted.filter(file => file.startsWith('/')).map(file => workflowFileName(file)))
+  return extracted.filter(file => file.startsWith('/') || file.includes('/') || !absoluteNames.has(file))
+}
+
+function workflowArtifactFiles(content) {
+  const files = extractWorkflowArtifactFiles(content)
+  const expanded = new Set(files)
+  for (const file of files) {
+    for (const nested of state.workflowNestedFiles.get(resolveWorkflowFilePath(file)) || []) expanded.add(nested)
+  }
+  return [...expanded]
+}
+
+async function hydrateWorkflowFileReferences(pipeline) {
+  const markdownFiles = new Map()
+  for (const session of pipeline.sessionDetails || []) {
+    for (const message of session.messages || []) {
+      for (const file of extractWorkflowArtifactFiles(message.content || '')) {
+        const resolved = resolveWorkflowFilePath(file)
+        if (/\.md$/i.test(resolved)) markdownFiles.set(resolved, session.cwd || '')
+      }
+    }
+  }
+  let changed = false
+  await Promise.all([...markdownFiles].map(async ([file, cwd]) => {
+    try {
+      const preview = await api('/api/files/preview', 'POST', { path: file, cwd: cwd || undefined })
+      const nested = extractWorkflowArtifactFiles(preview.content || '').map(resolveWorkflowFilePath)
+      state.workflowNestedFiles.set(file, nested)
+      for (const match of String(preview.content || '').matchAll(/([^,\s\\]+)=([\w.-]+)/g)) {
+        if (/\.(png|jpe?g|webp|gif|svg)$/i.test(match[1])) state.workflowFileAliases.set(match[2], match[1])
+      }
+      changed = true
+    } catch {}
+  }))
+  if (changed && state.currentPipelineId === pipeline.id) renderWorkflowSteps(state.currentPipeline)
+}
+
+function workflowFileName(file) {
+  return String(file).split('/').pop() || String(file)
+}
+
+function workflowFileMeta(file) {
+  const name = workflowFileName(file)
+  const ext = (name.match(/\.([^.]+)$/)?.[1] || '').toLowerCase()
+  let role = '文件'
+  if (/storyboard/i.test(name)) role = '故事板分镜图'
+  else if (/三视图|角色|同事|人物/.test(file) && /^(png|jpe?g|webp|gif)$/i.test(ext)) role = '角色参考图'
+  else if (/prompt/i.test(name)) role = '生成提示词'
+  else if (/script/i.test(name)) role = '拍摄脚本'
+  else if (/reference/i.test(name)) role = '参考素材'
+  else if (/commands?|命令/i.test(file)) role = '视频生成命令'
+  else if (/^(png|jpe?g|webp|gif|svg)$/i.test(ext)) role = '图片素材'
+  else if (/^(mp4|mov|webm)$/i.test(ext)) role = '视频文件'
+  else if (/^(md|txt|log|json|ya?ml)$/i.test(ext)) role = '文本文件'
+  return { name, role }
+}
+
+function resolveWorkflowFilePath(file) {
+  const value = String(file)
+  if (value.includes('/')) return value
+  const matches = new Set()
+  for (const session of state.currentPipeline?.sessionDetails || []) {
+    for (const message of session.messages || []) {
+      for (const candidate of extractWorkflowArtifactFiles(message.content || '')) {
+        if (candidate.startsWith('/') && workflowFileName(candidate) === value) matches.add(candidate)
+      }
+    }
+  }
+  return matches.size === 1 ? [...matches][0] : value
+}
+
+function renderWorkflowFileItem(file, cwd, prefix = '├─') {
+  const resolvedFile = resolveWorkflowFilePath(file)
+  const meta = workflowFileMeta(resolvedFile)
+  return `
+    <button class="file-item" onclick='window.previewWorkflowFile(${jsString(resolvedFile)}, ${jsString(cwd || '')})'>
+      <span class="file-tree">${prefix}</span>
+      <span class="file-info">
+        <span class="file-name">${escapeHtml(meta.name)}</span>
+        <span class="file-role">${escapeHtml(meta.role)}</span>
+        <span class="file-location">${escapeHtml(resolvedFile)}</span>
+      </span>
+      <span class="file-arrow">→</span>
+    </button>
+  `
+}
+
+function inferWorkflowStepTitle(session, index) {
+  const initial = (session?.messages || []).find(msg => msg.from === 'human' && Number(msg.round) === 0)?.content || ''
+  const quoted = initial.match(/“([^”]{2,24})”/)
+  if (quoted?.[1]) return quoted[1]
+  const firstLine = initial.split('\n').map(line => line.trim()).find(Boolean)
+  if (firstLine) return firstLine.slice(0, 24)
+  return `Step ${index + 1}`
+}
+
+function sessionTitle(session) {
+  const provided = String(session?.displayTitle || '').trim()
+  if (provided) return provided
+  const initial = (session?.messages || []).find(msg => msg.from === 'human' && Number(msg.round) === 0)?.content || ''
+  const firstLine = initial.split('\n').map(line => line.trim()).find(Boolean)
+  if (firstLine) return firstLine.length > 56 ? `${firstLine.slice(0, 56)}...` : firstLine
+  const mode = session?.mode ? `${session.mode} session` : 'Untitled session'
+  return session?.cwd ? `${mode} · ${session.cwd}` : mode
+}
+
+window.copyWorkflowStepArtifact = async function(content) {
+  const ok = await copyText(content)
+  showToast(ok ? '已复制' : '复制失败', ok ? 'success' : 'error')
+}
+
+window.showWorkflowStepVersions = function(sessionId) {
+  const session = findCurrentWorkflowSessionDetail(sessionId)
+  const versions = session?.versions || []
+  showModal(`
+    <div class="modal-card file-preview-modal">
+      <div class="modal-head">
+        <h3>版本记录</h3>
+        <button class="icon-btn" onclick="window.closeModal()">×</button>
+      </div>
+      ${versions.length ? versions.map((version, index) => `
+        <div class="version-card">
+          <div class="version-title">v${versions.length - index} · Round ${escapeHtml(version.round ?? '')} · ${escapeHtml(new Date(version.timestamp).toLocaleString())}</div>
+          <div class="version-reason">${escapeHtml(version.reason || '')}</div>
+          ${version.output ? `<div class="version-output">${renderWorkflowMarkdown(String(version.output).replace(/\[DONE\]/gi, '').trim(), session?.cwd || '')}</div>` : ''}
+        </div>
+      `).join('') : '<p class="muted">暂无版本记录</p>'}
+    </div>
+  `)
+}
+
+window.previewWorkflowFile = async function(filePath, cwd) {
+  try {
+    const file = await api('/api/files/preview', 'POST', { path: filePath, cwd: cwd || undefined })
+    const isMarkdown = /\.md$/i.test(file.name || file.path || '')
+    const isImage = /^image\//i.test(file.mimeType || '') && file.encoding === 'base64'
+    const nestedFiles = isMarkdown ? extractWorkflowArtifactFiles(file.content || '').filter(path => path !== file.path) : []
+    const body = isImage
+      ? `<img class="file-preview-image" src="data:${escapeAttr(file.mimeType)};base64,${escapeAttr(file.content || '')}" alt="${escapeAttr(file.name || filePath)}">`
+      : isMarkdown
+        ? renderWorkflowMarkdown(file.content || '', cwd || '')
+        : `<pre>${escapeHtml(file.content || '')}</pre>`
+    showModal(`
+      <div class="modal-card file-preview-modal">
+        <div class="modal-head">
+          <h3>${escapeHtml(file.name || filePath)}</h3>
+          <button class="icon-btn" onclick="window.closeModal()">×</button>
+        </div>
+        <div class="file-preview-path">${escapeHtml(file.path || filePath)}</div>
+        ${nestedFiles.length ? `
+          <div class="output-files">
+            <div class="files-label">Referenced Files [${nestedFiles.length}]</div>
+            <div class="files-list">
+              ${nestedFiles.map((path, idx) => renderWorkflowFileItem(path, cwd || '', idx === nestedFiles.length - 1 ? '└─' : '├─')).join('')}
+            </div>
+          </div>
+        ` : ''}
+        <div class="file-preview-body">
+          ${body}
+        </div>
+      </div>
+    `)
+  } catch (err) {
+    showToast(err.message)
+  }
 }
 
 function renderWorkflowStepMessages(session) {
@@ -1388,7 +1789,7 @@ function renderWorkflowStepMessages(session) {
             <div class="chat-msg ${isFrom ? 'from' : 'to'}">
               <div class="chat-avatar">${escapeHtml(avatar)}</div>
               <div>
-                <div class="chat-bubble">${renderMarkdown(msg.content || '')}</div>
+                <div class="chat-bubble">${renderWorkflowMarkdown(msg.content || '', session?.cwd || '')}</div>
                 <div class="chat-meta">
                   <span>${escapeHtml(msg.from || '')} · Turn ${escapeHtml(msg.round ?? '')}</span>
                 </div>
@@ -1434,6 +1835,14 @@ function stepIndexBySessionId(sessionId) {
   return (state.currentPipeline?.sessions || []).findIndex(step => step.sessionId === sessionId)
 }
 
+function workflowRevisionTargets(currentStepIndex) {
+  const steps = state.currentPipeline?.sessions || []
+  return steps
+    .slice(0, Math.max(0, currentStepIndex))
+    .map((step, index) => ({ id: step.sessionId, index, title: step.title || `Step ${index + 1}` }))
+    .filter(target => target.id)
+}
+
 function formatStatNumber(value) {
   const number = Number(value)
   if (!Number.isFinite(number)) return '0'
@@ -1466,7 +1875,7 @@ async function renderSession(id) {
         <header class="topbar">
           <div class="topbar-left">
             <a href="/sessions" class="btn btn-ghost btn-sm">← Back</a>
-            <h2>${escapeHtml(session.from.label || session.from.adapter)} → ${escapeHtml(session.to.label || session.to.adapter)}</h2>
+            <h2>${escapeHtml(sessionTitle(session))}</h2>
             <span id="session-status-badge" class="badge badge-${session.status}">${session.status}</span>
           </div>
           <div class="topbar-right" id="session-actions">
@@ -1578,6 +1987,10 @@ function renderSessionPanel(session) {
         <div class="panel-kv-row">
           <span class="kv-label">Status</span>
           <span class="badge badge-${session.status}" style="margin: 0;">${session.status}</span>
+        </div>
+        <div class="panel-kv-row">
+          <span class="kv-label">Permission</span>
+          <span class="kv-value ${session.permissionMode === 'trusted' ? 'permission-trusted' : ''}">${escapeHtml(session.permissionMode || 'safe')}</span>
         </div>
         <div class="panel-kv-row">
           <span class="kv-label">Created</span>
@@ -2533,6 +2946,13 @@ window.showNewSessionModal = async function(templateId = 'custom') {
           <input class="input" name="cwd" placeholder="/path/to/project">
         </div>
         <div class="form-group">
+          <label>Permission mode</label>
+          <select class="input" name="permissionMode">
+            <option value="safe">Safe</option>
+            <option value="trusted">Trusted · skip CLI approvals</option>
+          </select>
+        </div>
+        <div class="form-group">
           <label>Prompt</label>
           <textarea class="input" name="prompt" rows="5" required placeholder="Describe the session..."></textarea>
         </div>
@@ -2578,6 +2998,7 @@ window.createSession = async function(e) {
     mode: fd.get('mode') || state.config?.defaults?.mode || 'collaborate',
     maxRounds: parseInt(fd.get('maxRounds')) || state.config?.defaults?.maxRounds || 5,
     approveMode: fd.get('approveMode') === 'on',
+    permissionMode: fd.get('permissionMode') || 'safe',
     cwd: String(fd.get('cwd') || '').trim() || undefined,
     context,
   }
@@ -2725,6 +3146,10 @@ window.showNewWorkflowModal = async function() {
           <label>Pipeline name</label>
           <input class="input" name="name" required placeholder="Release workflow">
         </div>
+        <div class="form-group">
+          <label>Workflow input</label>
+          <textarea class="input" name="workflowInput" rows="4" placeholder="Paste the reference video notes, source copy, or brief for this run..."></textarea>
+        </div>
         <div class="workflow-editor-head">
           <h3>Steps</h3>
           <button type="button" class="btn btn-secondary btn-sm" onclick="window.addWorkflowStep()">+ Add Step</button>
@@ -2743,7 +3168,7 @@ window.showNewWorkflowModal = async function() {
   window.addWorkflowStep()
 }
 
-window.addWorkflowStep = function(step = {}) {
+window.addWorkflowStep = function(step = {}, options = {}) {
   const editor = document.getElementById('workflow-step-editor')
   if (!editor) return
   const index = Number(editor.dataset.count || '0')
@@ -2753,6 +3178,9 @@ window.addWorkflowStep = function(step = {}) {
   const row = document.createElement('div')
   row.className = 'workflow-edit-step'
   row.draggable = true
+  row.dataset.autoDefaultDependency = options.autoDefaultDependency === false ? 'false' : 'true'
+  if (step.cwd) row.dataset.cwd = step.cwd
+  if (step.context) row.dataset.context = JSON.stringify(step.context)
   row.innerHTML = renderWorkflowEditStep(index, step, defaultFrom, defaultTo)
   row.addEventListener('dragstart', event => {
     event.dataTransfer.setData('text/plain', String([...editor.children].indexOf(row)))
@@ -2777,12 +3205,20 @@ function renderWorkflowEditStep(index, step, defaultFrom, defaultTo) {
   const to = resolveWorkflowAgentName(step.to, step.toAdapter, defaultTo, from)
   const mode = step.mode || 'collaborate'
   const maxRounds = step.maxRounds || state.config?.defaults?.maxRounds || 5
+  const title = step.title || `Step ${index + 1}`
   const prompt = step.initialPrompt || ''
+  const permissionMode = step.permissionMode || 'safe'
+  const cwd = step.cwd || ''
+  const outputDir = step.outputDir || ''
   return `
     <div class="workflow-edit-title">
       <span class="drag-handle">↕</span>
       <strong data-step-label>Step ${index + 1}</strong>
       <button type="button" class="btn btn-ghost btn-sm" onclick="window.removeWorkflowStep(this)">Remove</button>
+    </div>
+    <div class="form-group">
+      <label>Step name</label>
+      <input class="input" name="title" required value="${escapeAttr(title)}" placeholder="改编文案">
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -2813,6 +3249,27 @@ function renderWorkflowEditStep(index, step, defaultFrom, defaultTo) {
       <label>Prompt</label>
       <textarea class="input" name="initialPrompt" rows="3" required placeholder="Describe this step...">${escapeHtml(prompt)}</textarea>
     </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Permission mode</label>
+        <select class="input" name="permissionMode">
+          <option value="safe" ${permissionMode === 'safe' ? 'selected' : ''}>Safe</option>
+          <option value="trusted" ${permissionMode === 'trusted' ? 'selected' : ''}>Trusted · skip CLI approvals</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Working Directory</label>
+        <input class="input" name="cwd" value="${escapeAttr(cwd)}" placeholder="/path/to/project">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Output Directory</label>
+      <input class="input" name="outputDir" value="${escapeAttr(outputDir)}" placeholder="/path/to/save/outputs">
+    </div>
+    <label class="check-row">
+      <input type="checkbox" name="approveMode" ${step.approveMode ? 'checked' : ''}>
+      <span>Pause before this step and require manual approval</span>
+    </label>
     <div class="form-group">
       <label>Depends on</label>
       <select class="input" name="dependsOn" multiple data-deps></select>
@@ -2841,7 +3298,7 @@ window.applyWorkflowTemplate = function(templateId) {
     return
   }
   if (nameInput) nameInput.value = template.name
-  template.steps.forEach(step => window.addWorkflowStep(step))
+  template.steps.forEach(step => window.addWorkflowStep(step, { autoDefaultDependency: false }))
   if (deleteButton) deleteButton.style.display = template.source === 'user' ? '' : 'none'
   const rows = [...editor.querySelectorAll('.workflow-edit-step')]
   rows.forEach((row, index) => {
@@ -2853,18 +3310,28 @@ window.applyWorkflowTemplate = function(templateId) {
   })
 }
 
-function collectWorkflowSteps() {
+function collectWorkflowSteps(workflowInput = '') {
   const rows = [...document.querySelectorAll('#workflow-step-editor .workflow-edit-step')]
   return rows.map(row => {
     const dependsOn = [...row.querySelector('[name="dependsOn"]').selectedOptions]
       .map(option => Number(option.value))
       .filter(value => Number.isInteger(value))
+    const initialPrompt = row.querySelector('[name="initialPrompt"]').value.trim()
+    const promptWithInput = !dependsOn.length && workflowInput
+      ? `${initialPrompt}\n\n本次输入：\n${workflowInput}`
+      : initialPrompt
     return compactObject({
       from: { adapter: row.querySelector('[name="from"]').value },
       to: { adapter: row.querySelector('[name="to"]').value },
-      initialPrompt: row.querySelector('[name="initialPrompt"]').value.trim(),
+      title: row.querySelector('[name="title"]').value.trim(),
+      initialPrompt: promptWithInput,
       mode: row.querySelector('[name="mode"]').value,
       maxRounds: parseInt(row.querySelector('[name="maxRounds"]').value) || undefined,
+      approveMode: row.querySelector('[name="approveMode"]').checked || undefined,
+      permissionMode: row.querySelector('[name="permissionMode"]').value,
+      cwd: row.querySelector('[name="cwd"]').value.trim() || undefined,
+      outputDir: row.querySelector('[name="outputDir"]').value.trim() || undefined,
+      context: row.dataset.context ? JSON.parse(row.dataset.context) : undefined,
       dependsOn: dependsOn.length ? dependsOn : undefined,
     })
   })
@@ -2928,8 +3395,9 @@ function refreshWorkflowStepEditor() {
     const deps = row.querySelector('[data-deps]')
     const selected = [...deps.selectedOptions].map(option => option.value)
     deps.innerHTML = rows.map((_, depIndex) => {
-      if (depIndex === index) return ''
-      const defaultSelected = selected.includes(String(depIndex)) || (selected.length === 0 && depIndex === index - 1)
+      if (depIndex >= index) return ''
+      const shouldAutoDefault = row.dataset.autoDefaultDependency !== 'false'
+      const defaultSelected = selected.includes(String(depIndex)) || (shouldAutoDefault && selected.length === 0 && depIndex === index - 1)
       return `<option value="${depIndex}" ${defaultSelected ? 'selected' : ''}>Step ${depIndex + 1}</option>`
     }).join('')
   })
@@ -2938,7 +3406,7 @@ function refreshWorkflowStepEditor() {
 window.createWorkflow = async function(e) {
   e.preventDefault()
   const fd = new FormData(e.target)
-  const steps = collectWorkflowSteps()
+  const steps = collectWorkflowSteps(String(fd.get('workflowInput') || '').trim())
 
   try {
     const pipeline = await api('/api/pipelines', 'POST', {
@@ -2955,6 +3423,110 @@ window.createWorkflow = async function(e) {
 window.toggleWorkflowStep = function(sessionId) {
   state.expandedWorkflowStep = state.expandedWorkflowStep === sessionId ? null : sessionId
   renderWorkflowSteps(state.currentPipeline)
+}
+
+window.resumeWorkflowStep = async function(sessionId) {
+  try {
+    await api(`/api/sessions/${sessionId}/resume`, 'POST')
+    if (state.currentPipelineId) {
+      const pipeline = await api(`/api/pipelines/${state.currentPipelineId}`)
+      applyPipelineUpdate(pipeline)
+    }
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.openWorkflowStepMessage = function(sessionId, title) {
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>插入对话：${escapeHtml(title || '当前步骤')}</h3>
+        <button class="icon-btn" onclick="window.closeModal()">×</button>
+      </div>
+      <form onsubmit='window.submitWorkflowStepMessage(event, ${jsString(sessionId)})'>
+        <div class="form-group">
+          <label>消息内容</label>
+          <textarea class="input" name="content" rows="6" required placeholder="给这个步骤补充指令或修改意见..."></textarea>
+          <small class="form-hint">提交后会写入该步骤的人类对话，并触发该步骤继续执行；其后续步骤会按依赖重置。</small>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">发送</button>
+        </div>
+      </form>
+    </div>
+  `)
+}
+
+window.submitWorkflowStepMessage = async function(event, sessionId) {
+  event.preventDefault()
+  const fd = new FormData(event.target)
+  const content = String(fd.get('content') || '').trim()
+  if (!content) return
+  try {
+    await api(`/api/sessions/${sessionId}/message`, 'POST', { content })
+    closeModal()
+    if (state.currentPipelineId) {
+      const pipeline = await api(`/api/pipelines/${state.currentPipelineId}`)
+      applyPipelineUpdate(pipeline)
+    }
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.requestWorkflowStepChanges = function(sessionId, title) {
+  const stepIndex = stepIndexBySessionId(sessionId)
+  const targets = workflowRevisionTargets(stepIndex)
+  const defaultTarget = targets.at(-1)?.id || sessionId
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>要求修改上游产物</h3>
+        <button class="icon-btn" onclick="window.closeModal()">×</button>
+      </div>
+      <form onsubmit='window.submitWorkflowStepChanges(event)'>
+        <div class="form-group">
+          <label>要修改哪一步</label>
+          <select class="input" name="sessionId">
+            ${targets.map(target => `
+              <option value="${escapeAttr(target.id)}" ${target.id === defaultTarget ? 'selected' : ''}>
+                Step ${target.index + 1}：${escapeHtml(target.title)}
+              </option>
+            `).join('')}
+          </select>
+          <small class="form-hint">可回退并修改当前步骤之前的任意产物；提交前会自动保存该步骤当前版本。</small>
+        </div>
+        <div class="form-group">
+          <label>修改意见</label>
+          <textarea class="input" name="content" rows="6" required placeholder="说明哪里不过、希望怎么改..."></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">提交修改</button>
+        </div>
+      </form>
+    </div>
+  `)
+}
+
+window.submitWorkflowStepChanges = async function(event) {
+  event.preventDefault()
+  const fd = new FormData(event.target)
+  const sessionId = String(fd.get('sessionId') || '').trim()
+  const content = String(fd.get('content') || '').trim()
+  if (!sessionId || !content) return
+  try {
+    await api(`/api/sessions/${sessionId}/message`, 'POST', { content })
+    closeModal()
+    if (state.currentPipelineId) {
+      const pipeline = await api(`/api/pipelines/${state.currentPipelineId}`)
+      applyPipelineUpdate(pipeline)
+    }
+  } catch (err) {
+    showToast(err.message)
+  }
 }
 
 window.pauseWorkflow = async function() {
@@ -2997,8 +3569,9 @@ window.deleteCurrentWorkflow = async function() {
 window.showAgentModal = async function(name) {
   if (!state.apiKeys.length) await loadApiKeys()
   const existing = state.agents.find(agent => agent.name === name)
-  const selectedAdapter = existing?.adapter || 'anthropic-api'
-  const selectedModel = existing?.model || defaultModelForAdapter(selectedAdapter)
+  const selectedProvider = providerPresetForAgent(existing)
+  const selectedPreset = PROVIDER_PRESETS[selectedProvider]
+  const selectedModel = existing?.model || defaultModelForProvider(selectedProvider)
   showModal(`
     <div class="modal-card">
       <div class="modal-head">
@@ -3015,29 +3588,24 @@ window.showAgentModal = async function(name) {
             <input class="input" name="name" required value="${escapeAttr(existing?.name || '')}">
           </div>
           <div class="form-group">
-            <label>Adapter</label>
-            <select class="input" name="adapter" id="agent-adapter-select" required onchange="window.updateAgentModelOptions()">
-              ${adapterOption('anthropic-api', selectedAdapter)}
-              ${adapterOption('openai-api', selectedAdapter)}
-              ${adapterOption('zhipu-api', selectedAdapter)}
-              ${adapterOption('custom-api', selectedAdapter)}
+            <label>Provider</label>
+            <select class="input" name="provider" id="agent-provider-select" required onchange="window.updateAgentProviderOptions()">
+              ${providerPresetOptions(selectedProvider)}
             </select>
           </div>
         </div>
         <div class="form-group">
           <label>Model</label>
-          <select class="input" name="model" id="agent-model-select">
-            ${modelOptions(selectedAdapter, selectedModel)}
-          </select>
+          <div id="agent-model-control">${modelControl(selectedProvider, selectedModel)}</div>
         </div>
         <div class="form-group">
           <label>Base URL</label>
-          <input class="input" name="baseUrl" value="${escapeAttr(existing?.baseUrl || '')}" placeholder="Optional">
+          <input class="input" name="baseUrl" id="agent-base-url-input" value="${escapeAttr(existing?.baseUrl || selectedPreset.baseUrl)}" placeholder="${selectedProvider === 'custom' ? 'Required' : 'Optional override'}">
         </div>
         <div class="form-group">
           <label>Provider Key</label>
           <select class="input" name="keyId" id="agent-key-select" data-has-current-key="${existing?.hasKey ? 'true' : 'false'}" data-original-adapter="${escapeAttr(existing?.adapter || '')}">
-            ${agentKeyOptions(selectedAdapter, Boolean(existing?.hasKey))}
+            ${agentKeyOptions(selectedProvider, Boolean(existing?.hasKey))}
           </select>
         </div>
         <div class="form-row">
@@ -3059,9 +3627,10 @@ window.showAgentModal = async function(name) {
 window.saveAgent = async function(e, originalName) {
   e.preventDefault()
   const fd = new FormData(e.target)
+  const preset = PROVIDER_PRESETS[String(fd.get('provider') || '')] || PROVIDER_PRESETS.custom
   const body = compactObject({
     name: String(fd.get('name') || '').trim(),
-    adapter: fd.get('adapter'),
+    adapter: preset.adapter,
     model: String(fd.get('model') || '').trim() || undefined,
     baseUrl: String(fd.get('baseUrl') || '').trim() || undefined,
     keyId: String(fd.get('keyId') || '').trim() || undefined,
@@ -3111,6 +3680,7 @@ window.showApiKeyModal = function() {
             <select class="input" name="provider">
               <option value="anthropic">Anthropic</option>
               <option value="openai">OpenAI</option>
+              <option value="deepseek">DeepSeek</option>
               <option value="zhipu">Zhipu</option>
             </select>
           </div>
@@ -3251,6 +3821,66 @@ function renderMarkdown(content) {
   }
 }
 
+function renderWorkflowMarkdown(content, cwd) {
+  const html = renderMarkdown(content)
+  const template = document.createElement('template')
+  template.innerHTML = html
+  const previewCode = file => `window.previewWorkflowFile(${jsString(resolveWorkflowFilePath(file))}, ${jsString(cwd || '')}); return false`
+
+  for (const anchor of template.content.querySelectorAll('a[href]')) {
+    const href = anchor.getAttribute('href') || ''
+    let file = ''
+    try {
+      const url = new URL(href, window.location.origin)
+      file = decodeURIComponent(url.pathname)
+    } catch {
+      file = href
+    }
+    if (extractWorkflowArtifactFiles(file).length) {
+      anchor.setAttribute('href', '#')
+      anchor.removeAttribute('target')
+      anchor.removeAttribute('rel')
+      anchor.setAttribute('onclick', previewCode(file))
+      anchor.classList.add('workflow-inline-file')
+    }
+  }
+
+  const references = extractWorkflowArtifactFiles(content)
+    .map(file => ({ source: file, resolved: resolveWorkflowFilePath(file) }))
+    .concat([...state.workflowFileAliases].map(([source, resolved]) => ({ source, resolved })))
+    .sort((a, b) => b.source.length - a.source.length)
+  if (!references.length) return template.innerHTML
+  const referenceBySource = new Map(references.map(item => [item.source, item]))
+  const referencePattern = new RegExp(references.map(item => item.source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'g')
+
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT)
+  const textNodes = []
+  while (walker.nextNode()) textNodes.push(walker.currentNode)
+  for (const node of textNodes) {
+    if (node.parentElement?.closest('a, .workflow-inline-file')) continue
+    const text = String(node.nodeValue)
+    const matches = [...text.matchAll(referencePattern)]
+    if (!matches.length) continue
+    const fragment = document.createDocumentFragment()
+    let offset = 0
+    for (const match of matches) {
+      if (match.index > offset) fragment.appendChild(document.createTextNode(text.slice(offset, match.index)))
+      const reference = referenceBySource.get(match[0])
+      const link = document.createElement('span')
+      link.className = 'workflow-inline-file'
+      link.setAttribute('role', 'button')
+      link.setAttribute('tabindex', '0')
+      link.setAttribute('onclick', previewCode(reference?.resolved || match[0]))
+      link.textContent = match[0]
+      fragment.appendChild(link)
+      offset = match.index + match[0].length
+    }
+    if (offset < text.length) fragment.appendChild(document.createTextNode(text.slice(offset)))
+    node.replaceWith(fragment)
+  }
+  return template.innerHTML
+}
+
 function sanitizeRenderedHtml(html, fallbackText) {
   const template = document.createElement('template')
   template.innerHTML = html
@@ -3361,57 +3991,75 @@ function parseEnvLines(value) {
   return Object.keys(env).length ? env : undefined
 }
 
-function adapterOption(value, selected) {
-  return `<option value="${escapeAttr(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(value)}</option>`
-}
-
-function modelOptions(adapter, selected) {
-  const options = MODEL_OPTIONS_BY_ADAPTER[adapter] || []
-  const selectedValue = selected ?? ''
-  const known = options.some(option => option.value === selectedValue)
-  const current = selectedValue && !known
-    ? `<option value="${escapeAttr(selectedValue)}" selected>${escapeHtml(selectedValue)} · current</option>`
-    : ''
-  return current + options
-    .map(option => `<option value="${escapeAttr(option.value)}" ${option.value === selectedValue ? 'selected' : ''}>${escapeHtml(option.label)}</option>`)
+function providerPresetOptions(selected) {
+  return Object.entries(PROVIDER_PRESETS)
+    .map(([value, preset]) => `<option value="${escapeAttr(value)}" ${selected === value ? 'selected' : ''}>${escapeHtml(preset.label)}</option>`)
     .join('')
 }
 
-function defaultModelForAdapter(adapter) {
-  return (MODEL_OPTIONS_BY_ADAPTER[adapter] || [])[0]?.value || ''
+function modelControl(provider, selected) {
+  const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
+  if (provider === 'custom') {
+    return `<input class="input" name="model" value="${escapeAttr(selected || '')}" placeholder="Enter model name">`
+  }
+  const selectedValue = preset.models.some(option => option.value === selected)
+    ? selected
+    : defaultModelForProvider(provider)
+  return `
+    <select class="input" name="model">
+      ${preset.models.map(option => `<option value="${escapeAttr(option.value)}" ${option.value === selectedValue ? 'selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
+    </select>
+  `
 }
 
-function agentKeyOptions(adapter, hasCurrentKey) {
+function defaultModelForProvider(provider) {
+  return (PROVIDER_PRESETS[provider]?.models || [])[0]?.value || ''
+}
+
+function providerPresetForAgent(agent) {
+  if (!agent) return 'anthropic'
+  if (agent.baseUrl?.includes('api.deepseek.com')) return 'deepseek'
+  if (agent.adapter === 'anthropic-api') return 'anthropic'
+  if (agent.adapter === 'openai-api') return 'openai'
+  if (agent.adapter === 'zhipu-api') return 'zhipu'
+  return 'custom'
+}
+
+function agentKeyOptions(provider, hasCurrentKey) {
   const defaultOption = hasCurrentKey
     ? '<option value="">Keep current key</option>'
     : '<option value="">Select a saved Provider Key</option>'
-  return defaultOption + providerKeyOptionsForAdapter(adapter)
+  return defaultOption + providerKeyOptionsForProvider(provider)
 }
 
-function providerKeyOptionsForAdapter(adapter) {
+function providerKeyOptionsForProvider(provider) {
   return state.apiKeys
-    .filter(key => !key.readOnly && providerMatchesAdapter(key.provider, adapter))
+    .filter(key => !key.readOnly && providerMatchesPreset(key.provider, provider))
     .map(key => `<option value="${escapeAttr(key.id)}">${escapeHtml(key.name)} · ${escapeHtml(providerLabel(key.provider))} · ${escapeHtml(key.maskedKey)}</option>`)
     .join('')
 }
 
-window.updateAgentModelOptions = function() {
-  const adapterSelect = document.getElementById('agent-adapter-select')
-  const modelSelect = document.getElementById('agent-model-select')
+window.updateAgentProviderOptions = function() {
+  const providerSelect = document.getElementById('agent-provider-select')
+  const modelControlContainer = document.getElementById('agent-model-control')
+  const baseUrlInput = document.getElementById('agent-base-url-input')
   const keySelect = document.getElementById('agent-key-select')
-  const adapter = adapterSelect?.value || 'anthropic-api'
-  if (modelSelect) modelSelect.innerHTML = modelOptions(adapter, defaultModelForAdapter(adapter))
+  const provider = providerSelect?.value || 'anthropic'
+  const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
+  if (modelControlContainer) modelControlContainer.innerHTML = modelControl(provider, defaultModelForProvider(provider))
+  if (baseUrlInput) {
+    baseUrlInput.value = preset.baseUrl
+    baseUrlInput.placeholder = provider === 'custom' ? 'Required' : 'Optional override'
+  }
   if (keySelect) {
-    const canKeepCurrentKey = keySelect.dataset.hasCurrentKey === 'true' && adapter === keySelect.dataset.originalAdapter
-    keySelect.innerHTML = agentKeyOptions(adapter, canKeepCurrentKey)
+    const canKeepCurrentKey = keySelect.dataset.hasCurrentKey === 'true' && preset.adapter === keySelect.dataset.originalAdapter
+    keySelect.innerHTML = agentKeyOptions(provider, canKeepCurrentKey)
   }
 }
 
-function providerMatchesAdapter(provider, adapter) {
-  if (adapter === 'anthropic-api') return provider === 'anthropic'
-  if (adapter === 'openai-api' || adapter === 'custom-api') return provider === 'openai'
-  if (adapter === 'zhipu-api') return provider === 'zhipu'
-  return true
+function providerMatchesPreset(keyProvider, provider) {
+  if (provider === 'custom') return keyProvider === 'openai'
+  return keyProvider === provider
 }
 
 function keySourceLabel(source) {
@@ -3433,11 +4081,11 @@ function taskBadgeClass(status) {
 }
 
 function providerIcon(provider) {
-  return ({ anthropic: 'A', openai: 'O', zhipu: 'Z' })[provider] || '?'
+  return ({ anthropic: 'A', openai: 'O', deepseek: 'D', zhipu: 'Z' })[provider] || '?'
 }
 
 function providerLabel(provider) {
-  return ({ anthropic: 'Anthropic', openai: 'OpenAI', zhipu: 'Zhipu' })[provider] || provider
+  return ({ anthropic: 'Anthropic', openai: 'OpenAI', deepseek: 'DeepSeek', zhipu: 'Zhipu' })[provider] || provider
 }
 
 function initialsFromEmail(email) {
