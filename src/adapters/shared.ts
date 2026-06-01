@@ -9,6 +9,7 @@ interface RunCommandOptions {
   env?: Record<string, string>
   timeout: number
   stdinMode?: 'ignore' | 'pipe'
+  signal?: AbortSignal
   onOutput?: (line: string) => void
   getTimeoutExtensionMs?: () => number
 }
@@ -38,6 +39,7 @@ export function runCommand({
   env = {},
   timeout,
   stdinMode = 'pipe',
+  signal,
   onOutput,
   getTimeoutExtensionMs,
 }: RunCommandOptions): Promise<string> {
@@ -60,6 +62,19 @@ export function runCommand({
     const startedAt = Date.now()
     let settled = false
     let timer: NodeJS.Timeout | undefined
+
+    const abort = () => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      proc.kill('SIGTERM')
+      reject(withLastOutput(new Error(`[${adapterName}] interrupted by human message`), lastOutput))
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) {
+      abort()
+      return
+    }
 
     const capture = (chunk: Buffer, stream: 'stdout' | 'stderr') => {
       const text = chunk.toString()
@@ -90,6 +105,7 @@ export function runCommand({
       }
       proc.kill('SIGTERM')
       settled = true
+      signal?.removeEventListener('abort', abort)
       reject(withLastOutput(new Error(`[${adapterName}] timed out after ${totalTimeout}ms`), lastOutput))
     }
     scheduleTimeout()
@@ -98,6 +114,7 @@ export function runCommand({
       if (settled) return
       settled = true
       if (timer) clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
       const finalStdout = flushLine(stdoutBuffer, onOutput)
       const finalStderr = flushLine(stderrBuffer, onOutput)
       lastOutput = finalStderr || finalStdout || lastOutput
@@ -112,6 +129,7 @@ export function runCommand({
       if (settled) return
       settled = true
       if (timer) clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
       reject(withLastOutput(new Error(`[${adapterName}] spawn error: ${err.message}`), lastOutput))
     })
   })

@@ -5,11 +5,12 @@ import { execFile, execFileSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
-import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts, Task } from './types.js'
+import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts, Task, ExternalJob } from './types.js'
 import * as state from './state.js'
 import { decryptKey } from './keyvault.js'
 import {
   checkPreRound,
+  checkSessionTimeout,
   detectCompletion,
   DEFAULT_POLICY,
 } from './policy.js'
@@ -23,6 +24,19 @@ const GIT_DIFF_TIMEOUT_MS = 10_000
 const PIPELINE_DEP_MAX_FILES = 8
 const PIPELINE_DEP_FILE_CHARS = 12_000
 const PIPELINE_DEP_TEXT_CHARS = 4_000
+const DREAMINA_COMMAND = process.env.TURING_DREAMINA_COMMAND ?? '/Users/jamesyu/.local/bin/dreamina'
+const DREAMINA_POLL_INTERVAL_MS = 10_000
+
+type DreaminaQueryResult = {
+  status: 'querying' | 'success' | 'error'
+  paths?: string[]
+  errorMessage?: string
+}
+
+type RouterOptions = {
+  dreaminaQuery?: (externalId: string, downloadDir: string) => Promise<DreaminaQueryResult>
+  dreaminaPollIntervalMs?: number
+}
 
 type StreamStep = {
   type: 'read' | 'write' | 'exec' | 'think' | 'done'
@@ -37,12 +51,18 @@ export class Router extends EventEmitter {
   // Track in-flight sessions so runSession loops can be cancelled
   private runningLoops = new Set<string>()
   private runEpochs = new Map<string, number>()
+  private turnControllers = new Map<string, AbortController>()
   private timeoutExtensions = new Map<string, number>()
   private lastStreamStepSignatures = new Map<string, string>()
+  private externalJobTimers = new Map<string, NodeJS.Timeout>()
+  private dreaminaQuery: NonNullable<RouterOptions['dreaminaQuery']>
+  private dreaminaPollIntervalMs: number
 
-  constructor(policy: Partial<PolicyConfig> = {}) {
+  constructor(policy: Partial<PolicyConfig> = {}, options: RouterOptions = {}) {
     super()
     this.policy = { ...DEFAULT_POLICY, ...policy }
+    this.dreaminaQuery = options.dreaminaQuery ?? queryDreaminaResult
+    this.dreaminaPollIntervalMs = options.dreaminaPollIntervalMs ?? DREAMINA_POLL_INTERVAL_MS
   }
 
   // ── Adapter registry ────────────────────────────────────────────────────────
@@ -119,6 +139,25 @@ export class Router extends EventEmitter {
           console.error(`[router] recovered task error ${task.id}:`, err)
         })
       })
+    }
+  }
+
+  recoverSessions(): void {
+    for (const session of state.listSessions({ status: 'active' })) {
+      state.updateSession(session.id, { status: 'paused' })
+      this.emitLog('warn', `Recovered interrupted session as paused [${session.id.slice(0, 8)}]`, session.id)
+    }
+  }
+
+  recoverExternalJobs(): void {
+    for (const job of state.listExternalJobs('querying')) {
+      const session = state.getSession(job.sessionId)
+      if (!session || session.status === 'done' || session.status === 'stopped') {
+        state.updateExternalJob(job.provider, job.externalId, { status: 'stopped' })
+        continue
+      }
+      state.updateSession(job.sessionId, { status: 'active' })
+      this.scheduleExternalJobPoll(job, 0)
     }
   }
 
@@ -201,6 +240,7 @@ export class Router extends EventEmitter {
         return normalizeAdapterResponse(result)
       } catch (err) {
         lastErr = err
+        if (opts?.signal?.aborted) break
         if (attempt < this.policy.retries) {
           await sleep(1000)
         }
@@ -223,11 +263,12 @@ export class Router extends EventEmitter {
     templateId?: string
     maxRounds?: number
     approveMode?: boolean
+    permissionMode?: Session['permissionMode']
     cwd?: string
   }): Session {
     const session = this.createSessionRecord(params, 'active')
 
-    this.emitLog('info', `Session started: ${agentLabel(params.from)} → ${agentLabel(params.to)} [${session.id.slice(0, 8)}] mode=${session.mode}`, session.id)
+    this.emitLog('info', `Session started: ${agentLabel(params.from)} → ${agentLabel(params.to)} [${session.id.slice(0, 8)}] mode=${session.mode} permission=${session.permissionMode}${session.cwd ? ` cwd=${session.cwd}` : ''}`, session.id)
 
     // Kick off the run loop (non-blocking)
     this.startRunLoop(session.id, params.initialPrompt)
@@ -239,6 +280,7 @@ export class Router extends EventEmitter {
     userId?: string
     name: string
     steps: Array<{
+      title?: string
       from: AgentRef
       to: AgentRef
       initialPrompt: string
@@ -246,6 +288,7 @@ export class Router extends EventEmitter {
       context?: SessionContext
       maxRounds?: number
       approveMode?: boolean
+      permissionMode?: Session['permissionMode']
       cwd?: string
       dependsOn?: number[]
     }>
@@ -266,6 +309,7 @@ export class Router extends EventEmitter {
       status: 'active',
       sessions: params.steps.map((step, index) => ({
         sessionId: created[index].id,
+        title: step.title,
         dependsOn: step.dependsOn?.map((depIndex) => created[depIndex].id),
         status: step.dependsOn?.length ? 'pending' : 'active',
       })),
@@ -286,6 +330,7 @@ export class Router extends EventEmitter {
     this.runningLoops.delete(id)
     this.timeoutExtensions.delete(id)
     this.nextRunEpoch(id)
+    this.abortActiveTurn(id)
     const session = state.updateSession(id, { status: 'paused' })
     this.emit('event', { type: 'session:paused', payload: session } satisfies WsEvent)
     this.emitLog('info', `Session paused [${id.slice(0, 8)}] at round ${session.currentRound}`, id)
@@ -295,7 +340,7 @@ export class Router extends EventEmitter {
   async resumeSession(id: string, extraRounds?: number): Promise<Session> {
     const session = state.getSession(id)
     if (!session) throw new Error(`Session ${id} not found`)
-    if (session.status !== 'paused') throw new Error(`Session ${id} is not paused`)
+    if (session.status !== 'paused' && session.status !== 'stopped') throw new Error(`Session ${id} is not paused or stopped`)
 
     const messages = state.getMessages(id)
     const lastMessage = messages.at(-1)
@@ -304,6 +349,7 @@ export class Router extends EventEmitter {
     const updated = state.updateSession(id, {
       status: 'active',
       ...(extraRounds !== undefined ? { maxRounds: session.maxRounds + extraRounds } : {}),
+      resumeCount: session.resumeCount + 1,
     })
 
     this.emit('event', { type: 'session:resumed', payload: updated } satisfies WsEvent)
@@ -350,6 +396,8 @@ export class Router extends EventEmitter {
     this.runningLoops.delete(id)
     this.timeoutExtensions.delete(id)
     this.nextRunEpoch(id)
+    this.abortActiveTurn(id)
+    state.stopExternalJobsForSession(id)
     const session = state.updateSession(id, { status: 'stopped' })
     this.emit('event', { type: 'session:updated', payload: session } satisfies WsEvent)
     this.emitLog('info', `Session stopped [${id.slice(0, 8)}]`, id)
@@ -417,35 +465,77 @@ export class Router extends EventEmitter {
     const session = state.getSession(sessionId)
     if (!session) throw new Error(`Session ${sessionId} not found`)
 
-    // If session is done, reopen it first
-    if (session.status === 'done') {
-      const reopened = state.reopenSession(sessionId)
-      this.emit('event', { type: 'session:updated', payload: reopened } satisfies WsEvent)
-      this.emitLog('info', `Session reopened [${sessionId.slice(0, 8)}] via message injection`, sessionId)
+    this.saveSessionVersion(sessionId, content)
+    this.invalidatePipelineDescendants(sessionId)
+    this.runningLoops.delete(sessionId)
+    this.timeoutExtensions.delete(sessionId)
+    this.abortActiveTurn(sessionId)
+    state.stopExternalJobsForSession(sessionId)
+    const epoch = this.nextRunEpoch(sessionId)
+    const reopened = state.reopenSession(sessionId)
+    const activated = state.updateSession(sessionId, {
+      resumeCount: reopened.resumeCount + 1,
+      ...(reopened.currentRound >= reopened.maxRounds ? { maxRounds: reopened.currentRound + 1 } : {}),
+    })
+    this.emit('event', { type: 'session:resumed', payload: activated } satisfies WsEvent)
+    this.emitLog('info', `Human message activated session [${sessionId.slice(0, 8)}] from ${session.status}`, sessionId)
 
-      const msg = this.recordMessage(sessionId, 'human', content, reopened.currentRound)
-
-      // Kick off the run loop with the injected message
-      const epoch = this.nextRunEpoch(sessionId)
-      setImmediate(() => {
-        this.runSession(sessionId, content, epoch).catch((err) => {
-          console.error(`[router] runSession error for ${sessionId}:`, err)
-          this.emitLog('error', `Session reopen error [${sessionId.slice(0, 8)}]: ${String(err)}`, sessionId)
-          this.markError(sessionId, err)
-        })
-      })
-
-      return msg
-    }
-
-    const msg = this.recordMessage(sessionId, 'human', content, session.currentRound)
-
-    // If session is paused, auto-resume using injected message
-    if (session.status === 'paused') {
-      this.resumeSession(sessionId).catch(console.error)
-    }
-
+    const msg = this.recordMessage(sessionId, 'human', content, activated.currentRound)
+    this.startRunLoop(sessionId, content, epoch)
     return msg
+  }
+
+  private saveSessionVersion(sessionId: string, reason: string): void {
+    const session = state.getSession(sessionId)
+    if (!session) return
+    const output = session.lastAgentOutput || [...state.getMessages(sessionId)]
+      .reverse()
+      .find((msg) => msg.from !== 'human' && msg.content)?.content
+    if (!output && !session.artifacts) return
+    state.addSessionVersion({
+      id: uuidv4(),
+      sessionId,
+      timestamp: Date.now(),
+      round: session.currentRound,
+      reason,
+      ...(output ? { output } : {}),
+      ...(session.artifacts ? { artifacts: session.artifacts } : {}),
+    })
+  }
+
+  private invalidatePipelineDescendants(sessionId: string): void {
+    const pipeline = state.getPipelineBySession(sessionId)
+    if (!pipeline) return
+
+    const descendants = new Set<string>()
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const step of pipeline.sessions) {
+        if (descendants.has(step.sessionId) || step.sessionId === sessionId) continue
+        if ((step.dependsOn ?? []).some((dependencyId) => dependencyId === sessionId || descendants.has(dependencyId))) {
+          descendants.add(step.sessionId)
+          changed = true
+        }
+      }
+    }
+
+    for (const descendantId of descendants) {
+      this.runningLoops.delete(descendantId)
+      this.timeoutExtensions.delete(descendantId)
+      this.nextRunEpoch(descendantId)
+      this.abortActiveTurn(descendantId)
+      const reset = state.resetSessionForPipelineRerun(descendantId)
+      this.emit('event', { type: 'session:paused', payload: reset } satisfies WsEvent)
+    }
+
+    const sessions = pipeline.sessions.map((step) => {
+      if (step.sessionId === sessionId) return { ...step, status: 'active' as const }
+      if (descendants.has(step.sessionId)) return { ...step, status: 'pending' as const }
+      return step
+    })
+    const updated = state.updatePipeline(pipeline.id, { status: 'active', sessions })
+    this.emit('event', { type: 'pipeline:updated', payload: updated } satisfies WsEvent)
   }
 
   /**
@@ -454,21 +544,7 @@ export class Router extends EventEmitter {
    * Use when the user wants to redirect the conversation mid-flight.
    */
   async nudge(sessionId: string, content: string): Promise<Message> {
-    const session = state.getSession(sessionId)
-    if (!session) throw new Error(`Session ${sessionId} not found`)
-
-    // Pause if currently active
-    if (session.status === 'active') {
-      await this.pauseSession(sessionId)
-    }
-
-    // Record the human message
-    const msg = this.recordMessage(sessionId, 'human', content, session.currentRound)
-
-    // Resume — the run loop will pick up from the last message (the human injection)
-    await this.resumeSession(sessionId)
-
-    return msg
+    return this.injectMessage(sessionId, content)
   }
 
   // ── Core run loop ────────────────────────────────────────────────────────────
@@ -497,7 +573,9 @@ export class Router extends EventEmitter {
       const policySession = nextRoundOverride !== undefined
         ? { ...session, currentRound: Math.max(0, nextRoundOverride - 1) }
         : session
-      const preCheck = checkPreRound(policySession, this.policy)
+      const preCheck = session.nextTurn === 'to'
+        ? checkPreRound(policySession, this.policy)
+        : checkSessionTimeout(policySession, this.policy)
       if (!preCheck.allowed) {
         this.emitLog('warn', `Policy check failed [${sessionId.slice(0, 8)}]: ${preCheck.reason ?? 'unknown'}`, sessionId)
         if (preCheck.reason === 'session_timeout' || preCheck.reason === 'message_timeout') {
@@ -518,7 +596,7 @@ export class Router extends EventEmitter {
       }
 
       // If approveMode, pause and wait for external resume
-      if (session.approveMode) {
+      if (session.approveMode && session.resumeCount === 0) {
         this.emitLog('info', `Approve mode — waiting for approval [${sessionId.slice(0, 8)}]`, sessionId)
         await this.pauseSession(sessionId)
         break
@@ -529,6 +607,9 @@ export class Router extends EventEmitter {
       try {
         const result = await this.processTurn(sessionId, nextMessage, epoch, nextRoundOverride)
         nextRoundOverride = undefined
+        if (result.waiting) {
+          break
+        }
         if (result.done) {
           const updated = await this.completeSession(sessionId)
           this.emit('event', { type: 'session:done', payload: updated } satisfies WsEvent)
@@ -538,6 +619,9 @@ export class Router extends EventEmitter {
         }
         nextMessage = result.nextMessage
       } catch (err) {
+        if (this.runEpochs.get(sessionId) !== epoch || !this.runningLoops.has(sessionId)) {
+          break
+        }
         console.error(`[router] round error session ${sessionId}:`, err)
         this.emitLog('error', `Round error [${sessionId.slice(0, 8)}]: ${String(err)}`, sessionId)
         const failed = state.getSession(sessionId)
@@ -546,7 +630,9 @@ export class Router extends EventEmitter {
       }
     }
 
-    this.runningLoops.delete(sessionId)
+    if (this.runEpochs.get(sessionId) === epoch) {
+      this.runningLoops.delete(sessionId)
+    }
   }
 
   /**
@@ -558,7 +644,7 @@ export class Router extends EventEmitter {
     message: string,
     epoch: number,
     roundOverride?: number
-  ): Promise<{ done: boolean; nextMessage: string }> {
+  ): Promise<{ done: boolean; waiting?: boolean; nextMessage: string }> {
     const session = state.getSession(sessionId)!
     const recipient = session.nextTurn
     const target = recipient === 'to' ? session.to : session.from
@@ -585,6 +671,9 @@ export class Router extends EventEmitter {
     emitHeartbeat()
 
     const opts = this.buildSendOpts(session, recipient, adapter)
+    const controller = new AbortController()
+    this.turnControllers.set(sessionId, controller)
+    opts.signal = controller.signal
     opts.onOutput = (line) => {
       lastOutput = line
       this.emit('event', {
@@ -607,7 +696,10 @@ export class Router extends EventEmitter {
       throw err
     } finally {
       clearInterval(heartbeat)
-      this.timeoutExtensions.delete(sessionId)
+      if (this.turnControllers.get(sessionId) === controller) {
+        this.timeoutExtensions.delete(sessionId)
+        this.turnControllers.delete(sessionId)
+      }
     }
     if (this.runEpochs.get(sessionId) !== epoch || !this.runningLoops.has(sessionId)) {
       return { done: false, nextMessage: message }
@@ -629,10 +721,20 @@ export class Router extends EventEmitter {
         currentRound: round,
         nextTurn: 'from',
       })
+      const pendingJob = detectDreaminaSubmittedJob(content, session)
+      if (pendingJob) {
+        this.registerDreaminaJob(sessionId, pendingJob)
+        return { done: false, waiting: true, nextMessage: content }
+      }
       return { done: false, nextMessage: content }
     }
 
     state.updateSession(sessionId, { nextTurn: 'to' })
+    const pendingJob = detectDreaminaSubmittedJob(content, session)
+    if (pendingJob) {
+      this.registerDreaminaJob(sessionId, pendingJob)
+      return { done: false, waiting: true, nextMessage: content }
+    }
     if (this.shouldCompleteSession(sessionId, session, content)) {
       return { done: true, nextMessage: content }
     }
@@ -692,6 +794,7 @@ export class Router extends EventEmitter {
         return normalizeAdapterResponse(result)
       } catch (err) {
         lastErr = err
+        if (opts?.signal?.aborted) break
         if (attempt < this.policy.retries) {
           this.emitLog('warn', `Adapter ${adapter.name} attempt ${attempt + 1} failed, retrying… [${session.id.slice(0, 8)}]`, session.id)
           console.warn(`[router] adapter ${adapter.name} attempt ${attempt + 1} failed, retrying...`)
@@ -757,8 +860,13 @@ export class Router extends EventEmitter {
     templateId?: string
     maxRounds?: number
     approveMode?: boolean
+    permissionMode?: Session['permissionMode']
     cwd?: string
   }, initialStatus: 'active' | 'paused'): Session {
+    if (params.permissionMode === 'trusted' && !params.cwd) {
+      throw new Error('Trusted permission mode requires cwd')
+    }
+
     const mode = params.mode ?? 'freeform'
     const fromAdapter = this.resolveAdapter(params.from.adapter, params.userId)
     const toAdapter = this.resolveAdapter(params.to.adapter, params.userId)
@@ -786,6 +894,7 @@ export class Router extends EventEmitter {
       nextTurn: 'to',
       maxRounds: params.maxRounds ?? this.policy.maxRounds,
       approveMode: params.approveMode ?? false,
+      permissionMode: params.permissionMode ?? 'safe',
       cwd: params.cwd,
       gitSnapshot: captureGitHead(params.cwd),
     })
@@ -796,6 +905,7 @@ export class Router extends EventEmitter {
       : created
 
     this.emit('event', { type: 'session:created', payload: session } satisfies WsEvent)
+    this.emitLog(session.permissionMode === 'trusted' ? 'warn' : 'info', `Permission mode: ${session.permissionMode}${session.permissionMode === 'trusted' ? ' — CLI approvals may be bypassed' : ''}`, session.id)
     return session
   }
 
@@ -848,6 +958,11 @@ export class Router extends EventEmitter {
       const session = state.getSession(step.sessionId)
       if (session?.status === 'paused') {
         this.hydratePipelineDependencyContext(step.sessionId, step.dependsOn ?? [])
+        if (session.approveMode) {
+          this.emitLog('info', `Pipeline approval gate — waiting before step starts [${step.sessionId.slice(0, 8)}]`, step.sessionId)
+          changed = true
+          return { ...step, status: 'active' as const }
+        }
         const initialMessage = state.getMessages(step.sessionId).find((msg) => msg.from === 'human' && msg.round === 0)
         const resumed = state.updateSession(step.sessionId, { status: 'active' })
         this.emit('event', { type: 'session:resumed', payload: resumed } satisfies WsEvent)
@@ -892,7 +1007,84 @@ export class Router extends EventEmitter {
     const session = state.getSession(sessionId)
     if (!session) throw new Error(`Session ${sessionId} not found`)
     const artifacts = await buildSessionArtifacts(session)
-    return state.updateSession(sessionId, { status: 'done', artifacts })
+    const lastAgentOutput = [...state.getMessages(sessionId)]
+      .reverse()
+      .find((message) => message.from !== 'human' && message.content.trim())
+      ?.content
+    return state.updateSession(sessionId, { status: 'done', artifacts, ...(lastAgentOutput ? { lastAgentOutput } : {}) })
+  }
+
+  private registerDreaminaJob(sessionId: string, pending: { externalId: string; downloadDir: string }): void {
+    const now = Date.now()
+    const job = state.upsertExternalJob({
+      id: uuidv4(),
+      sessionId,
+      provider: 'dreamina',
+      externalId: pending.externalId,
+      status: 'querying',
+      downloadDir: pending.downloadDir,
+      createdAt: now,
+      updatedAt: now,
+    })
+    this.emitLog('info', `Dreamina task waiting [${sessionId.slice(0, 8)}] submit_id=${job.externalId}`, sessionId)
+    this.scheduleExternalJobPoll(job)
+  }
+
+  private scheduleExternalJobPoll(job: ExternalJob, delay = this.dreaminaPollIntervalMs): void {
+    if (this.externalJobTimers.has(job.id)) return
+    const timer = setTimeout(() => {
+      this.externalJobTimers.delete(job.id)
+      this.pollDreaminaJob(job).catch((err) => {
+        this.emitLog('warn', `Dreamina poll failed [${job.sessionId.slice(0, 8)}]: ${errorMessage(err)}`, job.sessionId)
+        this.scheduleExternalJobPoll(job)
+      })
+    }, delay)
+    timer.unref()
+    this.externalJobTimers.set(job.id, timer)
+  }
+
+  private async pollDreaminaJob(job: ExternalJob): Promise<void> {
+    const current = state.getExternalJob(job.provider, job.externalId)
+    if (!current || current.status !== 'querying') return
+    const session = state.getSession(current.sessionId)
+    if (!session || session.status === 'stopped') {
+      state.updateExternalJob(current.provider, current.externalId, { status: 'stopped' })
+      return
+    }
+
+    const result = await this.dreaminaQuery(current.externalId, current.downloadDir)
+    if (result.status === 'querying') {
+      this.scheduleExternalJobPoll(current)
+      return
+    }
+    if (result.status === 'error') {
+      state.updateExternalJob(current.provider, current.externalId, {
+        status: 'error',
+        errorMessage: result.errorMessage ?? 'Dreamina generation failed',
+      })
+      this.markError(current.sessionId, new Error(result.errorMessage ?? 'Dreamina generation failed'))
+      return
+    }
+
+    const paths = result.paths ?? []
+    state.updateExternalJob(current.provider, current.externalId, { status: 'done', resultPaths: paths })
+    const content = [
+      '[RESULT]',
+      '即梦视频生成完成。',
+      '',
+      `submit_id：\`${current.externalId}\``,
+      '状态：`success`',
+      '本地视频：',
+      ...paths.map((filePath) => `\`${filePath}\``),
+      '[/RESULT]',
+      '[DONE]',
+    ].join('\n')
+    this.recordMessage(current.sessionId, 'dreamina', content, Math.max(1, session.currentRound))
+    state.updateSession(current.sessionId, { lastAgentOutput: content })
+    const updated = await this.completeSession(current.sessionId)
+    this.emit('event', { type: 'session:done', payload: updated } satisfies WsEvent)
+    this.emitLog('info', `Dreamina task completed [${current.sessionId.slice(0, 8)}] submit_id=${current.externalId}`, current.sessionId)
+    this.handlePipelineSessionFinished(current.sessionId, 'done')
   }
 
   private emitLog(level: 'info' | 'warn' | 'error', message: string, sessionId: string): void {
@@ -913,6 +1105,11 @@ export class Router extends EventEmitter {
     const next = (this.runEpochs.get(sessionId) ?? 0) + 1
     this.runEpochs.set(sessionId, next)
     return next
+  }
+
+  private abortActiveTurn(sessionId: string): void {
+    this.turnControllers.get(sessionId)?.abort()
+    this.turnControllers.delete(sessionId)
   }
 
   private shouldCompleteSession(sessionId: string, session: Session, response: string): boolean {
@@ -1083,6 +1280,54 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+export function detectDreaminaSubmittedJob(content: string, session: Pick<Session, 'cwd'>): { externalId: string; downloadDir: string } | undefined {
+  if (!/submit[_ -]?id/i.test(content)) return undefined
+  if (/(?:本地视频|local video|downloaded)[\s\S]{0,300}\.mp4\b/i.test(content)) return undefined
+  const match = content.match(/submit[_ -]?id[^\da-f-]*([0-9a-f]{8}-[0-9a-f-]{27,})/i)
+  if (!match?.[1]) return undefined
+  return {
+    externalId: match[1],
+    downloadDir: path.join(session.cwd ?? process.cwd(), 'output'),
+  }
+}
+
+async function queryDreaminaResult(externalId: string, downloadDir: string): Promise<DreaminaQueryResult> {
+  fs.mkdirSync(downloadDir, { recursive: true })
+  const stdout = await execFileText(DREAMINA_COMMAND, [
+    'query_result',
+    `--submit_id=${externalId}`,
+    `--download_dir=${downloadDir}`,
+  ])
+  const payload = JSON.parse(stdout) as {
+    gen_status?: string
+    message?: string
+  }
+  const status = payload.gen_status?.toLowerCase()
+  if (status === 'success') {
+    const paths = fs.readdirSync(downloadDir)
+      .filter((name) => name.includes(externalId) && /\.(?:mp4|mov|webm)$/i.test(name))
+      .map((name) => path.join(downloadDir, name))
+    if (paths.length > 0) return { status: 'success', paths }
+    return { status: 'querying' }
+  }
+  if (status === 'failed' || status === 'error') {
+    return { status: 'error', errorMessage: payload.message ?? `Dreamina task ${status}` }
+  }
+  return { status: 'querying' }
+}
+
+function execFileText(command: string, args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, { timeout: 60_000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        reject(new Error((stderr || err.message).trim()))
+        return
+      }
+      resolve(stdout.trim())
+    })
+  })
+}
+
 function agentLabel(ref: AgentRef): string {
   return ref.label ?? ref.adapter
 }
@@ -1161,6 +1406,7 @@ function buildTaskSession(task: Task): Session {
     maxRounds: 1,
     currentRound: 0,
     approveMode: false,
+    permissionMode: 'safe',
     cwd: task.cwd,
     context: task.context,
     systemPrompts: task.systemPrompt ? { from: task.systemPrompt, to: task.systemPrompt } : undefined,

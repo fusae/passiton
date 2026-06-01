@@ -2,6 +2,7 @@
 
 export type SessionStatus = 'active' | 'paused' | 'done' | 'error' | 'stopped'
 export type TaskStatus = 'queued' | 'running' | 'done' | 'error' | 'stopped'
+export type PermissionMode = 'safe' | 'trusted'
 
 // Session modes determine the system prompts and interaction style
 export type SessionMode = 'collaborate' | 'discuss' | 'review' | 'freeform'
@@ -68,6 +69,7 @@ export interface Session {
   maxRounds: number
   currentRound: number
   approveMode: boolean
+  permissionMode: PermissionMode
   cwd?: string
   context?: SessionContext   // structured context injected every round
   systemPrompts?: {          // per-agent system prompts (generated from mode + context)
@@ -88,6 +90,7 @@ export interface Session {
 
 export interface SessionWithMessages extends Session {
   messages: Message[]
+  versions?: SessionVersion[]
 }
 
 export interface Task {
@@ -121,6 +124,7 @@ export interface Pipeline {
 
 export interface PipelineStep {
   sessionId: string
+  title?: string
   dependsOn?: string[]
   status: 'pending' | 'active' | 'done' | 'error'
 }
@@ -133,7 +137,9 @@ export interface PipelineTemplateRecordStep {
   mode?: SessionMode
   maxRounds?: number
   approveMode?: boolean
+  permissionMode?: PermissionMode
   cwd?: string
+  outputDir?: string
   context?: SessionContextInput
   dependsOn?: number[]
 }
@@ -150,7 +156,7 @@ export interface PipelineTemplateRecord {
 }
 
 export interface PipelineWithSessions extends Pipeline {
-  sessionDetails: Session[]
+  sessionDetails: SessionWithMessages[]
 }
 
 export interface SessionStats {
@@ -217,6 +223,29 @@ export interface DiffSnapshot {
   diffFull: string
 }
 
+export interface SessionVersion {
+  id: string
+  sessionId: string
+  timestamp: number
+  round: number
+  reason: string
+  output?: string
+  artifacts?: SessionArtifacts
+}
+
+export interface ExternalJob {
+  id: string
+  sessionId: string
+  provider: 'dreamina'
+  externalId: string
+  status: 'querying' | 'done' | 'error' | 'stopped'
+  downloadDir: string
+  resultPaths?: string[]
+  errorMessage?: string
+  createdAt: number
+  updatedAt: number
+}
+
 export interface AdapterCapabilities {
   tools: boolean
   fileSystem: boolean
@@ -238,6 +267,7 @@ export interface AdapterSendOpts {
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
   apiKey?: string
   env?: Record<string, string>
+  signal?: AbortSignal
   onOutput?: (line: string) => void
   getTimeoutExtensionMs?: () => number
 }

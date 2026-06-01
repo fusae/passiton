@@ -42,7 +42,7 @@ export const LOCAL_CLI_AGENT_DEFAULTS: Record<string, AppConfig['agents'][string
     codex: {
       adapter: 'codex',
       command: DEFAULT_CODEX_COMMAND,
-      args: ['exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
+      args: ['exec', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
       timeout: 600_000,
     },
     'claude-code': {
@@ -60,7 +60,7 @@ export const LOCAL_CLI_AGENT_DEFAULTS: Record<string, AppConfig['agents'][string
     opencode: {
       adapter: 'opencode',
       command: DEFAULT_OPENCODE_COMMAND,
-      args: ['run', '{prompt}', '--dangerously-skip-permissions'],
+      args: ['run', '{prompt}'],
       timeout: 600_000,
     },
 }

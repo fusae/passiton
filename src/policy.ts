@@ -20,7 +20,7 @@ export function checkRoundLimit(session: Session, policy: PolicyConfig): PolicyR
 
 // Check whether the session has exceeded its wall-clock timeout
 export function checkSessionTimeout(session: Session, policy: PolicyConfig): PolicyResult {
-  const elapsed = Date.now() - session.createdAt
+  const elapsed = Date.now() - session.updatedAt
   if (elapsed >= policy.sessionTimeout) {
     return { allowed: false, reason: 'session_timeout' }
   }

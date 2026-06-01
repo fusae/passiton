@@ -2,15 +2,11 @@
 
 import type { Adapter } from './types.js'
 import type { Session, AdapterSendOpts } from '../types.js'
-import { resolveCommandArgs } from './command-args.js'
+import { applyPermissionModeArgs, resolveCommandArgs } from './command-args.js'
 import { buildPrompt, runCommand } from './shared.js'
 
 export function defaultClaudeCodeArgs(): string[] {
-  const args = ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose']
-  if (typeof process.getuid !== 'function' || process.getuid() !== 0) {
-    args.push('--dangerously-skip-permissions')
-  }
-  return args
+  return ['-p', '{prompt}', '--output-format', 'stream-json', '--verbose']
 }
 
 export interface ClaudeCodeAdapterConfig {
@@ -53,11 +49,12 @@ export class ClaudeCodeAdapter implements Adapter {
     const raw = await runCommand({
       adapterName: this.name,
       command: this.command,
-      args: resolveCommandArgs(this.args, fullMessage),
+      args: resolveCommandArgs(applyPermissionModeArgs(this.name, this.args, session.permissionMode), fullMessage),
       cwd: session.cwd,
       env: this.env,
       timeout: this.timeout,
       stdinMode: 'ignore',
+      signal: opts?.signal,
       onOutput: opts?.onOutput,
       getTimeoutExtensionMs: opts?.getTimeoutExtensionMs,
     })

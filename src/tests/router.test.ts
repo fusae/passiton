@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Router } from '../router.js'
+import { Router, detectDreaminaSubmittedJob } from '../router.js'
 import * as state from '../state.js'
 import type { Adapter, AdapterCapabilities, AdapterSendOpts, Session } from '../types.js'
 
@@ -94,6 +94,158 @@ test('local planner with API-looking name does not get API-only warning', async 
   })
 })
 
+test('approve mode resumes after explicit approval', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+    router.registerAdapter(new StubAdapter('claude-code', async () => 'approved work'))
+
+    const session = router.startSession({
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      initialPrompt: 'review gate',
+      mode: 'collaborate',
+      maxRounds: 2,
+      approveMode: true,
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'paused')
+    assert.equal(state.getMessages(session.id).length, 1)
+
+    await router.resumeSession(session.id)
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+    const completed = state.getSession(session.id)
+    assert.equal(completed?.resumeCount, 1)
+    assert.equal(completed?.currentRound, 1)
+    assert.equal(state.getMessages(session.id).length, 3)
+  })
+})
+
+test('stopped session resumes after explicit approval', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+    router.registerAdapter(new StubAdapter('claude-code', async () => 'approved work'))
+
+    const session = state.createSession({
+      id: 'resume-stopped',
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      maxRounds: 2,
+    })
+    state.updateSession(session.id, { status: 'stopped' })
+    state.addMessage({
+      id: 'resume-stopped-message',
+      sessionId: session.id,
+      from: 'human',
+      content: 'resume stopped work',
+      timestamp: Date.now(),
+      round: 0,
+    })
+
+    await router.resumeSession(session.id)
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+    assert.equal(state.getSession(session.id)?.resumeCount, 1)
+  })
+})
+
+test('human message interrupts an active turn and immediately restarts with the directive', async () => {
+  await withTempDb(async () => {
+    let firstTurnStarted!: () => void
+    const started = new Promise<void>((resolve) => { firstTurnStarted = resolve })
+    let interrupted = false
+    const toCalls: string[] = []
+    const router = new Router()
+
+    router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+    router.registerAdapter(new StubAdapter('claude-code', async (_session, message, opts) => {
+      toCalls.push(message)
+      if (message !== 'initial request') return 'revised result'
+      firstTurnStarted()
+      await new Promise<void>((_resolve, reject) => {
+        opts?.signal?.addEventListener('abort', () => {
+          interrupted = true
+          reject(new Error('interrupted'))
+        }, { once: true })
+      })
+      return 'unreachable'
+    }))
+
+    const session = router.startSession({
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      initialPrompt: 'initial request',
+      mode: 'collaborate',
+      maxRounds: 2,
+    })
+
+    await started
+    router.injectMessage(session.id, 'human correction')
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+    assert.equal(interrupted, true)
+    assert.deepEqual(toCalls, ['initial request', 'human correction'])
+    assert.equal(state.getSession(session.id)?.resumeCount, 1)
+  })
+})
+
+test('human message reactivates paused, done, error, and stopped sessions', async () => {
+  for (const status of ['paused', 'done', 'error', 'stopped'] as const) {
+    await withTempDb(async () => {
+      const toCalls: string[] = []
+      const router = new Router()
+      router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+      router.registerAdapter(new StubAdapter('claude-code', async (_session, message) => {
+        toCalls.push(message)
+        return 'reactivated'
+      }))
+
+      const session = state.createSession({
+        id: `reactivate-${status}`,
+        from: { adapter: 'codex' },
+        to: { adapter: 'claude-code' },
+        nextTurn: 'to',
+        maxRounds: 2,
+      })
+      state.updateSession(session.id, { status })
+
+      router.injectMessage(session.id, `resume from ${status}`)
+      await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+      assert.deepEqual(toCalls, [`resume from ${status}`])
+      assert.equal(state.getSession(session.id)?.resumeCount, 1)
+    })
+  }
+})
+
+test('human message adds one round when the paused session already reached its limit', async () => {
+  await withTempDb(async () => {
+    const toCalls: string[] = []
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+    router.registerAdapter(new StubAdapter('claude-code', async (_session, message) => {
+      toCalls.push(message)
+      return '[DONE]'
+    }))
+
+    const session = state.createSession({
+      id: 'reactivate-max-rounds',
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      nextTurn: 'to',
+      maxRounds: 1,
+    })
+    state.updateSession(session.id, { status: 'paused', currentRound: 1 })
+
+    router.injectMessage(session.id, 'human correction after limit')
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+    assert.deepEqual(toCalls, ['human correction after limit'])
+    assert.equal(state.getSession(session.id)?.maxRounds, 2)
+  })
+})
+
 async function waitFor(check: () => boolean, timeoutMs = 2_000): Promise<void> {
   const startedAt = Date.now()
   while (!check()) {
@@ -136,6 +288,61 @@ test('recoverTasks resumes queued tasks and fails interrupted running tasks', as
     assert.equal(state.getTask('queued-task')?.result, 'done')
     assert.equal(state.getTask('running-task')?.status, 'error')
     assert.equal(state.getTask('running-task')?.errorMessage, 'Task interrupted by server restart')
+  })
+})
+
+test('recoverSessions pauses interrupted active sessions', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    const session = state.createSession({
+      id: 'interrupted-session',
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      maxRounds: 2,
+    })
+
+    router.recoverSessions()
+
+    assert.equal(state.getSession(session.id)?.status, 'paused')
+    assert.match(state.getLogs(session.id).at(-1)?.message ?? '', /Recovered interrupted session as paused/)
+  })
+})
+
+test('detectDreaminaSubmittedJob ignores completed local video output', () => {
+  const pending = detectDreaminaSubmittedJob(
+    'submit_id: `5db07d3a-4d66-44b7-ac53-b2f9f660ce11` querying',
+    { cwd: '/tmp/project' }
+  )
+  assert.deepEqual(pending, {
+    externalId: '5db07d3a-4d66-44b7-ac53-b2f9f660ce11',
+    downloadDir: '/tmp/project/output',
+  })
+  assert.equal(detectDreaminaSubmittedJob(
+    'submit_id: `5db07d3a-4d66-44b7-ac53-b2f9f660ce11`\n本地视频：`/tmp/video.mp4`',
+    { cwd: '/tmp/project' }
+  ), undefined)
+})
+
+test('dreamina pending output is reconciled automatically', async () => {
+  await withTempDb(async () => {
+    const router = new Router({}, {
+      dreaminaPollIntervalMs: 1,
+      dreaminaQuery: async () => ({ status: 'success', paths: ['/tmp/generated.mp4'] }),
+    })
+    router.registerAdapter(new StubAdapter('codex', async () => (
+      '[RESULT]submit_id: `5db07d3a-4d66-44b7-ac53-b2f9f660ce11` querying[/RESULT]\n[DONE]'
+    )))
+
+    const session = router.startSession({
+      from: { adapter: 'codex' },
+      to: { adapter: 'codex' },
+      initialPrompt: 'generate video',
+      cwd: '/tmp/project',
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+    assert.equal(state.listExternalJobs('done').length, 1)
+    assert.match(state.getSession(session.id)?.lastAgentOutput ?? '', /generated\.mp4/)
   })
 })
 
@@ -449,6 +656,108 @@ test('pipeline dependencies inject upstream output and file contents', async () 
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+test('pipeline approval gate waits before running a dependent step', async () => {
+  await withTempDb(async () => {
+    let gatedCalls = 0
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+    router.registerAdapter(new StubAdapter('claude-code', async (session) => {
+      if (session.approveMode) gatedCalls += 1
+      return 'completed work'
+    }))
+
+    const pipeline = router.startPipeline({
+      name: 'Approval gate',
+      steps: [
+        {
+          from: { adapter: 'codex' },
+          to: { adapter: 'claude-code' },
+          initialPrompt: 'Prepare input',
+        },
+        {
+          from: { adapter: 'codex' },
+          to: { adapter: 'claude-code' },
+          initialPrompt: 'Execute approved command',
+          approveMode: true,
+          dependsOn: [0],
+        },
+      ],
+    })
+
+    const gatedSessionId = pipeline.sessions[1].sessionId
+    await waitFor(() => state.getPipeline(pipeline.id)?.sessions[1].status === 'active')
+
+    assert.equal(state.getSession(gatedSessionId)?.status, 'paused')
+    assert.equal(gatedCalls, 0)
+
+    await router.resumeSession(gatedSessionId)
+    await waitFor(() => state.getSession(gatedSessionId)?.status === 'done')
+    assert.equal(gatedCalls, 1)
+  })
+})
+
+test('changing an upstream pipeline step invalidates dependent results', async () => {
+  await withTempDb(async () => {
+    const calls: string[] = []
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+    router.registerAdapter(new StubAdapter('claude-code', async (_session, message) => {
+      calls.push(message)
+      return 'completed work'
+    }))
+
+    const pipeline = router.startPipeline({
+      name: 'Revision invalidation',
+      steps: [
+        {
+          from: { adapter: 'codex' },
+          to: { adapter: 'claude-code' },
+          initialPrompt: 'Prepare input',
+        },
+        {
+          from: { adapter: 'codex' },
+          to: { adapter: 'claude-code' },
+          initialPrompt: 'Execute approved command',
+          approveMode: true,
+          dependsOn: [0],
+        },
+        {
+          from: { adapter: 'codex' },
+          to: { adapter: 'claude-code' },
+          initialPrompt: 'Publish approved result',
+          dependsOn: [1],
+        },
+      ],
+    })
+
+    const sourceSessionId = pipeline.sessions[0].sessionId
+    const gatedSessionId = pipeline.sessions[1].sessionId
+    const publishSessionId = pipeline.sessions[2].sessionId
+    await waitFor(() => state.getPipeline(pipeline.id)?.sessions[1].status === 'active')
+
+    state.addMessage({
+      id: 'stale-dependent-output',
+      sessionId: gatedSessionId,
+      from: 'claude-code',
+      content: 'stale output',
+      timestamp: Date.now(),
+      round: 1,
+    })
+
+    router.injectMessage(sourceSessionId, 'Revise the input')
+
+    assert.equal(state.getPipeline(pipeline.id)?.sessions[1].status, 'pending')
+    assert.equal(state.getPipeline(pipeline.id)?.sessions[2].status, 'pending')
+    assert.equal(state.getSession(gatedSessionId)?.status, 'paused')
+    assert.equal(state.getSession(publishSessionId)?.status, 'paused')
+    assert.deepEqual(state.getMessages(gatedSessionId).map((message) => message.content), ['Execute approved command'])
+
+    await waitFor(() => state.getPipeline(pipeline.id)?.sessions[1].status === 'active')
+    assert.equal(state.getSession(gatedSessionId)?.status, 'paused')
+    assert.deepEqual(calls, ['Prepare input', 'Revise the input'])
   })
 })
 

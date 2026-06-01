@@ -11,7 +11,7 @@ import { ZhipuApiAdapter } from './api/zhipu.js'
 const DISCOVERED_DEFAULTS: Record<string, Omit<AgentConfig, 'command'>> = {
   codex: {
     adapter: 'codex',
-    args: ['exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
+    args: ['exec', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
     timeout: 600_000,
   },
   'claude-code': {
@@ -22,7 +22,7 @@ const DISCOVERED_DEFAULTS: Record<string, Omit<AgentConfig, 'command'>> = {
   },
   opencode: {
     adapter: 'opencode',
-    args: ['run', '{prompt}', '--dangerously-skip-permissions'],
+    args: ['run', '{prompt}'],
     timeout: 600_000,
   },
   'gemini-cli': {

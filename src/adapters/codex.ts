@@ -2,11 +2,11 @@
 
 import type { Adapter } from './types.js'
 import type { Session, AdapterSendOpts } from '../types.js'
-import { resolveCommandArgs } from './command-args.js'
+import { applyPermissionModeArgs, resolveCommandArgs } from './command-args.js'
 import { buildPrompt, runCommand } from './shared.js'
 
 const DEFAULT_CODEX_PATH = process.env.TURING_CODEX_COMMAND ?? 'codex'
-const DEFAULT_CODEX_ARGS = ['exec', '--full-auto', '--ephemeral', '--skip-git-repo-check', '{prompt}']
+const DEFAULT_CODEX_ARGS = ['exec', '--ephemeral', '--skip-git-repo-check', '{prompt}']
 
 export interface CodexAdapterConfig {
   command?: string
@@ -36,11 +36,12 @@ export class CodexAdapter implements Adapter {
     return runCommand({
       adapterName: this.name,
       command: this.command,
-      args: resolveCommandArgs(this.args, fullMessage),
+      args: resolveCommandArgs(applyPermissionModeArgs(this.name, this.args, session.permissionMode), fullMessage),
       cwd: session.cwd,
       env: this.env,
       timeout: this.timeout,
       stdinMode: 'pipe',
+      signal: opts?.signal,
       onOutput: opts?.onOutput,
       getTimeoutExtensionMs: opts?.getTimeoutExtensionMs,
     })

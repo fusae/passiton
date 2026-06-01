@@ -49,6 +49,7 @@ export class GeminiAdapter implements Adapter {
       env: this.env,
       timeout: this.timeout,
       stdinMode: 'pipe',
+      signal: opts?.signal,
       onOutput: opts?.onOutput,
       getTimeoutExtensionMs: opts?.getTimeoutExtensionMs,
     })

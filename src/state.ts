@@ -15,6 +15,7 @@ import type {
   SessionArtifacts,
   RoundMetadata,
   DiffSnapshot,
+  SessionVersion,
   Pipeline,
   PipelineStep,
   PipelineTemplateRecord,
@@ -24,6 +25,7 @@ import type {
   AgentConfig,
   Task,
   TaskStatus,
+  ExternalJob,
 } from './types.js'
 
 const DB_DIR = join(homedir(), '.turing')
@@ -57,7 +59,7 @@ export interface ApiTokenRecord {
 export interface StoredApiKeyRecord {
   id: string
   userId: string
-  provider: 'anthropic' | 'openai' | 'zhipu'
+  provider: 'anthropic' | 'openai' | 'deepseek' | 'zhipu'
   encryptedKey: string
   iv: string
   authTag: string
@@ -158,6 +160,7 @@ function createTables(): void {
       max_rounds   INTEGER NOT NULL DEFAULT 20,
       current_round INTEGER NOT NULL DEFAULT 0,
       approve_mode INTEGER NOT NULL DEFAULT 0,
+      permission_mode TEXT NOT NULL DEFAULT 'safe',
       cwd          TEXT,
       context      TEXT,
       system_prompts TEXT,
@@ -220,6 +223,16 @@ function createTables(): void {
       diff_full   TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS session_versions (
+      id          TEXT PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES sessions(id),
+      timestamp   INTEGER NOT NULL,
+      round       INTEGER NOT NULL,
+      reason      TEXT NOT NULL,
+      output      TEXT,
+      artifacts   TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS pipelines (
       id          TEXT PRIMARY KEY,
       user_id     TEXT NOT NULL DEFAULT 'local',
@@ -233,6 +246,7 @@ function createTables(): void {
       pipeline_id TEXT NOT NULL REFERENCES pipelines(id) ON DELETE CASCADE,
       session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       position    INTEGER NOT NULL,
+      title       TEXT,
       depends_on  TEXT,
       status      TEXT NOT NULL DEFAULT 'pending',
       PRIMARY KEY (pipeline_id, session_id)
@@ -248,14 +262,31 @@ function createTables(): void {
       updated_at  INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS external_jobs (
+      id            TEXT PRIMARY KEY,
+      session_id    TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      provider      TEXT NOT NULL,
+      external_id   TEXT NOT NULL,
+      status        TEXT NOT NULL DEFAULT 'querying',
+      download_dir  TEXT NOT NULL,
+      result_paths  TEXT,
+      error_message TEXT,
+      created_at    INTEGER NOT NULL,
+      updated_at    INTEGER NOT NULL,
+      UNIQUE(provider, external_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_session_logs_session ON session_logs(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots(session_id, round, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_session_versions_session ON session_versions(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
     CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
     CREATE INDEX IF NOT EXISTS idx_pipeline_steps_session ON pipeline_steps(session_id);
     CREATE INDEX IF NOT EXISTS idx_pipeline_steps_pipeline ON pipeline_steps(pipeline_id, position);
     CREATE INDEX IF NOT EXISTS idx_pipeline_templates_user ON pipeline_templates(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_external_jobs_status ON external_jobs(status, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_external_jobs_session ON external_jobs(session_id, updated_at);
   `)
 
   // Migrate: add new columns if they don't exist (for existing DBs)
@@ -296,10 +327,16 @@ function createTables(): void {
     db.exec(`ALTER TABLE sessions ADD COLUMN resume_count INTEGER NOT NULL DEFAULT 0`)
   } catch { /* column already exists */ }
   try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'safe'`)
+  } catch { /* column already exists */ }
+  try {
     db.exec(`ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'`)
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE pipelines ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE pipeline_steps ADD COLUMN title TEXT`)
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE messages ADD COLUMN metadata TEXT`)
@@ -316,6 +353,7 @@ function createTables(): void {
     CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
     CREATE INDEX IF NOT EXISTS idx_user_agents_user ON user_agents(user_id);
     CREATE INDEX IF NOT EXISTS idx_pipeline_templates_user ON pipeline_templates(user_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_session_versions_session ON session_versions(session_id, timestamp);
   `)
 }
 
@@ -685,6 +723,7 @@ function rowToSession(row: Record<string, unknown>): Session {
     maxRounds: row.max_rounds as number,
     currentRound: row.current_round as number,
     approveMode: Boolean(row.approve_mode),
+    permissionMode: (row.permission_mode as Session['permissionMode'] | undefined) ?? 'safe',
     cwd: row.cwd as string | undefined,
     context,
     systemPrompts,
@@ -715,14 +754,15 @@ export function createSession(params: {
   nextTurn?: 'from' | 'to'
   maxRounds?: number
   approveMode?: boolean
+  permissionMode?: Session['permissionMode']
   cwd?: string
 }): Session {
   const now = Date.now()
   const stmt = db.prepare(`
     INSERT INTO sessions (id, user_id, from_adapter, from_label, to_adapter, to_label,
-      status, mode, next_turn, max_rounds, current_round, approve_mode, cwd, context, system_prompts, template_id,
+      status, mode, next_turn, max_rounds, current_round, approve_mode, permission_mode, cwd, context, system_prompts, template_id,
       git_snapshot, artifacts, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   stmt.run(
     params.id,
@@ -735,6 +775,7 @@ export function createSession(params: {
     params.nextTurn ?? 'to',
     params.maxRounds ?? 20,
     params.approveMode ? 1 : 0,
+    params.permissionMode ?? 'safe',
     params.cwd ?? null,
     params.context ? JSON.stringify(params.context) : null,
     params.systemPrompts ? JSON.stringify(params.systemPrompts) : null,
@@ -754,7 +795,7 @@ export function getSession(id: string, userId?: string): Session | undefined {
   return row ? rowToSession(row) : undefined
 }
 
-export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'nextTurn' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount' | 'context' | 'systemPrompts' | 'gitSnapshot' | 'artifacts'>>, userId?: string): Session {
+export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'permissionMode' | 'nextTurn' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount' | 'context' | 'systemPrompts' | 'gitSnapshot' | 'artifacts'>>, userId?: string): Session {
   const fields: string[] = ['updated_at = ?']
   const values: unknown[] = [Date.now()]
 
@@ -763,6 +804,7 @@ export function updateSession(id: string, updates: Partial<Pick<Session, 'status
   if (updates.currentRound !== undefined) { fields.push('current_round = ?'); values.push(updates.currentRound) }
   if (updates.maxRounds !== undefined) { fields.push('max_rounds = ?'); values.push(updates.maxRounds) }
   if (updates.approveMode !== undefined) { fields.push('approve_mode = ?'); values.push(updates.approveMode ? 1 : 0) }
+  if (updates.permissionMode !== undefined) { fields.push('permission_mode = ?'); values.push(updates.permissionMode) }
   if (updates.errorType !== undefined) { fields.push('error_type = ?'); values.push(updates.errorType) }
   if (updates.errorRound !== undefined) { fields.push('error_round = ?'); values.push(updates.errorRound) }
   if (updates.errorMessage !== undefined) { fields.push('error_message = ?'); values.push(updates.errorMessage) }
@@ -808,6 +850,31 @@ export function reopenSession(id: string, userId?: string): Session {
         updated_at = ?
     WHERE id = ?
   `).run(now, id)
+  return getSession(id)!
+}
+
+export function resetSessionForPipelineRerun(id: string): Session {
+  const tx = db.transaction(() => {
+    db.prepare(`
+      UPDATE sessions
+      SET status = 'paused',
+          next_turn = 'to',
+          current_round = 0,
+          resume_count = 0,
+          error_type = NULL,
+          error_round = NULL,
+          error_message = NULL,
+          last_agent_output = NULL,
+          git_snapshot = NULL,
+          artifacts = NULL,
+          updated_at = ?
+      WHERE id = ?
+    `).run(Date.now(), id)
+    db.prepare(`DELETE FROM messages WHERE session_id = ? AND NOT (from_agent = 'human' AND round = 0)`).run(id)
+    db.prepare('DELETE FROM snapshots WHERE session_id = ?').run(id)
+    db.prepare('DELETE FROM session_logs WHERE session_id = ?').run(id)
+  })
+  tx()
   return getSession(id)!
 }
 
@@ -860,6 +927,7 @@ function rowToPipelineStep(row: Record<string, unknown>): PipelineStep {
   }
   return {
     sessionId: row.session_id as string,
+    ...(typeof row.title === 'string' && row.title ? { title: row.title } : {}),
     ...(dependsOn && dependsOn.length > 0 ? { dependsOn } : {}),
     status: row.status as PipelineStep['status'],
   }
@@ -874,14 +942,15 @@ function getPipelineSteps(pipelineId: string): PipelineStep[] {
 
 function insertPipelineSteps(pipelineId: string, steps: PipelineStep[]): void {
   const stmt = db.prepare(`
-    INSERT INTO pipeline_steps (pipeline_id, session_id, position, depends_on, status)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO pipeline_steps (pipeline_id, session_id, position, title, depends_on, status)
+    VALUES (?, ?, ?, ?, ?, ?)
   `)
   steps.forEach((step, index) => {
     stmt.run(
       pipelineId,
       step.sessionId,
       index,
+      step.title ?? null,
       step.dependsOn && step.dependsOn.length > 0 ? JSON.stringify(step.dependsOn) : null,
       step.status
     )
@@ -1016,6 +1085,7 @@ export function getPipelineWithSessions(id: string, userId?: string): PipelineWi
   const sessionDetails = pipeline.sessions
     .map((step) => getSession(step.sessionId, userId))
     .filter((session): session is Session => Boolean(session))
+    .map((session) => ({ ...session, messages: getMessages(session.id), versions: getSessionVersions(session.id) }))
   return { ...pipeline, sessionDetails }
 }
 
@@ -1137,6 +1207,129 @@ export function getSnapshots(sessionId: string): DiffSnapshot[] {
     'SELECT * FROM snapshots WHERE session_id = ? ORDER BY round ASC, timestamp ASC'
   ).all(sessionId) as Record<string, unknown>[]
   return rows.map(rowToSnapshot)
+}
+
+function rowToSessionVersion(row: Record<string, unknown>): SessionVersion {
+  let artifacts: SessionArtifacts | undefined
+  if (row.artifacts) {
+    try { artifacts = JSON.parse(row.artifacts as string) } catch { /* ignore */ }
+  }
+  return {
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    timestamp: row.timestamp as number,
+    round: row.round as number,
+    reason: row.reason as string,
+    ...(typeof row.output === 'string' && row.output ? { output: row.output } : {}),
+    ...(artifacts ? { artifacts } : {}),
+  }
+}
+
+export function addSessionVersion(version: SessionVersion): SessionVersion {
+  db.prepare(`
+    INSERT INTO session_versions (id, session_id, timestamp, round, reason, output, artifacts)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    version.id,
+    version.sessionId,
+    version.timestamp,
+    version.round,
+    version.reason,
+    version.output ?? null,
+    version.artifacts ? JSON.stringify(version.artifacts) : null
+  )
+  return version
+}
+
+export function getSessionVersions(sessionId: string): SessionVersion[] {
+  const rows = db.prepare(
+    'SELECT * FROM session_versions WHERE session_id = ? ORDER BY timestamp DESC'
+  ).all(sessionId) as Record<string, unknown>[]
+  return rows.map(rowToSessionVersion)
+}
+
+export function upsertExternalJob(job: ExternalJob): ExternalJob {
+  db.prepare(`
+    INSERT INTO external_jobs (
+      id, session_id, provider, external_id, status, download_dir, result_paths, error_message, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(provider, external_id) DO UPDATE SET
+      session_id = excluded.session_id,
+      status = excluded.status,
+      download_dir = excluded.download_dir,
+      result_paths = excluded.result_paths,
+      error_message = excluded.error_message,
+      updated_at = excluded.updated_at
+  `).run(
+    job.id,
+    job.sessionId,
+    job.provider,
+    job.externalId,
+    job.status,
+    job.downloadDir,
+    job.resultPaths ? JSON.stringify(job.resultPaths) : null,
+    job.errorMessage ?? null,
+    job.createdAt,
+    job.updatedAt
+  )
+  return getExternalJob(job.provider, job.externalId)!
+}
+
+export function getExternalJob(provider: ExternalJob['provider'], externalId: string): ExternalJob | undefined {
+  const row = db.prepare(
+    'SELECT * FROM external_jobs WHERE provider = ? AND external_id = ?'
+  ).get(provider, externalId) as Record<string, unknown> | undefined
+  return row ? rowToExternalJob(row) : undefined
+}
+
+export function listExternalJobs(status?: ExternalJob['status']): ExternalJob[] {
+  const rows = status
+    ? db.prepare('SELECT * FROM external_jobs WHERE status = ? ORDER BY updated_at ASC').all(status)
+    : db.prepare('SELECT * FROM external_jobs ORDER BY updated_at ASC').all()
+  return (rows as Record<string, unknown>[]).map(rowToExternalJob)
+}
+
+export function updateExternalJob(
+  provider: ExternalJob['provider'],
+  externalId: string,
+  updates: Partial<Pick<ExternalJob, 'status' | 'resultPaths' | 'errorMessage'>>
+): ExternalJob {
+  const fields: string[] = []
+  const values: unknown[] = []
+  if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status) }
+  if (updates.resultPaths !== undefined) { fields.push('result_paths = ?'); values.push(JSON.stringify(updates.resultPaths)) }
+  if (updates.errorMessage !== undefined) { fields.push('error_message = ?'); values.push(updates.errorMessage) }
+  fields.push('updated_at = ?')
+  values.push(Date.now(), provider, externalId)
+  db.prepare(`UPDATE external_jobs SET ${fields.join(', ')} WHERE provider = ? AND external_id = ?`).run(...values)
+  return getExternalJob(provider, externalId)!
+}
+
+export function stopExternalJobsForSession(sessionId: string): void {
+  db.prepare(`
+    UPDATE external_jobs
+    SET status = 'stopped', updated_at = ?
+    WHERE session_id = ? AND status = 'querying'
+  `).run(Date.now(), sessionId)
+}
+
+function rowToExternalJob(row: Record<string, unknown>): ExternalJob {
+  let resultPaths: string[] | undefined
+  if (typeof row.result_paths === 'string') {
+    try { resultPaths = JSON.parse(row.result_paths) as string[] } catch { /* ignore */ }
+  }
+  return {
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    provider: row.provider as ExternalJob['provider'],
+    externalId: row.external_id as string,
+    status: row.status as ExternalJob['status'],
+    downloadDir: row.download_dir as string,
+    ...(resultPaths ? { resultPaths } : {}),
+    ...(typeof row.error_message === 'string' ? { errorMessage: row.error_message } : {}),
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+  }
 }
 
 export function getStats(userId?: string): TuringStats {

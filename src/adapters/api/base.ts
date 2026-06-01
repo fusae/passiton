@@ -81,6 +81,7 @@ export abstract class ApiAdapter implements Adapter {
         return await this.fetchOnce(request, opts)
       } catch (err) {
         lastErr = err
+        if (opts?.signal?.aborted) break
         if (!this.shouldRetry(err) || attempt === this.maxRetries) break
         const delay = this.retryDelayMs * 2 ** attempt
         opts?.onOutput?.(`API retry ${attempt + 1}/${this.maxRetries} after ${delay}ms`)
@@ -92,6 +93,13 @@ export abstract class ApiAdapter implements Adapter {
 
   protected async fetchOnce(request: ApiRequest, opts?: AdapterSendOpts): Promise<unknown> {
     const controller = new AbortController()
+    let interrupted = false
+    const abort = () => {
+      interrupted = true
+      controller.abort()
+    }
+    opts?.signal?.addEventListener('abort', abort, { once: true })
+    if (opts?.signal?.aborted) abort()
     const startedAt = Date.now()
     let timer: NodeJS.Timeout | undefined
     const scheduleTimeout = () => {
@@ -126,11 +134,13 @@ export abstract class ApiAdapter implements Adapter {
       return response.json()
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
+        if (interrupted) throw new Error(`[${this.name}] interrupted by human message`)
         throw new Error(`[${this.name}] API request timed out after ${this.timeout + Math.max(0, opts?.getTimeoutExtensionMs?.() ?? 0)}ms`)
       }
       throw err
     } finally {
       if (timer) clearTimeout(timer)
+      opts?.signal?.removeEventListener('abort', abort)
     }
   }
 

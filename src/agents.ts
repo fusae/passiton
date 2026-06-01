@@ -391,6 +391,7 @@ function smokeSession(cwd: string): Session {
     maxRounds: 1,
     currentRound: 0,
     approveMode: false,
+    permissionMode: 'safe',
     cwd,
     resumeCount: 0,
     createdAt: now,

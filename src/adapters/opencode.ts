@@ -1,12 +1,12 @@
-// OpenCode adapter — uses opencode run "prompt" --dangerously-skip-permissions --format json
+// OpenCode adapter — uses opencode run "prompt".
 
 import type { Adapter } from './types.js'
 import type { Session, AdapterSendOpts } from '../types.js'
-import { resolveCommandArgs } from './command-args.js'
+import { applyPermissionModeArgs, resolveCommandArgs } from './command-args.js'
 import { buildPrompt, runCommand } from './shared.js'
 
 const DEFAULT_OPENCODE_PATH = process.env.TURING_OPENCODE_COMMAND ?? 'opencode'
-const DEFAULT_OPENCODE_ARGS = ['run', '{prompt}', '--dangerously-skip-permissions']
+const DEFAULT_OPENCODE_ARGS = ['run', '{prompt}']
 
 export interface OpenCodeAdapterConfig {
   command?: string
@@ -36,7 +36,7 @@ export class OpenCodeAdapter implements Adapter {
 
   async send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string> {
     const fullMessage = buildPrompt(message, opts)
-    const args = resolveCommandArgs(this.args, fullMessage)
+    const args = resolveCommandArgs(applyPermissionModeArgs(this.name, this.args, session.permissionMode), fullMessage)
     if (this.model) {
       args.push('--model', this.model)
     }
@@ -52,6 +52,7 @@ export class OpenCodeAdapter implements Adapter {
       env: this.env,
       timeout: this.timeout,
       stdinMode: 'pipe',
+      signal: opts?.signal,
       onOutput: opts?.onOutput,
       getTimeoutExtensionMs: opts?.getTimeoutExtensionMs,
     })

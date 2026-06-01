@@ -24,6 +24,8 @@ async function main(): Promise<void> {
   registerConfiguredAdapters(router, agents)
   registerPersistedUserAgents(router)
   router.recoverTasks()
+  router.recoverSessions()
+  router.recoverExternalJobs()
 
   // Start HTTP + WebSocket server
   const server = createServer(router, config.server.port, agentCatalog)
