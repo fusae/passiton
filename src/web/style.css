@@ -1576,6 +1576,21 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 
 /* --- Task UI --- */
+.task-card .session-card-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.35;
+}
+.task-card-agent {
+  margin: -2px 0 10px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
 .task-card-prompt {
   min-height: 48px;
   margin-bottom: 14px;
@@ -1862,6 +1877,11 @@ textarea.input { resize: vertical; min-height: 80px; }
   grid-template-columns: 1fr 1fr;
   gap: 16px;
 }
+.field-hint {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
 .context-details {
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
@@ -1875,6 +1895,51 @@ textarea.input { resize: vertical; min-height: 80px; }
   color: var(--text-secondary);
 }
 .context-details[open] summary { margin-bottom: 16px; }
+.context-view {
+  font-size: 0.84rem;
+}
+.context-view > summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.context-view[open] > summary {
+  margin-bottom: 14px;
+}
+.context-view-block + .context-view-block {
+  margin-top: 16px;
+}
+.context-view-copy {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255,255,255,0.035);
+}
+.context-file-list {
+  display: grid;
+  gap: 8px;
+}
+.context-file-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.035);
+}
+.context-file-item summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+.context-file-preview {
+  margin-top: 10px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
 .check-row {
   display: flex;
   align-items: center;

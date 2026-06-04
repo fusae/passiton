@@ -1078,10 +1078,11 @@ function renderTaskCards() {
   container.innerHTML = state.tasks.map(task => `
     <a href="/task/${task.id}" class="card session-card task-card">
       <div class="session-card-header">
-        <span class="session-card-title">${escapeHtml(agentLabel(task.agent))}</span>
+        <span class="session-card-title">${escapeHtml(taskTitle(task))}</span>
         <span class="badge ${taskBadgeClass(task.status)}">${escapeHtml(task.status)}</span>
       </div>
-      <div class="task-card-prompt">${escapeHtml(task.prompt)}</div>
+      <div class="task-card-agent">${escapeHtml(agentLabel(task.agent))}</div>
+      <div class="task-card-prompt">${escapeHtml(taskSubtitle(task))}</div>
       <div class="session-card-meta">
         <span>⏱ ${formatTime(task.updatedAt)}</span>
         ${task.cwd ? `<span>⌂ ${escapeHtml(task.cwd)}</span>` : ''}
@@ -1206,7 +1207,7 @@ async function renderTask(id) {
         <header class="topbar">
           <div class="topbar-left">
             <a href="/tasks" class="btn btn-ghost btn-sm">← Back</a>
-            <h2>${escapeHtml(agentLabel(task.agent))}</h2>
+            <h2>${escapeHtml(taskTitle(task))}</h2>
             <span id="task-status-badge" class="badge ${taskBadgeClass(task.status)}">${escapeHtml(task.status)}</span>
           </div>
           <div class="topbar-right" id="task-actions">
@@ -1226,9 +1227,10 @@ async function renderTask(id) {
 }
 
 function renderTaskActions(task) {
-  return task.status === 'queued' || task.status === 'running'
-    ? '<button class="btn btn-danger btn-sm" onclick="window.stopCurrentTask()">■ Stop</button>'
-    : ''
+  if (task.status === 'queued' || task.status === 'running') {
+    return '<button class="btn btn-danger btn-sm" onclick="window.stopCurrentTask()">■ Stop</button>'
+  }
+  return `<button class="btn btn-primary btn-sm" onclick="window.showTaskFeedbackModal()">✎ Feedback & Rerun</button>`
 }
 
 function renderTaskHeader(task) {
@@ -1287,6 +1289,11 @@ function renderTaskContent(task) {
         ${task.finishedAt ? `<div class="panel-kv-row"><span class="kv-label">Finished</span><span class="kv-value">${new Date(task.finishedAt).toLocaleString()}</span></div>` : ''}
         ${task.cwd ? `<div class="panel-kv-row"><span class="kv-label">CWD</span><span class="kv-value mono">${escapeHtml(task.cwd)}</span></div>` : ''}
       </div>
+      ${renderContextDetails(task.context)}
+      ${task.status !== 'queued' && task.status !== 'running' ? `
+        <div class="divider"></div>
+        <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="window.showTaskFeedbackModal()">✎ Feedback & Rerun</button>
+      ` : ''}
       ${task.lastAgentOutput ? `
         <div class="divider"></div>
         <div class="label mb-8">Last Agent Output</div>
@@ -1714,6 +1721,19 @@ function sessionTitle(session) {
   return session?.cwd ? `${mode} · ${session.cwd}` : mode
 }
 
+function taskTitle(task) {
+  const firstLine = String(task?.prompt || '').split('\n').map(line => line.trim()).find(Boolean)
+  if (!firstLine) return 'Untitled task'
+  return firstLine.length > 72 ? `${firstLine.slice(0, 72)}...` : firstLine
+}
+
+function taskSubtitle(task) {
+  const lines = String(task?.prompt || '').split('\n').map(line => line.trim()).filter(Boolean)
+  const rest = lines.slice(1).join(' ')
+  if (rest) return rest.length > 120 ? `${rest.slice(0, 120)}...` : rest
+  return task?.result || task?.lastAgentOutput || ''
+}
+
 window.copyWorkflowStepArtifact = async function(content) {
   const ok = await copyText(content)
   showToast(ok ? '已复制' : '复制失败', ok ? 'success' : 'error')
@@ -1936,6 +1956,7 @@ function renderSessionActions(session) {
     ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.extendSessionTimeout()">+5m</button>' : ''}
     ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.pauseSession()">⏸ Pause</button>' : ''}
     ${session.status === 'paused' ? '<button class="btn btn-primary btn-sm" onclick="window.resumeSession()">▶ Resume</button>' : ''}
+    ${session.status === 'error' ? '<button class="btn btn-primary btn-sm" onclick="window.resumeSession()">↻ Retry from Error</button>' : ''}
     ${session.status === 'active' || session.status === 'paused' ? '<button class="btn btn-danger btn-sm" onclick="window.stopSession()">■ Stop</button>' : ''}
   `
 }
@@ -2002,6 +2023,7 @@ function renderSessionPanel(session) {
         </div>
         ${session.cwd ? `<div class="panel-kv-row"><span class="kv-label">CWD</span><span class="kv-value mono">${escapeHtml(session.cwd)}</span></div>` : ''}
       </div>
+      ${renderContextDetails(session.context)}
     </div>
 
     <div class="divider"></div>
@@ -2880,10 +2902,9 @@ window.showNewSessionModal = async function(templateId = 'custom') {
   const template = state.templates.find(item => item.id === templateId) || state.templates.find(item => item.id === 'custom')
   const readyAgents = state.agents.filter(agent => agent.status === 'ready')
   const agents = readyAgents.length ? readyAgents : state.agents
-  const options = agents.map(agent => `<option value="${escapeAttr(agent.name)}">${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
   const defaultFrom = preferredAgentName(agents, template?.config?.preferredAdapters?.from)
   const defaultTo = preferredAgentName(agents, template?.config?.preferredAdapters?.to, defaultFrom)
-  const optionHtml = (selected) => agents.map(agent => `<option value="${escapeAttr(agent.name)}" ${agent.name === selected ? 'selected' : ''}>${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
+  const optionHtml = (selected) => agentOptionHtml(agents, selected)
   const mode = template?.config?.mode || state.config?.defaults?.mode || 'collaborate'
   const maxRounds = template?.config?.maxRounds || state.config?.defaults?.maxRounds || 5
   const prompts = template?.config?.systemPrompts || { from: '', to: '' }
@@ -2913,11 +2934,11 @@ window.showNewSessionModal = async function(templateId = 'custom') {
         <div class="form-row">
           <div class="form-group">
             <label>Agent A</label>
-            <select class="input" name="from" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultFrom) || options}</select>
+            <select class="input" name="from" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultFrom)}</select>
           </div>
           <div class="form-group">
-            <label>Agent B</label>
-            <select class="input" name="to" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultTo) || options}</select>
+            <label>Agent B <span class="field-hint">executor; needs filesystem for cwd</span></label>
+            <select class="input" name="to" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultTo)}</select>
           </div>
         </div>
         <div class="form-row">
@@ -2994,6 +3015,12 @@ window.createSession = async function(e) {
   const context = buildContextFromForm(fd)
   const systemPromptFrom = String(fd.get('systemPromptFrom') || '').trim()
   const systemPromptTo = String(fd.get('systemPromptTo') || '').trim()
+  const cwd = String(fd.get('cwd') || '').trim()
+  const toName = String(fd.get('to') || '')
+  if (cwd && !agentHasFilesystem(toName)) {
+    showToast('Sessions with cwd require Agent B to be a filesystem-capable local CLI agent')
+    return
+  }
   const body = {
     from: { adapter: fd.get('from') },
     to: { adapter: fd.get('to') },
@@ -3003,7 +3030,7 @@ window.createSession = async function(e) {
     maxRounds: parseInt(fd.get('maxRounds')) || state.config?.defaults?.maxRounds || 5,
     approveMode: fd.get('approveMode') === 'on',
     permissionMode: fd.get('permissionMode') || 'safe',
-    cwd: String(fd.get('cwd') || '').trim() || undefined,
+    cwd: cwd || undefined,
     context,
   }
   if (systemPromptFrom && systemPromptTo) {
@@ -3024,7 +3051,7 @@ window.showNewTaskModal = async function() {
   const readyAgents = state.agents.filter(agent => agent.status === 'ready')
   const agents = readyAgents.length ? readyAgents : state.agents
   const noAgents = agents.length === 0
-  const options = agents.map(agent => `<option value="${escapeAttr(agent.name)}">${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
+  const options = agentOptionHtml(agents)
 
   showModal(`
     <div class="modal-card">
@@ -3085,10 +3112,16 @@ window.showNewTaskModal = async function() {
 window.createTask = async function(e) {
   e.preventDefault()
   const fd = new FormData(e.target)
+  const cwd = String(fd.get('cwd') || '').trim()
+  const agentName = String(fd.get('agent') || '')
+  if (cwd && !agentHasFilesystem(agentName)) {
+    showToast('Tasks with cwd require a filesystem-capable local CLI agent')
+    return
+  }
   const body = {
     agent: { adapter: fd.get('agent') },
     prompt: String(fd.get('prompt') || '').trim(),
-    cwd: String(fd.get('cwd') || '').trim() || undefined,
+    cwd: cwd || undefined,
     context: buildContextFromForm(fd),
     systemPrompt: String(fd.get('systemPrompt') || '').trim() || undefined,
   }
@@ -3099,6 +3132,89 @@ window.createTask = async function(e) {
   } catch (err) {
     showToast(err.message)
   }
+}
+
+window.showTaskFeedbackModal = function() {
+  const task = state.currentTask
+  if (!task) return
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3>Feedback & Rerun</h3>
+          <p>基于当前 Task 的 prompt 和结果创建一个新 Task。</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+      </div>
+      <form onsubmit="window.rerunTaskWithFeedback(event)">
+        <div class="form-group">
+          <label>反馈意见</label>
+          <textarea class="input" name="feedback" rows="7" required placeholder="哪里不满意？希望怎么改？"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary" data-submit>Create New Task</button>
+        </div>
+      </form>
+    </div>
+  `)
+}
+
+window.rerunTaskWithFeedback = async function(e) {
+  e.preventDefault()
+  const task = state.currentTask
+  if (!task) return
+  const submit = e.target.querySelector('[data-submit]')
+  const fd = new FormData(e.target)
+  const feedback = String(fd.get('feedback') || '').trim()
+  if (!feedback) return
+  const previous = task.result || task.output || task.lastAgentOutput || task.errorMessage || ''
+  const prompt = [
+    '请基于下面的原始任务、上次输出和人工反馈，重新完成任务。',
+    '',
+    '## 原始任务',
+    task.prompt || '',
+    '',
+    previous ? `## 上次输出\n${previous}\n` : '',
+    '## 人工反馈',
+    feedback,
+  ].filter(Boolean).join('\n')
+  try {
+    if (submit) {
+      submit.disabled = true
+      submit.textContent = 'Creating...'
+    }
+    const created = await api('/api/tasks', 'POST', compactObject({
+      agent: { adapter: task.agent?.adapter },
+      prompt,
+      context: taskRerunContext(task.context),
+      systemPrompt: task.systemPrompt,
+      cwd: task.cwd,
+    }))
+    closeModal()
+    state.tasks.unshift(created)
+    navigate(`/task/${created.id}`)
+  } catch (err) {
+    showToast(err.message)
+    if (submit) {
+      submit.disabled = false
+      submit.textContent = 'Create New Task'
+    }
+  }
+}
+
+function taskRerunContext(context) {
+  if (!context) return undefined
+  const files = Array.isArray(context.files)
+    ? context.files
+      .map(file => typeof file === 'string' ? file : file?.path)
+      .filter(Boolean)
+    : undefined
+  return compactObject({
+    rules: context.rules,
+    text: context.text,
+    files: files?.length ? files : undefined,
+  })
 }
 
 window.stopCurrentTask = async function() {
@@ -3827,6 +3943,48 @@ function buildContextFromForm(fd) {
   return Object.keys(context).length ? context : undefined
 }
 
+function renderContextDetails(context) {
+  if (!context || !Object.keys(context).length) return ''
+  const files = Array.isArray(context.files) ? context.files : []
+  return `
+    <div class="divider"></div>
+    <details class="context-view" open>
+      <summary>Context</summary>
+      ${context.rules ? `
+        <div class="context-view-block">
+          <div class="label mb-8">Rules</div>
+          <div class="context-view-copy">${renderMarkdown(context.rules)}</div>
+        </div>
+      ` : ''}
+      ${context.text ? `
+        <div class="context-view-block">
+          <div class="label mb-8">Text</div>
+          <div class="context-view-copy">${renderMarkdown(context.text)}</div>
+        </div>
+      ` : ''}
+      ${files.length ? `
+        <div class="context-view-block">
+          <div class="label mb-8">Files</div>
+          <div class="context-file-list">
+            ${files.map(file => renderContextFile(file)).join('')}
+          </div>
+        </div>
+      ` : ''}
+    </details>
+  `
+}
+
+function renderContextFile(file) {
+  const path = typeof file === 'string' ? file : file?.path
+  const content = typeof file === 'object' && file?.content ? String(file.content) : ''
+  return `
+    <details class="context-file-item">
+      <summary class="mono">${escapeHtml(path || 'unnamed file')}</summary>
+      ${content ? `<pre class="context-file-preview">${escapeHtml(content.slice(0, 2000))}${content.length > 2000 ? '\n...' : ''}</pre>` : ''}
+    </details>
+  `
+}
+
 function renderMarkdown(content) {
   if (typeof marked === 'undefined') {
     return `<pre>${escapeHtml(content)}</pre>`
@@ -3986,6 +4144,23 @@ function buildSessionExport(session, messages) {
 
 function agentLabel(agent) {
   return agent?.label || agent?.adapter || ''
+}
+
+function agentHasFilesystem(name) {
+  const agent = state.agents.find(item => item.name === name || item.adapter === name)
+  return agent ? agent.kind === 'local' : false
+}
+
+function agentCapabilityLabel(agent) {
+  return agent.kind === 'local' ? 'Filesystem' : 'No filesystem'
+}
+
+function agentOptionHtml(agents, selected = '') {
+  return agents.map(agent => `
+    <option value="${escapeAttr(agent.name)}" ${agent.name === selected ? 'selected' : ''}>
+      ${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)} · ${agentCapabilityLabel(agent)}
+    </option>
+  `).join('')
 }
 
 function compactObject(obj) {

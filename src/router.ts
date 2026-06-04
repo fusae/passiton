@@ -378,6 +378,7 @@ export class Router extends EventEmitter {
     const failedRound = session.errorRound ?? this.inferFailedRound(session)
     const resumePrompt = this.buildCheckpointResumePrompt(session, failedRound)
     this.recordMessage(id, 'human', resumePrompt, failedRound)
+    state.clearSessionError(id)
 
     const updated = state.updateSession(id, {
       status: 'active',

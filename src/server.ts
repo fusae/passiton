@@ -536,6 +536,25 @@ function providerValueForAdapter(adapter: string, baseUrl?: string): state.Store
   return 'openai'
 }
 
+function agentHasFilesystem(userId: string, ref: AgentRef): boolean {
+  if (API_ADAPTERS.has(ref.adapter)) return false
+  const userAgent = state.getUserAgent(userId, ref.adapter)
+  if (userAgent) return !API_ADAPTERS.has(userAgent.adapter)
+  const configAgent = activeAgents(loadConfig())[ref.adapter]
+  if (configAgent) return !API_ADAPTERS.has(configAgent.adapter)
+  return true
+}
+
+function assertTaskFilesystemCapability(userId: string, agent: AgentRef, cwd?: string): void {
+  if (!cwd || agentHasFilesystem(userId, agent)) return
+  throw new HttpError(400, 'Tasks with cwd require a filesystem-capable local CLI agent')
+}
+
+function assertSessionFilesystemCapability(userId: string, to: AgentRef, cwd?: string): void {
+  if (!cwd || agentHasFilesystem(userId, to)) return
+  throw new HttpError(400, 'Sessions with cwd require Agent B to be a filesystem-capable local CLI agent')
+}
+
 function resolveApiKeySelection(userId: string, parsed: { keyId?: string; adapter: string; baseUrl?: string }): string | undefined {
   if (!parsed.keyId) return undefined
   if (parsed.keyId.startsWith('assistant:') || parsed.keyId.startsWith('global:')) {
@@ -1404,6 +1423,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       if (pathname === '/api/tasks' && method === 'POST') {
         const params = parseTaskBody(await parseBody(req))
         assertAllowedWorkspace(params.cwd)
+        assertTaskFilesystemCapability(authUser!.userId, params.agent, params.cwd)
         const task = router.startTask({
           userId: authUser!.userId,
           ...params,
@@ -1418,6 +1438,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const params = parseSessionBody(await parseBody(req))
         assertAllowedWorkspace(params.cwd)
         assertPermissionModeAllowed(params.permissionMode, params.cwd)
+        assertSessionFilesystemCapability(authUser!.userId, params.to, params.cwd)
         const template = params.templateId ? templates.find((item) => item.id === params.templateId) : undefined
         if (params.templateId && !template) {
           throw new HttpError(400, 'Unknown template_id')
