@@ -11,6 +11,7 @@
 - **Workflow**：把多个 Session 串成有依赖关系的步骤；支持模板、并行步骤、人工审核和上游修改后重新执行下游。
 - **CLI Agent**：支持 Codex、Claude Code、OpenCode、Gemini CLI。
 - **API Assistant**：支持 Anthropic、OpenAI、DeepSeek、智谱和 OpenAI-compatible API。
+- **能力约束**：带 `cwd` 的 Task/Session 需要本地 CLI Agent 执行文件读写；API Assistant 可做规划，但不能直接操作本地文件。
 - **文件预览**：Workflow 产出的 Markdown、文本、图片和视频可直接在页面中预览。
 - **运行恢复**：服务重启后会恢复队列，并将中断的 Session 标记为可恢复状态。
 
@@ -33,7 +34,8 @@ npm test
 打开 `http://localhost:4590`：
 
 - `Sessions`：查看双 Agent 对话、插入人工意见、查看每轮输出。
-- `Tasks`：创建单 Agent 任务并查看结果。
+- `Sessions`：错误态可从失败点重试；详情页会显示创建时的 `cwd` 和 `context`。
+- `Tasks`：创建单 Agent 任务、查看结果，并可基于人工反馈创建重跑任务。
 - `Workflows`：创建和保存工作流模板；按步骤查看产出、预览文件、审核通过或要求修改。
 - `Settings`：添加 CLI Agent、API Assistant 和 Provider Key。
 
@@ -116,6 +118,17 @@ Session 和 Workflow Step 支持两种权限模式：
 | `trusted` | 仅用于可信工作流；要求填写 `cwd`，并为支持的 CLI Agent 注入自动放权参数。 |
 
 `trusted` 模式应配合 `policy.allowedWorkspaces` 限制工作目录。
+
+## Agent 能力约束
+
+API Assistant 只能通过模型 API 返回文本，不能读取或写入本地项目文件。CLI Agent 由本机进程启动，可以在 `cwd` 指定目录内执行命令和改文件。
+
+因此：
+
+- 创建带 `cwd` 的 Task 时，所选 Agent 必须是本地 CLI Agent。
+- 创建带 `cwd` 的 Session 时，Agent B 是执行方，必须是本地 CLI Agent。
+- Agent 下拉框会标注 `Filesystem` 或 `No filesystem`。
+- 两个 API Assistant 可以讨论、规划、评审；不要用于需要落地改文件的任务。
 
 ## 全局 CLI
 
