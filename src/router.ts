@@ -20,6 +20,7 @@ const MAX_HISTORY_MESSAGES = 20
 const DISCUSS_MIN_ROUNDS = 3
 const DISCUSS_CONVERGENCE_ROUNDS = 2
 const DISCUSS_MESSAGES_PER_ROUND = 2
+const COLLABORATE_CONVERGENCE_MESSAGES = 4
 const GIT_DIFF_TIMEOUT_MS = 10_000
 const PIPELINE_DEP_MAX_FILES = 8
 const PIPELINE_DEP_FILE_CHARS = 12_000
@@ -28,6 +29,7 @@ const DREAMINA_COMMAND = process.env.TURING_DREAMINA_COMMAND ?? '/Users/jamesyu/
 const DREAMINA_POLL_INTERVAL_MS = 10_000
 const CURL_COMMAND = process.env.TURING_CURL_COMMAND ?? 'curl'
 const FFMPEG_COMMAND = process.env.TURING_FFMPEG_COMMAND ?? 'ffmpeg'
+const ACTIVE_SESSION_WATCHDOG_INTERVAL_MS = 30_000
 
 type DreaminaQueryResult = {
   status: 'querying' | 'success' | 'error'
@@ -57,6 +59,7 @@ export class Router extends EventEmitter {
   private timeoutExtensions = new Map<string, number>()
   private lastStreamStepSignatures = new Map<string, string>()
   private externalJobTimers = new Map<string, NodeJS.Timeout>()
+  private activeSessionWatchdog?: NodeJS.Timeout
   private dreaminaQuery: NonNullable<RouterOptions['dreaminaQuery']>
   private dreaminaPollIntervalMs: number
 
@@ -65,6 +68,7 @@ export class Router extends EventEmitter {
     this.policy = { ...DEFAULT_POLICY, ...policy }
     this.dreaminaQuery = options.dreaminaQuery ?? queryDreaminaResult
     this.dreaminaPollIntervalMs = options.dreaminaPollIntervalMs ?? DREAMINA_POLL_INTERVAL_MS
+    this.startActiveSessionWatchdog()
   }
 
   // ── Adapter registry ────────────────────────────────────────────────────────
@@ -148,6 +152,34 @@ export class Router extends EventEmitter {
     for (const session of state.listSessions({ status: 'active' })) {
       state.updateSession(session.id, { status: 'paused' })
       this.emitLog('warn', `Recovered interrupted session as paused [${session.id.slice(0, 8)}]`, session.id)
+    }
+  }
+
+  private startActiveSessionWatchdog(): void {
+    this.activeSessionWatchdog = setInterval(() => {
+      this.reconcileActiveSessions()
+    }, ACTIVE_SESSION_WATCHDOG_INTERVAL_MS)
+    this.activeSessionWatchdog.unref()
+  }
+
+  private reconcileActiveSessions(): void {
+    const staleAfterMs = Math.max(this.policy.messageTimeout, 60_000)
+    const now = Date.now()
+    for (const session of state.listSessions({ status: 'active' })) {
+      const age = now - session.updatedAt
+      if (age < staleAfterMs) continue
+      if (this.runningLoops.has(session.id)) {
+        this.emitLog('error', `Watchdog aborting stale active turn [${session.id.slice(0, 8)}]`, session.id)
+        this.runningLoops.delete(session.id)
+        this.abortActiveTurn(session.id)
+      }
+      this.markError(
+        session.id,
+        new Error(`Session lost active run loop after ${Math.round(age / 1000)}s without progress`),
+        this.inferFailedRound(session),
+        'policy_stop'
+      )
+      this.emitLog('error', `Watchdog marked stale active session as error [${session.id.slice(0, 8)}]`, session.id)
     }
   }
 
@@ -700,6 +732,8 @@ export class Router extends EventEmitter {
     this.emitLog('info', `Adapter call: ${target.adapter} [${sessionId.slice(0, 8)}] round=${round} turn=${recipient}`, sessionId)
     let lastOutput = 'Starting...'
     const startedAt = Date.now()
+    let lastProgressPersistedAt = startedAt
+    state.updateSession(sessionId, { lastAgentOutput: lastOutput })
     const emitHeartbeat = () => {
       this.emit('event', {
         type: 'heartbeat',
@@ -721,6 +755,11 @@ export class Router extends EventEmitter {
     opts.signal = controller.signal
     opts.onOutput = (line) => {
       lastOutput = line
+      const now = Date.now()
+      if (now - lastProgressPersistedAt > 5_000) {
+        lastProgressPersistedAt = now
+        state.updateSession(sessionId, { lastAgentOutput: lastOutput })
+      }
       this.emit('event', {
         type: 'message:delta',
         payload: {
@@ -1168,10 +1207,25 @@ export class Router extends EventEmitter {
   }
 
   private shouldCompleteSession(sessionId: string, session: Session, response: string): boolean {
-    if (!detectCompletion(response)) return false
-    if (session.mode !== 'discuss') return true
-    if (session.currentRound < DISCUSS_MIN_ROUNDS) return false
-    return this.hasDiscussConverged(sessionId)
+    if (detectCompletion(response)) {
+      if (session.mode !== 'discuss') return true
+      if (session.currentRound < DISCUSS_MIN_ROUNDS) return false
+      return this.hasDiscussConverged(sessionId)
+    }
+    if (session.mode === 'collaborate') return this.hasCollaborateConverged(sessionId)
+    if (session.mode !== 'discuss') return false
+    return false
+  }
+
+  private hasCollaborateConverged(sessionId: string): boolean {
+    const recentAgentMessages = state.getMessages(sessionId)
+      .filter((msg) => msg.from !== 'human' && msg.round > 0)
+      .slice(-COLLABORATE_CONVERGENCE_MESSAGES)
+
+    if (recentAgentMessages.length < COLLABORATE_CONVERGENCE_MESSAGES) return false
+    const senders = new Set(recentAgentMessages.map((msg) => msg.from))
+    if (senders.size < 2) return false
+    return recentAgentMessages.every((msg) => isCompletionLikeMessage(msg.content))
   }
 
   private hasDiscussConverged(sessionId: string): boolean {
@@ -1640,6 +1694,47 @@ function errorRoundFromError(err: unknown): number | undefined {
     return typeof round === 'number' ? round : undefined
   }
   return undefined
+}
+
+function isCompletionLikeMessage(content: string): boolean {
+  const normalized = content
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!normalized) return false
+
+  const completionSignals = [
+    /\[done\]/i,
+    /all tests? (passed|pass)/i,
+    /tests? (passed|pass)/i,
+    /fully complete/i,
+    /completed successfully/i,
+    /implementation (is )?complete/i,
+    /no further (action|changes|work) (is )?(needed|required)/i,
+    /nothing else (is )?(needed|required)/i,
+    /无需(进一步)?(操作|处理|修改)/,
+    /无(需|须)(进一步)?(操作|处理|修改)/,
+    /无需后续操作/,
+    /无需任何操作/,
+    /全部(完成|通过|就绪)/,
+    /测试(全部)?通过/,
+    /状态(稳定|正常)/,
+    /一切(正常|就绪)/,
+    /已(完成|就绪|启用|启动|验证通过)/,
+  ]
+
+  const blockingSignals = [
+    /需要你/,
+    /请你/,
+    /等待/,
+    /please provide/i,
+    /waiting for/i,
+    /needs? human/i,
+    /requires? (input|approval|action)/i,
+  ]
+
+  return completionSignals.some((pattern) => pattern.test(normalized)) &&
+    !blockingSignals.some((pattern) => pattern.test(normalized))
 }
 
 function summarizeCompletedRounds(session: Session, messages: Message[], failedRound: number): string {

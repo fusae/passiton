@@ -1898,6 +1898,33 @@ textarea.input { resize: vertical; min-height: 80px; }
 .context-view {
   font-size: 0.84rem;
 }
+.creation-details {
+  font-size: 0.84rem;
+}
+.creation-details > summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.creation-details[open] > summary {
+  margin-bottom: 14px;
+}
+.creation-kv {
+  margin-bottom: 14px;
+}
+.creation-block + .creation-block,
+.context-view + .creation-block,
+.creation-block + .context-view {
+  margin-top: 16px;
+}
+.creation-copy {
+  max-height: 260px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255,255,255,0.035);
+}
 .context-view > summary {
   cursor: pointer;
   font-weight: 700;

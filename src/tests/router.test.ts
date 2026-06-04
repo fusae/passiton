@@ -634,6 +634,42 @@ test('discuss mode ignores early done and waits for convergence', async () => {
   })
 })
 
+test('collaborate mode completes when both agents converge without DONE tag', async () => {
+  await withTempDb(async () => {
+    let toCalls = 0
+    let fromCalls = 0
+    const router = new Router()
+
+    router.registerAdapter(new StubAdapter('planner', async () => {
+      fromCalls += 1
+      return fromCalls === 1
+        ? '状态稳定，无需进一步操作。'
+        : '收到，状态稳定，无需操作。'
+    }))
+
+    router.registerAdapter(new StubAdapter('executor', async () => {
+      toCalls += 1
+      return toCalls === 1
+        ? '实现完成，测试全部通过。'
+        : '确认全部完成，无需操作。'
+    }))
+
+    const session = router.startSession({
+      from: { adapter: 'planner' },
+      to: { adapter: 'executor' },
+      initialPrompt: 'Implement a feature.',
+      mode: 'collaborate',
+      maxRounds: 10,
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+    assert.equal(toCalls, 2)
+    assert.equal(fromCalls, 2)
+    assert.equal(state.getSession(session.id)?.currentRound, 2)
+  })
+})
+
 test('context is cached at session start and injected via system prompt', async () => {
   await withTempDb(async () => {
     const dir = mkdtempSync(join(tmpdir(), 'turing-context-'))

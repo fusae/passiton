@@ -1289,7 +1289,7 @@ function renderTaskContent(task) {
         ${task.finishedAt ? `<div class="panel-kv-row"><span class="kv-label">Finished</span><span class="kv-value">${new Date(task.finishedAt).toLocaleString()}</span></div>` : ''}
         ${task.cwd ? `<div class="panel-kv-row"><span class="kv-label">CWD</span><span class="kv-value mono">${escapeHtml(task.cwd)}</span></div>` : ''}
       </div>
-      ${renderContextDetails(task.context)}
+      ${renderTaskCreationDetails(task)}
       ${task.status !== 'queued' && task.status !== 'running' ? `
         <div class="divider"></div>
         <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="window.showTaskFeedbackModal()">✎ Feedback & Rerun</button>
@@ -2023,7 +2023,7 @@ function renderSessionPanel(session) {
         </div>
         ${session.cwd ? `<div class="panel-kv-row"><span class="kv-label">CWD</span><span class="kv-value mono">${escapeHtml(session.cwd)}</span></div>` : ''}
       </div>
-      ${renderContextDetails(session.context)}
+      ${renderSessionCreationDetails(session)}
     </div>
 
     <div class="divider"></div>
@@ -3943,11 +3943,64 @@ function buildContextFromForm(fd) {
   return Object.keys(context).length ? context : undefined
 }
 
+function renderSessionCreationDetails(session) {
+  const initialPrompt = sessionInitialPrompt()
+  return `
+    <div class="divider"></div>
+    <details class="creation-details">
+      <summary>Creation Params</summary>
+      <div class="panel-kv creation-kv">
+        <div class="panel-kv-row"><span class="kv-label">Agent A</span><span class="kv-value">${escapeHtml(agentLabel(session.from))}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">Agent B</span><span class="kv-value">${escapeHtml(agentLabel(session.to))}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">Mode</span><span class="kv-value">${escapeHtml(session.mode)}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">Max Turns</span><span class="kv-value">${escapeHtml(session.maxRounds)}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">Approve</span><span class="kv-value">${session.approveMode ? 'on' : 'off'}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">Permission</span><span class="kv-value">${escapeHtml(session.permissionMode || 'safe')}</span></div>
+        ${session.templateId ? `<div class="panel-kv-row"><span class="kv-label">Template</span><span class="kv-value">${escapeHtml(session.templateId)}</span></div>` : ''}
+        ${session.cwd ? `<div class="panel-kv-row"><span class="kv-label">CWD</span><span class="kv-value mono">${escapeHtml(session.cwd)}</span></div>` : ''}
+      </div>
+      ${renderPromptBlock('Initial Prompt', initialPrompt)}
+      ${renderPromptBlock('Agent A System Prompt', session.systemPrompts?.from)}
+      ${renderPromptBlock('Agent B System Prompt', session.systemPrompts?.to)}
+      ${renderContextDetails(session.context)}
+    </details>
+  `
+}
+
+function renderTaskCreationDetails(task) {
+  return `
+    <div class="divider"></div>
+    <details class="creation-details">
+      <summary>Creation Params</summary>
+      <div class="panel-kv creation-kv">
+        <div class="panel-kv-row"><span class="kv-label">Agent</span><span class="kv-value">${escapeHtml(agentLabel(task.agent))}</span></div>
+        ${task.cwd ? `<div class="panel-kv-row"><span class="kv-label">CWD</span><span class="kv-value mono">${escapeHtml(task.cwd)}</span></div>` : ''}
+      </div>
+      ${renderPromptBlock('Prompt', task.prompt)}
+      ${renderPromptBlock('System Prompt', task.systemPrompt)}
+      ${renderContextDetails(task.context)}
+    </details>
+  `
+}
+
+function renderPromptBlock(label, value) {
+  if (!value) return ''
+  return `
+    <div class="creation-block">
+      <div class="label mb-8">${escapeHtml(label)}</div>
+      <div class="creation-copy">${renderMarkdown(String(value))}</div>
+    </div>
+  `
+}
+
+function sessionInitialPrompt() {
+  return state.currentMessages.find(msg => msg.from === 'human' && Number(msg.round) === 0)?.content || ''
+}
+
 function renderContextDetails(context) {
   if (!context || !Object.keys(context).length) return ''
   const files = Array.isArray(context.files) ? context.files : []
   return `
-    <div class="divider"></div>
     <details class="context-view" open>
       <summary>Context</summary>
       ${context.rules ? `
