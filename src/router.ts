@@ -5,7 +5,7 @@ import { execFile, execFileSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
-import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts, Task, ExternalJob } from './types.js'
+import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts, Task, ExternalJob, WorkflowNodeType, WorkflowStepContract } from './types.js'
 import * as state from './state.js'
 import { decryptKey } from './keyvault.js'
 import {
@@ -39,6 +39,7 @@ type DreaminaQueryResult = {
 
 type RouterOptions = {
   dreaminaQuery?: (externalId: string, downloadDir: string) => Promise<DreaminaQueryResult>
+  dreaminaSubmit?: (args: string[], cwd?: string) => Promise<string>
   dreaminaPollIntervalMs?: number
 }
 
@@ -46,6 +47,17 @@ type StreamStep = {
   type: 'read' | 'write' | 'exec' | 'think' | 'done'
   summary: string
   detail?: string
+}
+
+type DreaminaVideoCommand = {
+  args: string[]
+  downloadDir: string
+}
+
+type DreaminaVideoPlan = {
+  commands: DreaminaVideoCommand[]
+  outputDir: string
+  finalOutputPath?: string
 }
 
 export class Router extends EventEmitter {
@@ -61,12 +73,14 @@ export class Router extends EventEmitter {
   private externalJobTimers = new Map<string, NodeJS.Timeout>()
   private activeSessionWatchdog?: NodeJS.Timeout
   private dreaminaQuery: NonNullable<RouterOptions['dreaminaQuery']>
+  private dreaminaSubmit: NonNullable<RouterOptions['dreaminaSubmit']>
   private dreaminaPollIntervalMs: number
 
   constructor(policy: Partial<PolicyConfig> = {}, options: RouterOptions = {}) {
     super()
     this.policy = { ...DEFAULT_POLICY, ...policy }
     this.dreaminaQuery = options.dreaminaQuery ?? queryDreaminaResult
+    this.dreaminaSubmit = options.dreaminaSubmit ?? submitDreaminaCommand
     this.dreaminaPollIntervalMs = options.dreaminaPollIntervalMs ?? DREAMINA_POLL_INTERVAL_MS
     this.startActiveSessionWatchdog()
   }
@@ -315,6 +329,8 @@ export class Router extends EventEmitter {
     name: string
     steps: Array<{
       title?: string
+      nodeType?: WorkflowNodeType
+      contract?: WorkflowStepContract
       from: AgentRef
       to: AgentRef
       initialPrompt: string
@@ -325,6 +341,8 @@ export class Router extends EventEmitter {
       permissionMode?: Session['permissionMode']
       cwd?: string
       dependsOn?: number[]
+      manualDone?: boolean
+      manualOutput?: string
     }>
   }): Pipeline {
     if (params.steps.length === 0) {
@@ -333,29 +351,60 @@ export class Router extends EventEmitter {
 
     const created = params.steps.map((step) => {
       const hasDependencies = (step.dependsOn?.length ?? 0) > 0
-      return this.createSessionRecord({ ...step, userId: params.userId }, hasDependencies ? 'paused' : 'active')
+      const session = this.createSessionRecord({ ...step, userId: params.userId }, step.manualDone || hasDependencies ? 'paused' : 'active')
+      if (!step.manualDone) return session
+
+      const manualOutput = formatManualPipelineOutput(step.manualOutput)
+      this.recordMessage(session.id, 'workflow', manualOutput, 1)
+      const done = state.updateSession(session.id, {
+        status: 'done',
+        currentRound: 1,
+        lastAgentOutput: manualOutput,
+      })
+      this.emitLog('info', `Workflow step marked done from manual input [${session.id.slice(0, 8)}]`, session.id)
+      this.emit('event', { type: 'session:done', payload: done } satisfies WsEvent)
+      return done
     })
 
+    const stepStatuses = params.steps.map((step, index) => {
+      if (step.manualDone) return 'done' as const
+      return step.dependsOn?.length ? 'pending' as const : 'active' as const
+    })
+    const initialPipelineStatus: Pipeline['status'] = stepStatuses.every((status) => status === 'done') ? 'done' : 'active'
     const pipeline = state.createPipeline({
       id: uuidv4(),
       userId: params.userId,
       name: params.name,
-      status: 'active',
+      status: initialPipelineStatus,
       sessions: params.steps.map((step, index) => ({
         sessionId: created[index].id,
         title: step.title,
+        nodeType: step.nodeType,
+        contract: step.contract,
         dependsOn: step.dependsOn?.map((depIndex) => created[depIndex].id),
-        status: step.dependsOn?.length ? 'pending' : 'active',
+        status: stepStatuses[index],
       })),
     })
 
     this.emit('event', { type: 'pipeline:created', payload: pipeline } satisfies WsEvent)
 
     params.steps.forEach((step, index) => {
-      if (!step.dependsOn?.length) {
-        this.startRunLoop(created[index].id, step.initialPrompt)
+      if (!step.manualDone && !step.dependsOn?.length) {
+        if (this.shouldUseHostImageGenerationStep(step.nodeType, created[index])) {
+          this.prepareHostImageGenerationStep(created[index].id)
+        } else if (this.shouldUseDirectVideoGenerationStep(step.nodeType)) {
+          this.submitDreaminaVideoStep(created[index].id).catch((err) => this.markVideoStepSubmitError(created[index].id, err))
+        } else {
+          this.startRunLoop(created[index].id, step.initialPrompt)
+        }
       }
     })
+
+    if (params.steps.some((step) => step.manualDone) && initialPipelineStatus !== 'done') {
+      this.resumePipelineReadySteps(pipeline).catch((err) => {
+        console.error(`[router] pipeline resume error for ${pipeline.id}:`, err)
+      })
+    }
 
     return pipeline
   }
@@ -376,6 +425,19 @@ export class Router extends EventEmitter {
     if (!session) throw new Error(`Session ${id} not found`)
     if (session.status !== 'paused' && session.status !== 'stopped') throw new Error(`Session ${id} is not paused or stopped`)
 
+    const pipelineStep = state.getPipelineBySession(id)?.sessions.find((step) => step.sessionId === id)
+    if (this.shouldUseHostImageGenerationStep(pipelineStep?.nodeType, session)) {
+      return this.prepareHostImageGenerationStep(id)
+    }
+    if (this.shouldUseDirectVideoGenerationStep(pipelineStep?.nodeType)) {
+      try {
+        return await this.submitDreaminaVideoStep(id)
+      } catch (err) {
+        this.markVideoStepSubmitError(id, err)
+        return state.getSession(id)!
+      }
+    }
+
     const messages = state.getMessages(id)
     const lastMessage = messages.at(-1)
     if (!lastMessage) throw new Error(`Session ${id} has no messages`)
@@ -383,14 +445,15 @@ export class Router extends EventEmitter {
       throw new Error(`Session ${id} is waiting for human input; insert a reply instead of resuming`)
     }
 
+    const effectiveExtraRounds = extraRounds ?? (session.currentRound >= session.maxRounds ? 1 : undefined)
     const updated = state.updateSession(id, {
       status: 'active',
-      ...(extraRounds !== undefined ? { maxRounds: session.maxRounds + extraRounds } : {}),
+      ...(effectiveExtraRounds !== undefined ? { maxRounds: session.maxRounds + effectiveExtraRounds } : {}),
       resumeCount: session.resumeCount + 1,
     })
 
     this.emit('event', { type: 'session:resumed', payload: updated } satisfies WsEvent)
-    this.emitLog('info', `Session resumed [${id.slice(0, 8)}]${extraRounds !== undefined ? ` (+${extraRounds} rounds)` : ''}`, id)
+    this.emitLog('info', `Session resumed [${id.slice(0, 8)}]${effectiveExtraRounds !== undefined ? ` (+${effectiveExtraRounds} rounds)` : ''}`, id)
     const epoch = this.nextRunEpoch(id)
 
     this.startRunLoop(id, lastMessage.content, epoch)
@@ -481,6 +544,46 @@ export class Router extends EventEmitter {
     return completed
   }
 
+  async completeSessionWithManualArtifacts(id: string, paths: string[], summary?: string): Promise<Session> {
+    const session = state.getSession(id)
+    if (!session) throw new Error(`Session ${id} not found`)
+    const resolvedPaths = paths.map((filePath) => resolveManualArtifactPath(filePath, session.cwd))
+    if (resolvedPaths.length === 0) throw new Error('No artifact paths provided')
+
+    this.runningLoops.delete(id)
+    this.timeoutExtensions.delete(id)
+    this.nextRunEpoch(id)
+    this.abortActiveTurn(id)
+    state.stopExternalJobsForSession(id)
+    state.clearSessionError(id)
+
+    const round = Math.max(1, session.currentRound)
+    this.recordMessage(id, 'human', [
+      '人工补充产物完成，回填文件：',
+      ...resolvedPaths.map((filePath) => `- ${filePath}`),
+    ].join('\n'), round)
+
+    const content = [
+      '[RESULT]',
+      summary || '人工补充产物已回填。',
+      '',
+      ...resolvedPaths.map((filePath) => `产物：\`${filePath}\``),
+      '[/RESULT]',
+      '[DONE]',
+    ].join('\n')
+    this.recordMessage(id, 'turing', content, round, { filesModified: resolvedPaths })
+    state.updateSession(id, {
+      currentRound: round,
+      lastAgentOutput: content,
+      resumeCount: session.resumeCount + 1,
+    })
+    const completed = await this.completeSession(id)
+    this.emit('event', { type: 'session:done', payload: completed } satisfies WsEvent)
+    this.emitLog('info', `Manual artifacts completed session [${id.slice(0, 8)}]`, id)
+    this.handlePipelineSessionFinished(id, 'done')
+    return completed
+  }
+
   extendSessionTimeout(id: string, extensionMs = 5 * 60 * 1000): { session: Session; extensionMs: number; totalExtensionMs: number } {
     const session = state.getSession(id)
     if (!session) throw new Error(`Session ${id} not found`)
@@ -518,6 +621,61 @@ export class Router extends EventEmitter {
     this.emit('event', { type: 'pipeline:updated', payload: updated } satisfies WsEvent)
     await this.resumePipelineReadySteps(updated)
     return state.getPipeline(id)!
+  }
+
+  async rerunPipelineStep(sessionId: string): Promise<Pipeline> {
+    const pipeline = state.getPipelineBySession(sessionId)
+    if (!pipeline) throw new Error(`Session ${sessionId} is not part of a pipeline`)
+    const step = pipeline.sessions.find((item) => item.sessionId === sessionId)
+    if (!step) throw new Error(`Pipeline step ${sessionId} not found`)
+
+    const affected = new Set<string>([sessionId])
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const item of pipeline.sessions) {
+        if (affected.has(item.sessionId)) continue
+        if ((item.dependsOn ?? []).some((dependencyId) => affected.has(dependencyId))) {
+          affected.add(item.sessionId)
+          changed = true
+        }
+      }
+    }
+
+    for (const affectedSessionId of affected) {
+      this.runningLoops.delete(affectedSessionId)
+      this.timeoutExtensions.delete(affectedSessionId)
+      this.nextRunEpoch(affectedSessionId)
+      this.abortActiveTurn(affectedSessionId)
+      state.stopExternalJobsForSession(affectedSessionId)
+      if (affectedSessionId === sessionId) state.clearExternalJobsForSession(affectedSessionId)
+      this.saveSessionVersion(affectedSessionId, affectedSessionId === sessionId ? '重跑本步骤' : '上游重跑，自动重置')
+      const reset = state.resetSessionForPipelineRerun(affectedSessionId)
+      this.emit('event', { type: 'session:paused', payload: reset } satisfies WsEvent)
+    }
+
+    this.hydratePipelineDependencyContext(sessionId, step.dependsOn ?? [])
+    const initialMessage = state.getMessages(sessionId).find((message) => message.from === 'human' && message.round === 0)
+    if (!initialMessage) throw new Error(`Session ${sessionId} has no initial prompt`)
+
+    const epoch = this.nextRunEpoch(sessionId)
+    const activeSession = state.updateSession(sessionId, { status: 'active', resumeCount: 1 })
+    this.emit('event', { type: 'session:resumed', payload: activeSession } satisfies WsEvent)
+
+    const sessions = pipeline.sessions.map((item) => {
+      if (item.sessionId === sessionId) return { ...item, status: 'active' as const }
+      if (affected.has(item.sessionId)) return { ...item, status: 'pending' as const }
+      return item
+    })
+    const updated = state.updatePipeline(pipeline.id, { status: 'active', sessions })
+    this.emit('event', { type: 'pipeline:updated', payload: updated } satisfies WsEvent)
+    this.emitLog('info', `Pipeline step rerun [${sessionId.slice(0, 8)}] reset ${affected.size - 1} descendant step(s)`, sessionId)
+    if (this.shouldUseDirectVideoGenerationStep(step.nodeType)) {
+      this.submitDreaminaVideoStep(sessionId).catch((err) => this.markVideoStepSubmitError(sessionId, err))
+      return updated
+    }
+    this.startRunLoop(sessionId, initialMessage.content, epoch)
+    return updated
   }
 
   async deletePipeline(id: string): Promise<void> {
@@ -701,6 +859,9 @@ export class Router extends EventEmitter {
         }
         console.error(`[router] round error session ${sessionId}:`, err)
         this.emitLog('error', `Round error [${sessionId.slice(0, 8)}]: ${String(err)}`, sessionId)
+        if (await this.completeWorkflowStepAfterAdapterError(sessionId, err)) {
+          break
+        }
         const failed = state.getSession(sessionId)
         this.markError(sessionId, err, failed ? this.inferFailedRound(failed) : undefined)
         break
@@ -814,6 +975,14 @@ export class Router extends EventEmitter {
         await this.pauseSession(sessionId)
         this.emitLog('info', `Waiting for human input [${sessionId.slice(0, 8)}]`, sessionId)
         return { done: false, waiting: true, nextMessage: content }
+      }
+      const assistanceRequest = detectAgentAssistanceRequest(content)
+      if (assistanceRequest) {
+        this.emitLog('info', `Executor requested planner assistance [${sessionId.slice(0, 8)}]`, sessionId)
+        return {
+          done: false,
+          nextMessage: buildPlannerAssistanceDirective(content, assistanceRequest),
+        }
       }
       return { done: false, nextMessage: content }
     }
@@ -1013,6 +1182,155 @@ export class Router extends EventEmitter {
     })
   }
 
+  private shouldUseHostImageGenerationStep(nodeType: WorkflowNodeType | undefined, session: Session): boolean {
+    return nodeType === 'image_generate' && session.to.adapter === 'codex'
+  }
+
+  private shouldUseDirectVideoGenerationStep(nodeType: WorkflowNodeType | undefined): boolean {
+    return nodeType === 'video_generate'
+  }
+
+  private async submitDreaminaVideoStep(sessionId: string): Promise<Session> {
+    const session = state.getSession(sessionId)
+    if (!session) throw new Error(`Session ${sessionId} not found`)
+
+    this.runningLoops.delete(sessionId)
+    this.timeoutExtensions.delete(sessionId)
+    this.nextRunEpoch(sessionId)
+    this.abortActiveTurn(sessionId)
+    state.clearSessionError(sessionId)
+
+    const active = state.updateSession(sessionId, {
+      status: 'active',
+      resumeCount: session.resumeCount + 1,
+    })
+    this.emit('event', { type: 'session:resumed', payload: active } satisfies WsEvent)
+    this.emitLog('info', `Direct Dreamina video submission [${sessionId.slice(0, 8)}]`, sessionId)
+
+    const plan = readDreaminaVideoPlan(active)
+    const doneJobs = state.listExternalJobs('done')
+      .filter((job) => job.sessionId === sessionId && job.resultPaths?.length)
+      .sort((a, b) => a.createdAt - b.createdAt)
+    const next = plan.commands[doneJobs.length]
+    if (!next) return this.completeDreaminaVideoPlan(sessionId, plan)
+
+    const stdout = await this.dreaminaSubmit(next.args, active.cwd)
+    const externalId = parseDreaminaSubmitId(stdout)
+    if (!externalId) {
+      throw new Error(`Dreamina did not return submit_id. Output: ${truncate(stdout, 1000)}`)
+    }
+
+    const content = [
+      '[RESULT]',
+      `已提交即梦视频片段 ${doneJobs.length + 1}/${plan.commands.length}。`,
+      '',
+      `submit_id：\`${externalId}\``,
+      `命令：\`${DREAMINA_COMMAND} ${next.args.map(shellQuote).join(' ')}\``,
+      `下载目录：\`${next.downloadDir}\``,
+      '状态：`querying`',
+      '[/RESULT]',
+    ].join('\n')
+    this.recordMessage(sessionId, 'dreamina', content, Math.max(1, active.currentRound + 1))
+    state.updateSession(sessionId, {
+      currentRound: Math.max(1, active.currentRound + 1),
+      lastAgentOutput: content,
+    })
+    this.registerDreaminaJob(sessionId, { externalId, downloadDir: next.downloadDir })
+    return state.getSession(sessionId)!
+  }
+
+  private async completeDreaminaVideoPlan(sessionId: string, plan: DreaminaVideoPlan): Promise<Session> {
+    const doneJobs = state.listExternalJobs('done')
+      .filter((job) => job.sessionId === sessionId && job.resultPaths?.length)
+      .sort((a, b) => a.createdAt - b.createdAt)
+    const inputVideos = doneJobs.flatMap((job) => job.resultPaths ?? [])
+    if (!inputVideos.length) throw new Error('No generated video files found for concat')
+
+    let finalPath = plan.finalOutputPath ?? inputVideos[0]
+    if (inputVideos.length > 1) {
+      finalPath = plan.finalOutputPath ?? path.join(plan.outputDir, 'final-draft.mp4')
+      await concatVideos(inputVideos, finalPath)
+    }
+
+    const content = [
+      '[RESULT]',
+      '即梦视频生成完成。',
+      '',
+      '片段文件：',
+      ...inputVideos.map((filePath) => `\`${filePath}\``),
+      '',
+      `最终视频：\`${finalPath}\``,
+      '[/RESULT]',
+      '[DONE]',
+    ].join('\n')
+    const session = state.getSession(sessionId)
+    this.recordMessage(sessionId, 'dreamina', content, Math.max(1, session?.currentRound ?? 1))
+    state.updateSession(sessionId, { lastAgentOutput: content })
+    const completed = await this.completeSession(sessionId)
+    this.emit('event', { type: 'session:done', payload: completed } satisfies WsEvent)
+    this.emitLog('info', `Dreamina video plan completed [${sessionId.slice(0, 8)}]`, sessionId)
+    this.handlePipelineSessionFinished(sessionId, 'done')
+    return completed
+  }
+
+  private markVideoStepSubmitError(sessionId: string, err: unknown): void {
+    const content = [
+      '[RESULT]',
+      '视频生成提交失败。',
+      '',
+      `原因：${errorMessage(err)}`,
+      '[/RESULT]',
+    ].join('\n')
+    const session = state.getSession(sessionId)
+    this.recordMessage(sessionId, 'turing', content, Math.max(1, session?.currentRound ?? 1))
+    state.updateSession(sessionId, { lastAgentOutput: content })
+    this.markError(sessionId, err)
+  }
+
+  private prepareHostImageGenerationStep(sessionId: string): Session {
+    const session = state.getSession(sessionId)
+    if (!session) throw new Error(`Session ${sessionId} not found`)
+
+    this.runningLoops.delete(sessionId)
+    this.timeoutExtensions.delete(sessionId)
+    this.nextRunEpoch(sessionId)
+    this.abortActiveTurn(sessionId)
+    state.stopExternalJobsForSession(sessionId)
+    state.clearSessionError(sessionId)
+
+    const messages = state.getMessages(sessionId)
+    const existingHostRequest = [...messages].reverse().find((message) => message.from !== 'human' && message.content.includes('HOST_IMAGE_GENERATION_REQUIRED'))
+    const round = Math.max(1, session.currentRound)
+    const outputDirectory = sessionOutputDirectory(session) ?? session.cwd ?? ''
+    const content = [
+      '[RESULT]',
+      'HOST_IMAGE_GENERATION_REQUIRED',
+      '',
+      '本步骤需要 Codex 主进程内置生图工具执行。Turing 后端不会再启动 Codex 子进程，避免空转。',
+      '',
+      '处理方式：',
+      '1. 在 Codex 主进程根据本步骤输出和上游 `script.md`、`prompt.txt` 生成图片。',
+      '2. 把生成图片保存到本工作流输出目录。',
+      '3. 点击“主进程补图回填”，提交图片绝对路径。',
+      '',
+      `输出目录：\`${outputDirectory}\``,
+      '[/RESULT]',
+    ].join('\n')
+
+    if (!existingHostRequest || !existingHostRequest.content.includes(`输出目录：\`${outputDirectory}\``)) {
+      this.recordMessage(sessionId, 'turing', content, round)
+    }
+    const updated = state.updateSession(sessionId, {
+      status: 'paused',
+      currentRound: round,
+      lastAgentOutput: content,
+      resumeCount: session.resumeCount + 1,
+    })
+    this.emit('event', { type: 'session:paused', payload: updated } satisfies WsEvent)
+    this.emitLog('info', `Host image generation required [${sessionId.slice(0, 8)}]`, sessionId)
+    return updated
+  }
+
   private handlePipelineSessionFinished(sessionId: string, status: 'done' | 'error'): void {
     const pipeline = state.getPipelineBySession(sessionId)
     if (!pipeline) return
@@ -1054,6 +1372,16 @@ export class Router extends EventEmitter {
         this.hydratePipelineDependencyContext(step.sessionId, step.dependsOn ?? [])
         if (session.approveMode) {
           this.emitLog('info', `Pipeline approval gate — waiting before step starts [${step.sessionId.slice(0, 8)}]`, step.sessionId)
+          changed = true
+          return { ...step, status: 'active' as const }
+        }
+        if (this.shouldUseHostImageGenerationStep(step.nodeType, session)) {
+          this.prepareHostImageGenerationStep(step.sessionId)
+          changed = true
+          return { ...step, status: 'active' as const }
+        }
+        if (this.shouldUseDirectVideoGenerationStep(step.nodeType)) {
+          this.submitDreaminaVideoStep(step.sessionId).catch((err) => this.markVideoStepSubmitError(step.sessionId, err))
           changed = true
           return { ...step, status: 'active' as const }
         }
@@ -1162,6 +1490,14 @@ export class Router extends EventEmitter {
 
     const paths = result.paths ?? []
     state.updateExternalJob(current.provider, current.externalId, { status: 'done', resultPaths: paths })
+    if (this.shouldUseDirectVideoGenerationStep(state.getPipelineBySession(current.sessionId)?.sessions.find((step) => step.sessionId === current.sessionId)?.nodeType)) {
+      try {
+        await this.submitDreaminaVideoStep(current.sessionId)
+      } catch (err) {
+        this.markVideoStepSubmitError(current.sessionId, err)
+      }
+      return
+    }
     const content = [
       '[RESULT]',
       '即梦视频生成完成。',
@@ -1207,14 +1543,60 @@ export class Router extends EventEmitter {
   }
 
   private shouldCompleteSession(sessionId: string, session: Session, response: string): boolean {
+    const workflowReady = this.isWorkflowCompletionReady(sessionId, response)
     if (detectCompletion(response)) {
+      if (!workflowReady) return false
       if (session.mode !== 'discuss') return true
       if (session.currentRound < DISCUSS_MIN_ROUNDS) return false
       return this.hasDiscussConverged(sessionId)
     }
-    if (session.mode === 'collaborate') return this.hasCollaborateConverged(sessionId)
+    if (session.mode === 'collaborate') return workflowReady && this.hasCollaborateConverged(sessionId)
     if (session.mode !== 'discuss') return false
     return false
+  }
+
+  private isWorkflowCompletionReady(sessionId: string, response: string): boolean {
+    const pipeline = state.getPipelineBySession(sessionId)
+    if (!pipeline) return true
+    const session = state.getSession(sessionId)
+    if (!session) return false
+    const step = pipeline.sessions.find((item) => item.sessionId === sessionId)
+    const title = step?.title ?? ''
+    const messages = state.getMessages(sessionId)
+    const outputs = [...messages.filter((msg) => msg.from !== 'human').map((msg) => msg.content), response].join('\n\n')
+    return validateWorkflowStepOutput(title, outputs, session.cwd, step?.contract, session.createdAt)
+  }
+
+  private async completeWorkflowStepAfterAdapterError(sessionId: string, err: unknown): Promise<boolean> {
+    const pipeline = state.getPipelineBySession(sessionId)
+    const session = state.getSession(sessionId)
+    if (!pipeline || !session) return false
+    const step = pipeline.sessions.find((item) => item.sessionId === sessionId)
+    if (!step?.contract?.outputs?.length) return false
+    const outputs = [
+      ...state.getMessages(sessionId).filter((message) => message.from !== 'human').map((message) => message.content),
+      lastAgentOutputFromError(err) ?? '',
+    ].join('\n\n')
+    if (!validateWorkflowStepOutput(step.title ?? '', outputs, session.cwd, step.contract, session.createdAt)) return false
+
+    const content = [
+      '[RESULT]',
+      '执行器异常退出，但步骤产物已完整生成并通过输出契约校验。',
+      ...step.contract.outputs.map((output) => {
+        const outputPath = extractExistingOutputFile(outputs, output.fileName, session.cwd, session.createdAt)
+        return outputPath ? `产物：${outputPath}` : ''
+      }).filter(Boolean),
+      '[/RESULT]',
+      '[DONE]',
+    ].join('\n')
+    this.recordMessage(sessionId, 'turing', content, this.inferFailedRound(session))
+    state.clearSessionError(sessionId)
+    state.updateSession(sessionId, { lastAgentOutput: content })
+    const completed = await this.completeSession(sessionId)
+    this.emit('event', { type: 'session:done', payload: completed } satisfies WsEvent)
+    this.emitLog('warn', `Adapter failed after outputs satisfied contract; marked complete [${sessionId.slice(0, 8)}]`, sessionId)
+    this.handlePipelineSessionFinished(sessionId, 'done')
+    return true
   }
 
   private hasCollaborateConverged(sessionId: string): boolean {
@@ -1355,15 +1737,17 @@ export class Router extends EventEmitter {
       }
       summaries.push(summary.join('\n'))
 
-      if (!session.cwd || !latestSnapshot || files.length >= PIPELINE_DEP_MAX_FILES) continue
-      for (const relativePath of extractChangedFiles(latestSnapshot.diffFull)) {
+      if (!session.cwd || files.length >= PIPELINE_DEP_MAX_FILES) continue
+      const cwd = session.cwd
+      const referencedFiles = messages.flatMap((message) => extractReferencedTextFiles(message.content, cwd))
+      const changedFiles = latestSnapshot ? extractChangedFiles(latestSnapshot.diffFull).map((filePath) => path.resolve(cwd, filePath)) : []
+      for (const absolutePath of [...new Set([...referencedFiles, ...changedFiles])]) {
         if (files.length >= PIPELINE_DEP_MAX_FILES) break
-        const absolutePath = path.resolve(session.cwd, relativePath)
         try {
           if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) continue
           const content = fs.readFileSync(absolutePath, 'utf-8')
           files.push({
-            path: `[dependency ${dependencyId.slice(0, 8)}] ${relativePath}`,
+            path: `[dependency ${dependencyId.slice(0, 8)}] ${absolutePath}`,
             content: truncateText(content, PIPELINE_DEP_FILE_CHARS),
           })
         } catch {
@@ -1398,6 +1782,199 @@ export function detectDreaminaSubmittedJob(content: string, session: Pick<Sessio
     externalId: match[1],
     downloadDir: path.join(session.cwd ?? process.cwd(), 'output'),
   }
+}
+
+function readDreaminaVideoPlan(session: Session): DreaminaVideoPlan {
+  const commandSource = findVideoCommandSource(session)
+  if (!commandSource?.content.trim()) {
+    throw new Error('video-command.md not found in upstream outputs')
+  }
+  const outputDir = commandSource.filePath
+    ? path.dirname(commandSource.filePath)
+    : sessionOutputDirectory(session) ?? session.cwd ?? process.cwd()
+  const rawCommands = extractDreaminaCommands(commandSource.content)
+  if (!rawCommands.length) {
+    throw new Error('video-command.md does not contain a dreamina generation command')
+  }
+  const commands = rawCommands.map((command) => normalizeDreaminaVideoCommand(command, outputDir))
+  return {
+    commands,
+    outputDir,
+    finalOutputPath: extractFinalVideoOutputPath(commandSource.content, outputDir),
+  }
+}
+
+function findVideoCommandSource(session: Session): { filePath?: string; content: string } | undefined {
+  const contextFile = session.context?.files?.find((file) => /video-command\.md/i.test(file.path))
+  const contextPath = contextFile ? extractAbsolutePath(contextFile.path) : undefined
+  if (contextPath && fs.existsSync(contextPath) && fs.statSync(contextPath).isFile()) {
+    return { filePath: contextPath, content: fs.readFileSync(contextPath, 'utf-8') }
+  }
+  if (contextFile?.content) return { filePath: contextPath, content: contextFile.content }
+
+  const messages = state.getMessages(session.id).map((message) => message.content).join('\n\n')
+  const outputPath = extractExistingOutputFile(messages, 'video-command.md', session.cwd, session.createdAt)
+  if (outputPath) return { filePath: outputPath, content: fs.readFileSync(outputPath, 'utf-8') }
+  return undefined
+}
+
+function extractDreaminaCommands(content: string): string[] {
+  const normalized = content.replace(/\\\r?\n\s*/g, ' ')
+  const commands: string[] = []
+  const pattern = /(?:^|\n)\s*((?:dreamina|\/[^\s`"'<>]*dreamina)\s+(?:image2video|multiframe2video|multimodal2video|text2video|video)\b[^\n`]*)/gi
+  for (const match of normalized.matchAll(pattern)) {
+    if (match[1]) commands.push(match[1].trim())
+  }
+  return commands
+}
+
+function normalizeDreaminaVideoCommand(command: string, outputDir: string): DreaminaVideoCommand {
+  const argv = parseShellWords(command)
+  if (argv.length < 2 || path.basename(argv[0]) !== 'dreamina') {
+    throw new Error(`Unsupported Dreamina command: ${command}`)
+  }
+  const subcommand = argv[1]
+  const flags = parseFlags(argv.slice(2))
+  if (subcommand === 'video') return normalizeLegacyDreaminaVideoFlags(flags, outputDir)
+  if (!['image2video', 'multiframe2video', 'multimodal2video', 'text2video'].includes(subcommand)) {
+    throw new Error(`Unsupported Dreamina video subcommand: ${subcommand}`)
+  }
+
+  const args = [subcommand]
+  let outputPath: string | undefined
+  for (const flag of flags) {
+    if (flag.name === 'output') {
+      outputPath = resolveMaybePath(flag.value, outputDir)
+      continue
+    }
+    args.push(formatFlag(flag, outputDir))
+  }
+  ensurePollDisabled(args)
+  return { args, downloadDir: outputPath ? path.dirname(outputPath) : outputDir }
+}
+
+function normalizeLegacyDreaminaVideoFlags(flags: ParsedFlag[], outputDir: string): DreaminaVideoCommand {
+  const args = ['multimodal2video']
+  const images: string[] = []
+  let outputPath: string | undefined
+  for (const flag of flags) {
+    if ((flag.name === 'image' || flag.name === 'reference') && flag.value) {
+      images.push(resolveMaybePath(flag.value, outputDir))
+      continue
+    }
+    if (flag.name === 'output') {
+      outputPath = resolveMaybePath(flag.value, outputDir)
+      continue
+    }
+    if (['prompt', 'duration', 'ratio', 'session', 'model_version', 'video_resolution'].includes(flag.name)) {
+      args.push(`--${flag.name}`, flag.value ?? '')
+    }
+  }
+  for (const image of images) args.push('--image', image)
+  ensurePollDisabled(args)
+  return { args, downloadDir: outputPath ? path.dirname(outputPath) : outputDir }
+}
+
+type ParsedFlag = {
+  name: string
+  value?: string
+}
+
+function parseFlags(tokens: string[]): ParsedFlag[] {
+  const flags: ParsedFlag[] = []
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i]
+    if (!token.startsWith('--')) continue
+    const eq = token.indexOf('=')
+    if (eq !== -1) {
+      flags.push({ name: token.slice(2, eq), value: token.slice(eq + 1) })
+      continue
+    }
+    const next = tokens[i + 1]
+    if (next && !next.startsWith('--')) {
+      flags.push({ name: token.slice(2), value: next })
+      i += 1
+    } else {
+      flags.push({ name: token.slice(2) })
+    }
+  }
+  return flags
+}
+
+function formatFlag(flag: ParsedFlag, baseDir: string): string {
+  const valuePathFlags = new Set(['image', 'images', 'video', 'audio'])
+  if (flag.value === undefined) return `--${flag.name}`
+  const value = valuePathFlags.has(flag.name) ? resolveMaybePath(flag.value, baseDir) : flag.value
+  return `--${flag.name}=${value}`
+}
+
+function ensurePollDisabled(args: string[]): void {
+  if (!args.some((arg) => arg === '--poll' || arg.startsWith('--poll='))) args.push('--poll=0')
+}
+
+function extractFinalVideoOutputPath(content: string, baseDir: string): string | undefined {
+  const refs = Array.from(content.matchAll(/((?:\/|\.{1,2}\/)[^`\s"'<>，。；：、)）]+\.mp4)/gi)).map((match) => match[1])
+  const finalRef = [...refs].reverse().find((ref) => /final|draft|成片|最终/i.test(ref)) ?? refs.at(-1)
+  return finalRef ? resolveMaybePath(finalRef, baseDir) : undefined
+}
+
+function resolveMaybePath(value: string | undefined, baseDir: string): string {
+  if (!value) return ''
+  if (value.includes(',') && !value.includes('/,')) {
+    return value.split(',').map((part) => resolveMaybePath(part.trim(), baseDir)).join(',')
+  }
+  return path.isAbsolute(value) ? path.resolve(value) : path.resolve(baseDir, value)
+}
+
+function extractAbsolutePath(value: string): string | undefined {
+  const match = value.match(/(\/[^\n\r]+)$/)
+  return match?.[1]?.trim()
+}
+
+function parseDreaminaSubmitId(stdout: string): string | undefined {
+  return stdout.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0]
+}
+
+function parseShellWords(input: string): string[] {
+  const words: string[] = []
+  let current = ''
+  let quote: '"' | "'" | undefined
+  let escaped = false
+  for (const char of input) {
+    if (escaped) {
+      current += char
+      escaped = false
+      continue
+    }
+    if (char === '\\' && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote) {
+      if (char === quote) quote = undefined
+      else current += char
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        words.push(current)
+        current = ''
+      }
+      continue
+    }
+    current += char
+  }
+  if (current) words.push(current)
+  return words
+}
+
+function shellQuote(value: string): string {
+  if (/^[\w./:=,-]+$/.test(value)) return value
+  return `'${value.replace(/'/g, "'\\''")}'`
 }
 
 export function detectHumanInputWait(content: string): boolean {
@@ -1447,6 +2024,32 @@ async function queryDreaminaResult(externalId: string, downloadDir: string): Pro
   return { status: 'querying' }
 }
 
+async function submitDreaminaCommand(args: string[], cwd?: string): Promise<string> {
+  return execFileText(DREAMINA_COMMAND, args, 5 * 60_000, cwd)
+}
+
+async function concatVideos(inputVideos: string[], destination: string): Promise<void> {
+  fs.mkdirSync(path.dirname(destination), { recursive: true })
+  const listPath = path.join(path.dirname(destination), `.concat-${Date.now()}.txt`)
+  const listContent = inputVideos
+    .map((filePath) => `file '${filePath.replace(/'/g, "'\\''")}'`)
+    .join('\n')
+  fs.writeFileSync(listPath, listContent)
+  try {
+    await execFileText(FFMPEG_COMMAND, [
+      '-y',
+      '-f', 'concat',
+      '-safe', '0',
+      '-i', listPath,
+      '-c', 'copy',
+      destination,
+    ], 20 * 60_000)
+    await execFileText(FFMPEG_COMMAND, ['-v', 'error', '-i', destination, '-f', 'null', '-'], 5 * 60_000)
+  } finally {
+    fs.rmSync(listPath, { force: true })
+  }
+}
+
 async function downloadAndValidateVideo(url: string, destination: string): Promise<void> {
   const partial = `${destination}.part`
   await execFileText(CURL_COMMAND, [
@@ -1467,9 +2070,9 @@ async function downloadAndValidateVideo(url: string, destination: string): Promi
   fs.renameSync(partial, destination)
 }
 
-function execFileText(command: string, args: string[], timeout = 60_000): Promise<string> {
+function execFileText(command: string, args: string[], timeout = 60_000, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(command, args, { timeout, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(command, args, { timeout, maxBuffer: 10 * 1024 * 1024, cwd }, (err, stdout, stderr) => {
       if (err) {
         reject(new Error((stderr || err.message).trim()))
         return
@@ -1499,6 +2102,22 @@ function extractChangedFiles(diff: string): string[] {
     seen.add(filePath)
   }
   return Array.from(seen)
+}
+
+function extractReferencedTextFiles(content: string, cwd: string): string[] {
+  const matches = new Set<string>()
+  const patterns = [
+    /`([^`\n]+\.(?:md|txt|json|ya?ml|csv|tsv))`/gi,
+    /(^|[\s("'（])((?:\/|\.{0,2}\/)[^\s`'"<>，。；：、)）]+\.(?:md|txt|json|ya?ml|csv|tsv))(?=$|[\s`'"<>，。；：、)）])/gim,
+  ]
+  for (const pattern of patterns) {
+    for (const match of content.matchAll(pattern)) {
+      const candidate = (match[2] ?? match[1] ?? '').trim()
+      if (!candidate || /^https?:\/\//i.test(candidate)) continue
+      matches.add(path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(cwd, candidate))
+    }
+  }
+  return [...matches]
 }
 
 function truncateText(text: string, limit: number): string {
@@ -1580,6 +2199,35 @@ function readLastAgentOutput(error: unknown): string | undefined {
 
 function adapterCanUseTools(adapter: Adapter | undefined): boolean {
   return adapter?.capabilities?.tools ?? true
+}
+
+export function detectAgentAssistanceRequest(content: string): string | undefined {
+  const structured = content.match(/\[ASSIST_REQUEST\]([\s\S]*?)\[\/ASSIST_REQUEST\]/i)?.[1]?.trim()
+  if (structured) return structured
+
+  const text = String(content || '').trim()
+  if (!text) return undefined
+  const cannotAccess = /(?:无法|不能|不具备|没有权限).{0,24}(?:读取|访问|联网|搜索|浏览|执行|运行|写入|创建|验证|查看)/i
+  const asksPlanner = /(?:请|需要|麻烦).{0,20}(?:codex|planner|规划者|上游).{0,20}(?:提供|读取|搜索|查找|执行|写入|创建|验证|协助)/i
+  const english = /(?:cannot|can't|unable to).{0,30}(?:read|access|browse|search|run|execute|write|create|verify).{0,50}(?:codex|planner|you)/i
+  if (!cannotAccess.test(text) && !asksPlanner.test(text) && !english.test(text)) return undefined
+  return text
+}
+
+function buildPlannerAssistanceDirective(content: string, request: string): string {
+  return [
+    '[TURING_ASSISTANCE_REQUIRED]',
+    '执行 Agent 因能力限制无法继续。你必须立即使用自己的工具完成所需的读取、搜索、执行、写入或验证。',
+    '完成后把具体资料、命令结果或已验证文件路径回复给执行 Agent，让它继续原任务。',
+    '不要把问题转交给用户，也不要只给操作建议。',
+    '',
+    '请求内容：',
+    request,
+    '[/TURING_ASSISTANCE_REQUIRED]',
+    '',
+    '执行 Agent 原始回复：',
+    content,
+  ].join('\n')
 }
 
 function parseStreamStep(output: string): StreamStep | undefined {
@@ -1737,6 +2385,112 @@ function isCompletionLikeMessage(content: string): boolean {
     !blockingSignals.some((pattern) => pattern.test(normalized))
 }
 
+function validateWorkflowStepOutput(title: string, content: string, cwd?: string, contract?: WorkflowStepContract, createdAt?: number): boolean {
+  if (contract?.outputs?.length) {
+    return contract.outputs.every((output) => {
+      const outputPath = extractExistingOutputFile(content, output.fileName, cwd, createdAt)
+      if (!outputPath) return false
+      if (!output.requiredSections?.length) return true
+      try {
+        const fileContent = fs.readFileSync(outputPath, 'utf-8')
+        return output.requiredSections.every((section) => fileContent.includes(section))
+      } catch {
+        return false
+      }
+    })
+  }
+
+  const normalizedTitle = title.trim()
+  if (!normalizedTitle) return true
+
+  if (/改编文案/.test(normalizedTitle)) {
+    const outputPath = extractExistingOutputFile(content, 'script-adapted.md', cwd)
+    if (!outputPath) return false
+    try {
+      const fileContent = fs.readFileSync(outputPath, 'utf-8')
+      return /改编文案/.test(fileContent) && /改编说明/.test(fileContent) && /自检/.test(fileContent)
+    } catch {
+      return false
+    }
+  }
+
+  if (/生成分镜与 Prompt|生成分镜脚本/.test(normalizedTitle)) {
+    return /reference\.md/.test(content) && /script\.md/.test(content) && /prompt\.txt/.test(content)
+  }
+
+  if (/生成视觉资产/.test(normalizedTitle)) {
+    return /\.(png|jpe?g|webp)/i.test(content) && /storyboard|分镜/i.test(content) && /character|角色|三视图/i.test(content)
+  }
+
+  if (/生成分镜图/.test(normalizedTitle)) {
+    return /\.(png|jpe?g|webp)/i.test(content) && /storyboard|分镜/i.test(content)
+  }
+
+  if (/生成角色三视图/.test(normalizedTitle)) {
+    return /\.(png|jpe?g|webp)/i.test(content) && /character|角色|三视图/i.test(content)
+  }
+
+  if (/准备视频生成命令/.test(normalizedTitle)) {
+    return /本步未执行生成命令/.test(content) && /命令|command/i.test(content)
+  }
+
+  if (/执行视频生成/.test(normalizedTitle)) {
+    return /\.(mp4|mov|webm)/i.test(content)
+  }
+
+  if (/成片审核|最终保存/.test(normalizedTitle)) {
+    return /最终/.test(content) && /\.(mp4|mov|webm)/i.test(content)
+  }
+
+  return true
+}
+
+function extractExistingOutputFile(content: string, fileName: string, cwd?: string, createdAt?: number): string | undefined {
+  const escapedName = fileName.startsWith('*.')
+    ? `[^\\s\\x60"'<>，。；：、)）]*${fileName.slice(1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`
+    : fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(`(?:\\x60|["'])([^\\x60"'\\n]*${escapedName})(?:\\x60|["'])|((?:\\/|\\.{0,2}\\/)[^\\s\\x60"'<>，。；：、)）]*${escapedName})`, 'gi')
+  for (const match of content.matchAll(pattern)) {
+    const candidate = (match[1] ?? match[2] ?? '').trim()
+    if (!candidate) continue
+    const resolved = path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(cwd ?? process.cwd(), candidate)
+    try {
+      if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) return resolved
+    } catch {
+      // Ignore invalid candidates.
+    }
+  }
+  if (!cwd) return undefined
+  const matches: Array<{ filePath: string; mtimeMs: number }> = []
+  const wildcardExt = fileName.startsWith('*.') ? fileName.slice(1).toLowerCase() : undefined
+  const visit = (dir: string, depth: number) => {
+    if (depth > 6 || matches.length > 100) return
+    let entries: fs.Dirent[]
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      if (entry.name === 'node_modules' || entry.name === '.git' || entry.name.startsWith('.venv')) continue
+      const candidate = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        visit(candidate, depth + 1)
+        continue
+      }
+      if (!entry.isFile()) continue
+      const nameMatches = wildcardExt ? entry.name.toLowerCase().endsWith(wildcardExt) : entry.name === fileName
+      if (!nameMatches) continue
+      try {
+        const mtimeMs = fs.statSync(candidate).mtimeMs
+        if (createdAt && mtimeMs + 1000 < createdAt) continue
+        matches.push({ filePath: candidate, mtimeMs })
+      } catch {
+        // Ignore files that disappear during discovery.
+      }
+    }
+  }
+  visit(path.resolve(cwd), 0)
+  matches.sort((a, b) => b.mtimeMs - a.mtimeMs)
+  return matches[0]?.filePath
+}
+
 function summarizeCompletedRounds(session: Session, messages: Message[], failedRound: number): string {
   return messages
     .filter((msg) => msg.round > 0 && msg.round < failedRound)
@@ -1749,6 +2503,26 @@ function summarizeCompletedRounds(session: Session, messages: Message[], failedR
       return `Round ${msg.round} ${sender}: ${truncate(msg.content, 500)}`
     })
     .join('\n')
+}
+
+function formatManualPipelineOutput(output?: string): string {
+  const trimmed = output?.trim()
+  return [
+    '[RESULT] 本步骤已由人工确认完成，工作流从后续步骤继续。',
+    trimmed ? `\n人工补充：\n${trimmed}` : '',
+    '[/RESULT]',
+  ].join('\n')
+}
+
+function sessionOutputDirectory(session: Session): string | undefined {
+  const sources = [session.context?.rules, session.context?.text].filter((value): value is string => Boolean(value))
+  for (const source of sources) {
+    const tagged = source.match(/\[\[Turing Output Directory\]\]\s*Save this step's durable outputs under:\s*(.+?)\s*\[\[End Turing Output Directory\]\]/s)
+    if (tagged?.[1]?.trim()) return tagged[1].trim()
+    const fixed = source.match(/输出目录固定为\s*(.+?)(?:。|\n|$)/)
+    if (fixed?.[1]?.trim()) return fixed[1].trim()
+  }
+  return undefined
 }
 
 function truncate(value: string, maxLength: number): string {
@@ -1774,6 +2548,8 @@ async function buildSessionArtifacts(session: Session): Promise<SessionArtifacts
   const artifacts: SessionArtifacts = {
     summary: extractSessionSummary(session.id),
   }
+  const generatedFiles = collectSessionGeneratedFiles(session)
+  if (generatedFiles.length) artifacts.generatedFiles = generatedFiles
 
   if (!session.cwd || !session.gitSnapshot) return artifacts
 
@@ -1790,6 +2566,93 @@ async function buildSessionArtifacts(session: Session): Promise<SessionArtifacts
   }
 
   return artifacts
+}
+
+function collectSessionGeneratedFiles(session: Session): string[] {
+  const messages = state.getMessages(session.id)
+  const lastHumanTimestamp = Math.max(0, ...messages
+    .filter((message) => message.from === 'human')
+    .map((message) => Number(message.timestamp) || 0))
+  const outputs = messages
+    .filter((message) => message.from !== 'human' && (Number(message.timestamp) || 0) >= lastHumanTimestamp)
+    .map((message) => message.content)
+    .join('\n\n')
+  const generated = new Set<string>()
+  const add = (filePath?: string) => {
+    if (!filePath) return
+    try {
+      const resolved = path.resolve(filePath)
+      if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) generated.add(resolved)
+    } catch {
+      // Ignore paths that are not readable at completion time.
+    }
+  }
+
+  for (const ref of extractArtifactFileRefs(outputs)) {
+    add(resolveArtifactFileRef(ref, session.cwd))
+  }
+  for (const message of messages) {
+    if (message.from === 'human') continue
+    for (const filePath of message.metadata?.filesModified ?? []) {
+      add(path.isAbsolute(filePath) ? filePath : path.resolve(session.cwd ?? process.cwd(), filePath))
+    }
+  }
+
+  const step = state.getPipelineBySession(session.id)?.sessions.find((item) => item.sessionId === session.id)
+  for (const output of step?.contract?.outputs ?? []) {
+    add(extractExistingOutputFile(outputs, output.fileName, session.cwd, session.createdAt))
+  }
+
+  return [...generated].sort()
+}
+
+function extractArtifactFileRefs(content: string): string[] {
+  const files = new Set<string>()
+  const extensions = 'md|txt|log|json|yaml|yml|csv|tsv|png|jpe?g|webp|gif|svg|mp4|mov|webm|wav|mp3|m4a|aac|flac|pdf|docx|xlsx|pptx|zip'
+  const fileExtensionPattern = new RegExp(`\\.(${extensions})$`, 'i')
+  const patterns = [
+    new RegExp('`([^`]+\\.(' + extensions + '))`', 'gi'),
+    new RegExp('(^|[\\s(（"\\\',])(/[^\\s`\'"<>，。；：、)）,=\\\\]+?\\.(' + extensions + '))(?=$|[\\s`\'"<>，。；：、)）,=\\\\])', 'gim'),
+    new RegExp('(^|[\\s(（"\\\'])([\\w.\\-/\\u4e00-\\u9fa5]+/[^\\s`\'"<>，。；：、)）]+\\.(' + extensions + '))(?=$|[\\s`\'"<>，。；：、)）])', 'gim'),
+  ]
+  for (const pattern of patterns) {
+    for (const match of content.matchAll(pattern)) {
+      const file = match.slice(1).map((value) => (value || '').trim()).find((value) => fileExtensionPattern.test(value))
+      if (file && !/^https?:\/\//i.test(file)) files.add(file)
+    }
+  }
+  const directories: string[] = []
+  for (const match of content.matchAll(/(?:目录|路径|文件夹|输出目录|保存目录)\s*[：:]\s*`?([^`\n]+\/)`?/gi)) {
+    const dir = String(match[1] || '').trim()
+    if (dir && !/^https?:\/\//i.test(dir)) directories.push(dir)
+  }
+  for (const dir of directories) {
+    for (const file of [...files]) {
+      if (!file.includes('/') && fileExtensionPattern.test(file)) files.add(`${dir}${file}`)
+    }
+  }
+  return [...files]
+}
+
+function resolveArtifactFileRef(filePath: string, cwd?: string): string | undefined {
+  const baseDir = cwd ? path.resolve(cwd) : process.cwd()
+  const candidate = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath)
+  try {
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
+function resolveManualArtifactPath(filePath: string, cwd?: string): string {
+  const trimmed = filePath.trim()
+  if (!trimmed) throw new Error('Artifact path is empty')
+  const baseDir = cwd ? path.resolve(cwd) : process.cwd()
+  const resolved = path.isAbsolute(trimmed) ? path.resolve(trimmed) : path.resolve(baseDir, trimmed)
+  if (!fs.existsSync(resolved)) throw new Error(`Artifact not found: ${resolved}`)
+  if (!fs.statSync(resolved).isFile()) throw new Error(`Artifact is not a file: ${resolved}`)
+  return resolved
 }
 
 function extractSessionSummary(sessionId: string): string {

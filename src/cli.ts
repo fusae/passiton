@@ -245,7 +245,7 @@ async function serverStart() {
   console.log(`Starting Turing server at ${BASE} ...`)
   const { initDb } = await import('./state.js')
   const { Router } = await import('./router.js')
-  const { registerConfiguredAdapters } = await import('./adapters/factory.js')
+  const { registerBuiltinAdapters, registerConfiguredAdapters } = await import('./adapters/factory.js')
   const { createServer, registerPersistedUserAgents } = await import('./server.js')
   const { installGracefulShutdown } = await import('./shutdown.js')
 
@@ -254,6 +254,7 @@ async function serverStart() {
   const agentCatalog = new AgentCatalog(config.agents, true)
   await agentCatalog.discover()
   registerConfiguredAdapters(router, config.agents)
+  registerBuiltinAdapters(router)
   registerPersistedUserAgents(router)
   router.recoverTasks()
 

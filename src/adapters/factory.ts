@@ -7,6 +7,7 @@ import { OpenCodeAdapter } from './opencode.js'
 import { AnthropicApiAdapter } from './api/anthropic.js'
 import { OpenAIApiAdapter } from './api/openai.js'
 import { ZhipuApiAdapter } from './api/zhipu.js'
+import { GeminiImageAdapter } from './gemini-image.js'
 
 const DISCOVERED_DEFAULTS: Record<string, Omit<AgentConfig, 'command'>> = {
   codex: {
@@ -123,6 +124,10 @@ export function registerConfiguredAdapters(
     ;(adapter as { name: string }).name = name
     router.registerAdapter(adapter)
   }
+}
+
+export function registerBuiltinAdapters(router: Router): void {
+  router.registerAdapter(new GeminiImageAdapter())
 }
 
 export function registerUserConfiguredAdapters(

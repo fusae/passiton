@@ -8,7 +8,7 @@ import { fileURLToPath } from 'url'
 import { WebSocketServer } from 'ws'
 import type { WebSocket } from 'ws'
 import type { AgentCatalog } from './agents.js'
-import { createAdapter, createDiscoveredAgentConfig, registerConfiguredAdapters, registerUserConfiguredAdapters } from './adapters/factory.js'
+import { createAdapter, createDiscoveredAgentConfig, registerBuiltinAdapters, registerConfiguredAdapters, registerUserConfiguredAdapters } from './adapters/factory.js'
 import {
   AuthError,
   authCookie,
@@ -25,7 +25,7 @@ import { activeAgents, getConfigPath, loadConfig, writeConfig } from './config.j
 import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, PipelineTemplateRecord, AgentRef, Session, SessionMode, SessionContext, SessionContextInput, TaskStatus, WsEvent } from './types.js'
+import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, PipelineTemplateRecord, AgentRef, Session, SessionMode, SessionContext, SessionContextInput, TaskStatus, WsEvent, WorkflowNodeType } from './types.js'
 import { pipelineTemplates, templates } from './templates.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -370,6 +370,7 @@ async function reloadAgents(router: Router, agentCatalog: AgentCatalog, config: 
   agentCatalog.setConfiguredAgents(agents)
   await agentCatalog.discover()
   registerConfiguredAdapters(router, agents)
+  registerBuiltinAdapters(router)
 }
 
 function decryptUserAgentKey(record: state.UserAgentRecord): string | undefined {
@@ -722,6 +723,22 @@ function parseSessionBody(body: unknown) {
   }
 }
 
+function parseManualArtifactsBody(body: unknown): { paths: string[]; summary?: string } {
+  const data = requireRecord(body, 'body')
+  const rawPaths = data.paths ?? data.path
+  const paths = Array.isArray(rawPaths)
+    ? rawPaths
+    : typeof rawPaths === 'string'
+      ? rawPaths.split(/\r?\n|,/)
+      : []
+  const cleaned = paths.map((item) => String(item).trim()).filter(Boolean)
+  if (cleaned.length === 0) throw new HttpError(400, '"paths" must include at least one file path')
+  return {
+    paths: cleaned,
+    summary: optionalString(data.summary, 'summary'),
+  }
+}
+
 function parseTaskBody(body: unknown) {
   const data = requireRecord(body, 'body')
   return {
@@ -741,6 +758,15 @@ function parseFilePreviewBody(body: unknown): { path: string; cwd?: string } {
   }
 }
 
+function parseFileResolveBody(body: unknown): { paths: string[]; cwd?: string; baseFile?: string } {
+  const data = requireRecord(body, 'body')
+  return {
+    paths: optionalStringArray(data.paths, 'paths') ?? [],
+    cwd: optionalString(data.cwd, 'cwd'),
+    baseFile: optionalString(data.baseFile, 'baseFile'),
+  }
+}
+
 function previewMimeType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase()
   switch (ext) {
@@ -753,6 +779,11 @@ function previewMimeType(filePath: string): string {
     case '.mp4': return 'video/mp4'
     case '.mov': return 'video/quicktime'
     case '.webm': return 'video/webm'
+    case '.wav': return 'audio/wav'
+    case '.mp3': return 'audio/mpeg'
+    case '.m4a': return 'audio/mp4'
+    case '.aac': return 'audio/aac'
+    case '.flac': return 'audio/flac'
     case '.md': return 'text/markdown; charset=utf-8'
     case '.json': return 'application/json; charset=utf-8'
     case '.yaml':
@@ -769,6 +800,47 @@ function resolvePreviewFile(filePath: string, cwd?: string): string {
   if (!fs.existsSync(resolved)) throw new HttpError(404, 'File not found')
   if (!fs.statSync(resolved).isFile()) throw new HttpError(400, '"path" must be a file')
   return resolved
+}
+
+function resolveWorkflowFile(filePath: string, cwd?: string, baseFile?: string): string | undefined {
+  const baseDir = cwd ? path.resolve(cwd) : process.cwd()
+  const candidates = new Set<string>()
+  if (path.isAbsolute(filePath)) {
+    candidates.add(path.resolve(filePath))
+  } else {
+    if (baseFile) {
+      const resolvedBaseFile = path.isAbsolute(baseFile)
+        ? path.resolve(baseFile)
+        : path.resolve(baseDir, baseFile)
+      candidates.add(path.resolve(path.dirname(resolvedBaseFile), filePath))
+    }
+    candidates.add(path.resolve(baseDir, filePath))
+  }
+
+  for (const candidate of candidates) {
+    try {
+      assertAllowedWorkspace(candidate, 'path')
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate
+    } catch {
+      // Try the remaining candidates.
+    }
+  }
+
+  if (filePath.includes(path.sep) || filePath.includes('/')) return undefined
+  const matches: string[] = []
+  const visit = (dir: string, depth: number) => {
+    if (depth > 6 || matches.length > 1) return
+    let entries: fs.Dirent[]
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const entry of entries) {
+      if (matches.length > 1) return
+      const candidate = path.join(dir, entry.name)
+      if (entry.isDirectory()) visit(candidate, depth + 1)
+      else if (entry.isFile() && entry.name === filePath) matches.push(candidate)
+    }
+  }
+  visit(baseDir, 0)
+  return matches.length === 1 ? matches[0] : undefined
 }
 
 function streamPreviewFile(req: http.IncomingMessage, res: http.ServerResponse, filePath: string): void {
@@ -908,10 +980,18 @@ function parsePipelineSteps(stepsValue: unknown) {
       })
     }
 
+    const agent = step.agent !== undefined ? parseAgentRef(step.agent, `steps[${index}].agent`) : undefined
+    const nodeType = parseWorkflowNodeType(step.nodeType, `steps[${index}].nodeType`)
+    const effectiveAgent = workflowAgentForNode(nodeType, agent)
+    const explicitFrom = step.from !== undefined ? parseAgentRef(step.from, `steps[${index}].from`) : undefined
+    const contract = step.contract === undefined ? undefined : parseWorkflowStepContract(step.contract, `steps[${index}].contract`)
     return {
       title: optionalString(step.title, `steps[${index}].title`),
-      from: parseAgentRef(step.from, `steps[${index}].from`),
-      to: parseAgentRef(step.to, `steps[${index}].to`),
+      nodeType,
+      agent: effectiveAgent,
+      contract,
+      from: explicitFrom ?? effectiveAgent!,
+      to: effectiveAgent ?? parseAgentRef(step.to, `steps[${index}].to`),
       initialPrompt: requireNonEmptyString(step.initialPrompt, `steps[${index}].initialPrompt`),
       mode: parseSessionMode(step.mode),
       context: parseSessionContext(step.context, `steps[${index}].context`),
@@ -920,17 +1000,63 @@ function parsePipelineSteps(stepsValue: unknown) {
       permissionMode: parsePermissionMode(step.permissionMode, `steps[${index}].permissionMode`),
       cwd: optionalString(step.cwd, `steps[${index}].cwd`),
       outputDir: optionalString(step.outputDir, `steps[${index}].outputDir`),
+      manualDone: optionalBoolean(step.manualDone, `steps[${index}].manualDone`),
+      manualOutput: optionalString(step.manualOutput, `steps[${index}].manualOutput`),
       dependsOn,
     }
   })
 }
 
+function workflowAgentForNode(nodeType: WorkflowNodeType | undefined, requested: AgentRef | undefined): AgentRef | undefined {
+  if (nodeType === 'image_generate' && !requested) return { adapter: 'codex', label: 'Codex' }
+  return requested
+}
+
+function parseWorkflowNodeType(value: unknown, field: string): WorkflowNodeType | undefined {
+  const nodeType = optionalString(value, field)
+  if (nodeType === undefined) return undefined
+  const allowed: WorkflowNodeType[] = ['video_parse', 'copy_adapt', 'storyboard_script', 'image_generate', 'video_command', 'video_generate', 'human_review', 'custom']
+  if (!allowed.includes(nodeType as WorkflowNodeType)) throw new HttpError(400, `"${field}" is invalid`)
+  return nodeType as WorkflowNodeType
+}
+
+function parseWorkflowStepContract(value: unknown, field: string) {
+  const data = requireRecord(value, field)
+  const inputs = optionalStringArray(data.inputs, `${field}.inputs`)
+  let outputs: Array<{ fileName: string; requiredSections?: string[] }> | undefined
+  if (data.outputs !== undefined) {
+    if (!Array.isArray(data.outputs)) throw new HttpError(400, `"${field}.outputs" must be an array`)
+    outputs = data.outputs.map((item, index) => {
+      const output = requireRecord(item, `${field}.outputs[${index}]`)
+      return {
+        fileName: requireNonEmptyString(output.fileName, `${field}.outputs[${index}].fileName`),
+        requiredSections: optionalStringArray(output.requiredSections, `${field}.outputs[${index}].requiredSections`),
+      }
+    })
+  }
+  return {
+    ...(inputs?.length ? { inputs } : {}),
+    ...(outputs?.length ? { outputs } : {}),
+  }
+}
+
 function parsePipelineBody(body: unknown) {
   const data = requireRecord(body, 'body')
+  const startAtStep = optionalPositiveInt(data.startAtStep, 'startAtStep')
+  const manualOutput = optionalString(data.manualOutput, 'manualOutput')
+  const steps = parsePipelineSteps(data.steps)
+
+  if (startAtStep !== undefined && startAtStep > steps.length) {
+    throw new HttpError(400, '"startAtStep" must point to an existing step')
+  }
 
   return {
     name: requireNonEmptyString(data.name, 'name'),
-    steps: parsePipelineSteps(data.steps),
+    steps: steps.map((step, index) => (
+      startAtStep !== undefined && index < startAtStep - 1
+        ? { ...step, manualDone: true, manualOutput: step.manualOutput ?? manualOutput }
+        : step
+    )),
   }
 }
 
@@ -950,6 +1076,9 @@ function builtInPipelineTemplateRecords(): PipelineTemplateRecord[] {
     description: template.description,
     steps: template.steps.map((step) => ({
       title: step.title,
+      nodeType: step.nodeType,
+      agent: step.agent,
+      contract: step.contract,
       from: step.from,
       to: step.to,
       initialPrompt: step.initialPrompt,
@@ -961,6 +1090,8 @@ function builtInPipelineTemplateRecords(): PipelineTemplateRecord[] {
       cwd: step.cwd,
       outputDir: step.outputDir,
       context: step.context,
+      manualDone: step.manualDone,
+      manualOutput: step.manualOutput,
     })),
     source: 'builtin',
     createdAt: 0,
@@ -1254,6 +1385,20 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return streamPreviewFile(req, res, filePath)
       }
 
+      // POST /api/files/resolve
+      if (pathname === '/api/files/resolve' && method === 'POST') {
+        const body = parseFileResolveBody(await parseBody(req))
+        assertAllowedWorkspace(body.cwd, 'cwd')
+        return json(res, 200, body.paths.map((source) => {
+          const resolved = resolveWorkflowFile(source, body.cwd, body.baseFile)
+          return {
+            source,
+            exists: Boolean(resolved),
+            ...(resolved ? { path: resolved } : {}),
+          }
+        }))
+      }
+
       // POST /api/files/preview
       if (pathname === '/api/files/preview' && method === 'POST') {
         const body = parseFilePreviewBody(await parseBody(req))
@@ -1262,9 +1407,10 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const mimeType = previewMimeType(filePath)
         const isImage = mimeType.startsWith('image/')
         const isVideo = mimeType.startsWith('video/')
+        const isAudio = mimeType.startsWith('audio/')
         const maxPreviewSize = isImage ? MAX_IMAGE_FILE_PREVIEW_SIZE : MAX_FILE_PREVIEW_SIZE
-        if (!isVideo && stat.size > maxPreviewSize) throw new HttpError(413, `File too large to preview (max ${maxPreviewSize} bytes)`)
-        const content = isVideo
+        if (!isVideo && !isAudio && stat.size > maxPreviewSize) throw new HttpError(413, `File too large to preview (max ${maxPreviewSize} bytes)`)
+        const content = isVideo || isAudio
           ? undefined
           : isImage
           ? fs.readFileSync(filePath).toString('base64')
@@ -1275,8 +1421,8 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           size: stat.size,
           mtime: stat.mtimeMs,
           mimeType,
-          encoding: isVideo ? 'stream' : isImage ? 'base64' : 'utf-8',
-          ...(isVideo ? { streamUrl: `/api/files/content?path=${encodeURIComponent(filePath)}` } : {}),
+          encoding: isVideo || isAudio ? 'stream' : isImage ? 'base64' : 'utf-8',
+          ...(isVideo || isAudio ? { streamUrl: `/api/files/content?path=${encodeURIComponent(filePath)}` } : {}),
           content,
         })
       }
@@ -1515,11 +1661,26 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return json(res, 200, session)
       }
 
+      // POST /api/sessions/:id/rerun
+      const rerunMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/rerun$/)
+      if (rerunMatch && method === 'POST') {
+        if (!state.getSession(rerunMatch[1], authUser!.userId)) return json(res, 404, { error: 'Not found' })
+        return json(res, 200, await router.rerunPipelineStep(rerunMatch[1]))
+      }
+
       // POST /api/sessions/:id/confirm
       const confirmMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/confirm$/)
       if (confirmMatch && method === 'POST') {
         if (!state.getSession(confirmMatch[1], authUser!.userId)) return json(res, 404, { error: 'Not found' })
         return json(res, 200, await router.confirmSession(confirmMatch[1]))
+      }
+
+      // POST /api/sessions/:id/manual-artifacts
+      const manualArtifactsMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/manual-artifacts$/)
+      if (manualArtifactsMatch && method === 'POST') {
+        if (!state.getSession(manualArtifactsMatch[1], authUser!.userId)) return json(res, 404, { error: 'Not found' })
+        const body = parseManualArtifactsBody(await parseBody(req))
+        return json(res, 200, await router.completeSessionWithManualArtifacts(manualArtifactsMatch[1], body.paths, body.summary))
       }
 
       // POST /api/sessions/:id/extend-timeout

@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Router, detectDreaminaSubmittedJob, detectHumanInputWait } from '../router.js'
+import { Router, detectAgentAssistanceRequest, detectDreaminaSubmittedJob, detectHumanInputWait } from '../router.js'
 import * as state from '../state.js'
 import type { Adapter, AdapterCapabilities, AdapterSendOpts, Session } from '../types.js'
 
@@ -94,6 +94,48 @@ test('local planner with API-looking name does not get API-only warning', async 
   })
 })
 
+test('detects structured and natural-language executor assistance requests', () => {
+  assert.match(
+    detectAgentAssistanceRequest('[ASSIST_REQUEST]\naction: read_file\ntarget: /tmp/a.md\n[/ASSIST_REQUEST]') ?? '',
+    /read_file/
+  )
+  assert.match(
+    detectAgentAssistanceRequest('无法直接读取文件。请 codex 提供具体文案，以便继续改编。') ?? '',
+    /无法直接读取文件/
+  )
+  assert.equal(detectAgentAssistanceRequest('文案已经完成，等待人工审阅。'), undefined)
+})
+
+test('routes executor capability blockers to the planner as mandatory assistance', async () => {
+  await withTempDb(async () => {
+    const plannerMessages: string[] = []
+    const router = new Router()
+    router.registerAdapter(new StubAdapter(
+      'deepseek',
+      async () => '无法直接读取文件。请 codex 提供原始文案，以便继续改编。',
+      {},
+      { tools: false, fileSystem: false, shell: false }
+    ))
+    router.registerAdapter(new StubAdapter('codex', async (_session, message) => {
+      plannerMessages.push(message)
+      return '[RESULT]已读取并提供原始文案。[/RESULT]\n[DONE]'
+    }))
+
+    const session = router.startSession({
+      from: { adapter: 'codex' },
+      to: { adapter: 'deepseek' },
+      initialPrompt: '读取资料后改编',
+      mode: 'collaborate',
+      maxRounds: 1,
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+    assert.match(plannerMessages[0] ?? '', /\[TURING_ASSISTANCE_REQUIRED\]/)
+    assert.match(plannerMessages[0] ?? '', /不要把问题转交给用户/)
+    assert.match(plannerMessages[0] ?? '', /请 codex 提供原始文案/)
+  })
+})
+
 test('approve mode resumes after explicit approval', async () => {
   await withTempDb(async () => {
     const router = new Router()
@@ -119,6 +161,184 @@ test('approve mode resumes after explicit approval', async () => {
     assert.equal(completed?.resumeCount, 1)
     assert.equal(completed?.currentRound, 1)
     assert.equal(state.getMessages(session.id).length, 3)
+  })
+})
+
+test('resume automatically adds one round after max rounds is reached', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+    const session = state.createSession({
+      id: 'resume-max-rounds',
+      from: { adapter: 'codex' },
+      to: { adapter: 'codex' },
+      maxRounds: 2,
+    })
+    state.addMessage({
+      id: 'resume-max-rounds-message',
+      sessionId: session.id,
+      from: 'codex',
+      content: '继续',
+      timestamp: Date.now(),
+      round: 2,
+    })
+    state.updateSession(session.id, { status: 'paused', currentRound: 2 })
+
+    const resumed = await router.resumeSession(session.id)
+    assert.equal(resumed.maxRounds, 3)
+  })
+})
+
+test('pipeline step cannot complete until its output contract is satisfied', async () => {
+  await withTempDb(async () => {
+    let releaseDeepseek!: () => void
+    const deepseekGate = new Promise<void>((resolve) => { releaseDeepseek = resolve })
+    const router = new Router()
+
+    router.registerAdapter(new StubAdapter('deepseek', async () => {
+      await deepseekGate
+      return [
+        '## 改编文案',
+        '伪造文案',
+        '## 改编说明',
+        '伪造说明',
+        '## 自检',
+        '伪造自检',
+        '文件已创建：`/tmp/nonexistent/script-adapted.md`',
+      ].join('\n')
+    }))
+    router.registerAdapter(new StubAdapter('codex', async () => '审核通过。\n[DONE]'))
+
+    const session = router.startSession({
+      from: { adapter: 'codex' },
+      to: { adapter: 'deepseek' },
+      initialPrompt: '输出必须包含：改编文案、改编说明、自检。完成后以 [DONE] 结束。',
+      mode: 'collaborate',
+      maxRounds: 1,
+    })
+    state.createPipeline({
+      id: 'contract-pipeline',
+      name: 'Contract Pipeline',
+      sessions: [{
+        sessionId: session.id,
+        title: '任意标题',
+        nodeType: 'copy_adapt',
+        contract: { outputs: [{ fileName: 'script-adapted.md', requiredSections: ['改编文案', '改编说明', '自检'] }] },
+        status: 'active',
+      }],
+    })
+    releaseDeepseek()
+
+    await waitFor(() => state.getMessages(session.id).length >= 3)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    assert.notEqual(state.getSession(session.id)?.status, 'done')
+    assert.equal(state.getPipeline('contract-pipeline')?.sessions[0].status, 'active')
+  })
+})
+
+test('pipeline step can complete after a prior output satisfies its contract', async () => {
+  await withTempDb(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turing-contract-'))
+    try {
+      let releaseDeepseek!: () => void
+      const deepseekGate = new Promise<void>((resolve) => { releaseDeepseek = resolve })
+      const outputDir = join(dir, '012-动态选题')
+      const outputPath = join(outputDir, 'script-adapted.md')
+      const router = new Router()
+
+      router.registerAdapter(new StubAdapter('deepseek', async () => {
+        await deepseekGate
+        return [
+          '[RESULT]',
+          '## 改编文案',
+          '领导说：这两天新人入职都给我记住了。',
+          '## 改编说明',
+          '保留原视频反转结构。',
+          '## 自检',
+          '职场场景明确。',
+          `文件：\`${outputPath}\``,
+          '[/RESULT]',
+        ].join('\n')
+      }))
+      router.registerAdapter(new StubAdapter('codex', async () => {
+        mkdirSync(outputDir, { recursive: true })
+        writeFileSync(outputPath, '## 改编文案\n内容\n## 改编说明\n说明\n## 自检\n通过\n', 'utf-8')
+        return `已真实写入并验证：\`${outputPath}\`\n[DONE]`
+      }))
+
+      const session = router.startSession({
+        from: { adapter: 'codex' },
+        to: { adapter: 'deepseek' },
+        initialPrompt: '输出必须包含：改编文案、改编说明、自检。完成后以 [DONE] 结束。',
+        mode: 'collaborate',
+        maxRounds: 2,
+        cwd: dir,
+      })
+      state.createPipeline({
+        id: 'contract-pipeline-ok',
+        name: 'Contract Pipeline OK',
+        sessions: [{
+          sessionId: session.id,
+          title: '任意标题',
+          nodeType: 'copy_adapt',
+          contract: { outputs: [{ fileName: 'script-adapted.md', requiredSections: ['改编文案', '改编说明', '自检'] }] },
+          status: 'active',
+        }],
+      })
+      releaseDeepseek()
+
+      await waitFor(() => state.getSession(session.id)?.status === 'done')
+      assert.equal(state.getPipeline('contract-pipeline-ok')?.sessions[0].status, 'done')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+test('pipeline step completes when adapter crashes after writing contract output', async () => {
+  await withTempDb(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turing-contract-crash-'))
+    try {
+      const outputDir = join(dir, 'downloads', 'douyin', 'video-id')
+      const outputPath = join(outputDir, 'reference.md')
+      const router = new Router({ retries: 0 })
+      router.registerAdapter(new StubAdapter('codex', async () => {
+        mkdirSync(outputDir, { recursive: true })
+        writeFileSync(outputPath, '## 视频文案/台词\n内容\n## 选题 brief\n选题\n## 可复用结构\n结构\n', 'utf-8')
+        throw new Error('usage limit')
+      }))
+
+      const session = router.startSession({
+        from: { adapter: 'codex' },
+        to: { adapter: 'codex' },
+        initialPrompt: '解析视频并生成 reference.md',
+        maxRounds: 1,
+        cwd: dir,
+      })
+      state.createPipeline({
+        id: 'contract-pipeline-crash',
+        name: 'Contract Pipeline Crash',
+        sessions: [{
+          sessionId: session.id,
+          title: '解析对标视频',
+          nodeType: 'video_parse',
+          contract: {
+            outputs: [{
+              fileName: 'reference.md',
+              requiredSections: ['视频文案/台词', '选题 brief', '可复用结构'],
+            }],
+          },
+          status: 'active',
+        }],
+      })
+
+      await waitFor(() => state.getSession(session.id)?.status === 'done')
+      assert.equal(state.getPipeline('contract-pipeline-crash')?.sessions[0].status, 'done')
+      assert.match(state.getSession(session.id)?.lastAgentOutput ?? '', /产物已完整生成/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
@@ -444,6 +664,54 @@ test('dreamina pending output is reconciled automatically', async () => {
     await waitFor(() => state.getSession(session.id)?.status === 'done')
     assert.equal(state.listExternalJobs('done').length, 1)
     assert.match(state.getSession(session.id)?.lastAgentOutput ?? '', /generated\.mp4/)
+  })
+})
+
+test('video_generate pipeline step submits Dreamina directly without adapter', async () => {
+  await withTempDb(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turing-video-step-'))
+    try {
+      const commandPath = join(dir, 'video-command.md')
+      const commandContent = [
+        '```sh',
+        'dreamina video --image storyboard.png --reference hero.png --duration 15 --ratio 9:16 --prompt "camera push in" --output parts/part-01.mp4',
+        '```',
+      ].join('\n')
+      writeFileSync(commandPath, commandContent, 'utf-8')
+
+      let submittedArgs: string[] | undefined
+      const router = new Router({}, {
+        dreaminaSubmit: async (args) => {
+          submittedArgs = args
+          return 'submit_id: 5db07d3a-4d66-44b7-ac53-b2f9f660ce11'
+        },
+      })
+      router.registerAdapter(new StubAdapter('codex', async () => {
+        throw new Error('adapter should not run for video_generate')
+      }))
+
+      const pipeline = router.startPipeline({
+        name: 'video direct',
+        steps: [{
+          title: '执行视频生成',
+          nodeType: 'video_generate',
+          from: { adapter: 'codex' },
+          to: { adapter: 'codex' },
+          initialPrompt: 'run video',
+          cwd: dir,
+          context: { files: [{ path: commandPath, content: commandContent }] },
+        }],
+      })
+      const sessionId = pipeline.sessions[0].sessionId
+
+      await waitFor(() => state.listExternalJobs('querying').length === 1)
+      assert.equal(submittedArgs?.[0], 'multimodal2video')
+      assert.ok(submittedArgs?.includes('--image'))
+      assert.equal(state.getSession(sessionId)?.status, 'active')
+      assert.match(state.getSession(sessionId)?.lastAgentOutput ?? '', /submit_id/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 
@@ -796,6 +1064,63 @@ test('pipeline dependencies inject upstream output and file contents', async () 
   })
 })
 
+test('pipeline dependencies inject referenced files even without git snapshots', async () => {
+  await withTempDb(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turing-pipeline-reference-'))
+    try {
+      const referenceDir = join(dir, 'downloads', 'episode')
+      const referencePath = join(referenceDir, 'reference.md')
+      mkdirSync(referenceDir, { recursive: true })
+      writeFileSync(referencePath, '真实素材：高考考生被带回站点办理入职。', 'utf-8')
+
+      let firstSessionId = ''
+      let secondSessionId = ''
+      let dependencyPrompt = ''
+      const router = new Router()
+
+      router.registerAdapter(new StubAdapter('codex', async () => '[RESULT]核验通过：reference.md 已生成。[/RESULT]\n[DONE]'))
+      router.registerAdapter(new StubAdapter('claude-code', async (session, _message, opts) => {
+        if (session.id === firstSessionId) {
+          return '产出文件：`downloads/episode/reference.md`'
+        }
+        if (session.id === secondSessionId) {
+          dependencyPrompt = opts?.systemPrompt ?? ''
+          return '已使用依赖文件'
+        }
+        return 'noop'
+      }))
+
+      const pipeline = router.startPipeline({
+        name: 'Referenced file handoff',
+        steps: [
+          {
+            from: { adapter: 'codex' },
+            to: { adapter: 'claude-code' },
+            initialPrompt: '解析素材',
+            cwd: dir,
+          },
+          {
+            from: { adapter: 'codex' },
+            to: { adapter: 'claude-code' },
+            initialPrompt: '改编文案',
+            cwd: dir,
+            dependsOn: [0],
+          },
+        ],
+      })
+
+      firstSessionId = pipeline.sessions[0].sessionId
+      secondSessionId = pipeline.sessions[1].sessionId
+      await waitFor(() => state.getSession(secondSessionId)?.status === 'done', 5_000)
+
+      assert.match(dependencyPrompt, new RegExp(referencePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      assert.match(dependencyPrompt, /真实素材：高考考生被带回站点办理入职/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 test('pipeline approval gate waits before running a dependent step', async () => {
   await withTempDb(async () => {
     let gatedCalls = 0
@@ -833,6 +1158,47 @@ test('pipeline approval gate waits before running a dependent step', async () =>
     await router.resumeSession(gatedSessionId)
     await waitFor(() => state.getSession(gatedSessionId)?.status === 'done')
     assert.equal(gatedCalls, 1)
+  })
+})
+
+test('codex image generation pipeline step waits for host tool artifact handoff', async () => {
+  await withTempDb(async () => {
+    let imageCalls = 0
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async (session) => {
+      if (session.id === imageSessionId) imageCalls += 1
+      return '[DONE]'
+    }))
+
+    let imageSessionId = ''
+    const pipeline = router.startPipeline({
+      name: 'Host image handoff',
+      steps: [
+        {
+          from: { adapter: 'codex' },
+          to: { adapter: 'codex' },
+          initialPrompt: 'Prepare prompt',
+        },
+        {
+          nodeType: 'image_generate',
+          from: { adapter: 'codex' },
+          to: { adapter: 'codex' },
+          initialPrompt: 'Generate storyboard image',
+          approveMode: true,
+          dependsOn: [0],
+        },
+      ],
+    })
+
+    imageSessionId = pipeline.sessions[1]!.sessionId
+    await waitFor(() => state.getPipeline(pipeline.id)?.sessions[1]?.status === 'active')
+    assert.equal(state.getSession(imageSessionId)?.status, 'paused')
+
+    await router.resumeSession(imageSessionId)
+
+    assert.equal(imageCalls, 0)
+    assert.equal(state.getSession(imageSessionId)?.status, 'paused')
+    assert.match(state.getSession(imageSessionId)?.lastAgentOutput ?? '', /HOST_IMAGE_GENERATION_REQUIRED/)
   })
 })
 
@@ -895,6 +1261,84 @@ test('changing an upstream pipeline step invalidates dependent results', async (
     await waitFor(() => state.getPipeline(pipeline.id)?.sessions[1].status === 'active')
     assert.equal(state.getSession(gatedSessionId)?.status, 'paused')
     assert.deepEqual(calls, ['Prepare input', 'Revise the input'])
+  })
+})
+
+test('rerun pipeline step resets itself and downstream steps', async () => {
+  await withTempDb(async () => {
+    const calls: string[] = []
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => '[RESULT]rerun complete[/RESULT]\n[DONE]'))
+    router.registerAdapter(new StubAdapter('claude-code', async (_session, message) => {
+      calls.push(message)
+      return 'executor result'
+    }))
+
+    state.createSession({
+      id: 'rerun-source',
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      maxRounds: 2,
+    })
+    state.addMessage({
+      id: 'rerun-source-initial',
+      sessionId: 'rerun-source',
+      from: 'human',
+      content: 'Produce source',
+      timestamp: 1,
+      round: 0,
+    })
+    state.addMessage({
+      id: 'rerun-source-output',
+      sessionId: 'rerun-source',
+      from: 'codex',
+      content: '[RESULT]old source[/RESULT]\n[DONE]',
+      timestamp: 2,
+      round: 1,
+    })
+    state.updateSession('rerun-source', { status: 'done', currentRound: 1, lastAgentOutput: 'old source' })
+
+    state.createSession({
+      id: 'rerun-child',
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      maxRounds: 2,
+    })
+    state.addMessage({
+      id: 'rerun-child-initial',
+      sessionId: 'rerun-child',
+      from: 'human',
+      content: 'Use source',
+      timestamp: 3,
+      round: 0,
+    })
+    state.addMessage({
+      id: 'rerun-child-output',
+      sessionId: 'rerun-child',
+      from: 'codex',
+      content: '[RESULT]old child[/RESULT]\n[DONE]',
+      timestamp: 4,
+      round: 1,
+    })
+    state.updateSession('rerun-child', { status: 'done', currentRound: 1, lastAgentOutput: 'old child' })
+
+    state.createPipeline({
+      id: 'rerun-pipeline',
+      name: 'Rerun Pipeline',
+      sessions: [
+        { sessionId: 'rerun-source', title: 'Source', status: 'done' },
+        { sessionId: 'rerun-child', title: 'Child', dependsOn: ['rerun-source'], status: 'done' },
+      ],
+    })
+
+    const updated = await router.rerunPipelineStep('rerun-source')
+    assert.deepEqual(updated.sessions.map((step) => step.status), ['active', 'pending'])
+    assert.deepEqual(state.getMessages('rerun-child').map((message) => message.content), ['Use source'])
+
+    await waitFor(() => state.getSession('rerun-source')?.status === 'done')
+    assert.equal(calls[0], 'Produce source')
+    assert.equal(state.getPipeline('rerun-pipeline')?.sessions[0].status, 'done')
+    assert.notEqual(state.getPipeline('rerun-pipeline')?.sessions[1].status, 'pending')
   })
 })
 

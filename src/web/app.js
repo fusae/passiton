@@ -90,6 +90,13 @@ const state = {
   currentPipelineId: null,
   currentPipeline: null,
   expandedWorkflowStep: null,
+  liveReviewStep: null,
+  liveReviewDrafts: new Map(),
+  liveReviewPending: new Set(),
+  liveReviewArtifacts: new Map(),
+  liveReviewArtifactLoading: new Set(),
+  workflowSpeechRecognition: null,
+  workflowSpeechSessionId: null,
   currentMessages: [],
   currentSnapshots: [],
   ws: null,
@@ -100,6 +107,7 @@ const state = {
   streamStatus: new Map(),
   workflowFileAliases: new Map(),
   workflowNestedFiles: new Map(),
+  workflowFileResolution: new Map(),
   expandedStepDetails: new Set(),
   expandedArtifactFiles: new Set(),
   autoFollowMessages: true,
@@ -390,6 +398,10 @@ function handleWsEvent(event) {
       handleMessageStep(event.payload)
       break
     case 'message:new':
+      if (event.payload.from !== 'human') {
+        state.liveReviewPending.delete(event.payload.sessionId)
+        state.streamDeltas.delete(event.payload.sessionId)
+      }
       if (state.currentSessionId === event.payload.sessionId) {
         clearStreamingDelta(event.payload.sessionId)
         setStreamStatus(event.payload.sessionId, '已完成本轮输出')
@@ -457,6 +469,7 @@ function applyPipelineUpdate(pipeline) {
     state.currentPipeline = { ...(state.currentPipeline || {}), ...pipeline }
     state.workflowFileAliases = new Map()
     state.workflowNestedFiles = new Map()
+    state.workflowFileResolution = new Map()
     renderWorkflowHeader(state.currentPipeline)
     renderWorkflowSteps(state.currentPipeline)
     renderWorkflowTimeline(state.currentPipeline)
@@ -506,7 +519,13 @@ function handleMessageDelta(payload) {
   state.streamRaw.set(payload.sessionId, (state.streamRaw.get(payload.sessionId) || '') + payload.content)
   setStreamStatus(payload.sessionId, summarizeRawStatus(payload.content))
   if (state.currentSessionId === payload.sessionId) scheduleStreamingRender()
-  if (isCurrentWorkflowSession(payload.sessionId)) renderWorkflowSteps(state.currentPipeline)
+  if (isCurrentWorkflowSession(payload.sessionId)) {
+    if (state.liveReviewStep === payload.sessionId) {
+      updateWorkflowLiveReviewStream(payload.sessionId)
+    } else {
+      renderWorkflowSteps(state.currentPipeline)
+    }
+  }
 }
 
 function handleMessageStep(payload) {
@@ -523,7 +542,13 @@ function handleMessageStep(payload) {
   state.streamSteps.set(payload.sessionId, steps)
   setStreamStatus(payload.sessionId, step.summary)
   if (state.currentSessionId === payload.sessionId) renderSessionMessages()
-  if (isCurrentWorkflowSession(payload.sessionId)) renderWorkflowSteps(state.currentPipeline)
+  if (isCurrentWorkflowSession(payload.sessionId)) {
+    if (state.liveReviewStep === payload.sessionId) {
+      updateWorkflowLiveReviewStream(payload.sessionId)
+    } else {
+      renderWorkflowSteps(state.currentPipeline)
+    }
+  }
 }
 
 function setStreamStatus(sessionId, status) {
@@ -589,7 +614,11 @@ function updateHeartbeat(hb) {
   }
   if (isCurrentWorkflowSession(hb.sessionId)) {
     setStreamStatus(hb.sessionId, summarizeRawStatus(hb.lastOutput || '运行中...'))
-    renderWorkflowSteps(state.currentPipeline)
+    if (state.liveReviewStep === hb.sessionId) {
+      updateWorkflowLiveReviewStream(hb.sessionId)
+    } else {
+      renderWorkflowSteps(state.currentPipeline)
+    }
   }
 }
 
@@ -1333,6 +1362,10 @@ function renderPipelineCards() {
 }
 
 async function renderWorkflow(id) {
+  if (state.currentPipelineId && state.currentPipelineId !== id) {
+    stopWorkflowSpeechRecognition()
+    state.liveReviewStep = null
+  }
   state.currentSessionId = null
   state.currentSession = null
   state.currentPipelineId = id
@@ -1348,6 +1381,7 @@ async function renderWorkflow(id) {
   state.currentPipeline = pipeline
   state.workflowFileAliases = new Map()
   state.workflowNestedFiles = new Map()
+  state.workflowFileResolution = new Map()
 
   document.body.innerHTML = `
     <div class="app-layout">
@@ -1415,9 +1449,10 @@ function renderWorkflowSteps(pipeline) {
   if (!container || !pipeline) return
   const steps = pipeline.sessions || []
   const details = pipeline.sessionDetails || []
+  const detailsById = new Map(details.map(session => [session.id, session]))
   container.innerHTML = `
     <div class="workflow-timeline-view">
-      ${steps.map((step, index) => renderWorkflowTimelineStep(step, details[index], index, steps.length)).join('')}
+      ${steps.map((step, index) => renderWorkflowTimelineStep(step, detailsById.get(step.sessionId), index, steps.length)).join('')}
     </div>
   `
 }
@@ -1429,21 +1464,24 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
   const currentRound = Number(session?.currentRound) || 0
   const maxRounds = Number(session?.maxRounds) || 0
   const status = step.status === 'pending' ? 'pending' : (session?.status || step.status)
-  const canResumeStep = step.status === 'active' && (session?.status === 'paused' || session?.status === 'error' || session?.status === 'stopped')
   const approvalDependencies = dependsOn.map(id => ({ id, index: stepIndexBySessionId(id) }))
-  const approvalDependencyLabel = approvalDependencies.map(dep => `Step ${dep.index + 1}`).join(', ')
-  const canRequestChanges = step.status === 'active' && (session?.status === 'paused' || session?.status === 'stopped') && approvalDependencies.length > 0
-  const runningStatus = status === 'active'
-    ? (state.streamStatus.get(step.sessionId) || summarizeRawStatus(state.heartbeats.get(step.sessionId)?.lastOutput || '运行中...'))
-    : ''
-  const isLast = index === totalSteps - 1
-
-  // Get output
   const messages = session?.messages || []
   const output = workflowOutputMessage(messages)
   const cleaned = output ? output.replace(/\[DONE\]/gi, '').trim() : ''
+  const hostImageRequired = step.nodeType === 'image_generate' && /HOST_IMAGE_GENERATION_REQUIRED/.test(cleaned)
+  const canResumeStep = step.status === 'active' && !hostImageRequired && (session?.status === 'paused' || session?.status === 'error' || session?.status === 'stopped')
+  const canRequestChanges = step.status === 'active' && (session?.status === 'paused' || session?.status === 'stopped') && approvalDependencies.length > 0
+  const canManualArtifacts = step.nodeType === 'image_generate' && status !== 'done'
+  const runningStatus = status === 'active'
+    ? (state.streamStatus.get(step.sessionId) || summarizeRawStatus(state.heartbeats.get(step.sessionId)?.lastOutput || '运行中...'))
+    : ''
+  const errorTitle = session?.errorType || (status === 'error' ? 'step_error' : '')
+  const errorDetail = status === 'error' ? (session?.errorMessage || step.errorMessage || '') : ''
+  const isLast = index === totalSteps - 1
+
   const waitingForHumanApproval = /等待人工(?:确认|审核|回复|输入)|请回复[“"'` ]*(?:OK|通过|确认保存)/i.test(cleaned)
-  const files = cleaned ? workflowArtifactFiles(cleaned) : []
+  const files = session ? workflowSessionArtifactFiles(session, cleaned, step) : cleaned ? workflowArtifactFiles(cleaned) : []
+  const liveReviewOpen = state.liveReviewStep === step.sessionId
 
   return `
     <div class="timeline-step ${status}" data-step-id="${step.sessionId}">
@@ -1473,6 +1511,18 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
               <span class="meta-icon">⚠</span>
               ${escapeHtml(session?.permissionMode || 'safe')}
             </span>
+            ${step.nodeType ? `
+              <span class="meta-item">
+                <span class="meta-icon">◆</span>
+                ${escapeHtml(WORKFLOW_NODE_TYPES[step.nodeType]?.label || step.nodeType)}
+              </span>
+            ` : ''}
+            ${step.contract?.outputs?.length ? `
+              <span class="meta-item">
+                <span class="meta-icon">↳</span>
+                ${escapeHtml(step.contract.outputs.map(output => output.fileName).join(', '))}
+              </span>
+            ` : ''}
             ${dependsOn.length ? `
               <span class="meta-item">
                 <span class="meta-icon">⛓</span>
@@ -1489,13 +1539,25 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
           </div>
         ` : ''}
 
-        ${canResumeStep || canRequestChanges || step.sessionId ? `
-          <div class="step-actions">
-            ${canResumeStep ? `<button class="action-btn primary" onclick='window.approveWorkflowStep(${jsString(step.sessionId)}, ${waitingForHumanApproval})'>${waitingForHumanApproval ? '✓ 通过，确认保存' : approvalDependencies.length ? `✓ 批准 ${escapeHtml(approvalDependencyLabel)}，执行本步骤` : '✓ 通过，继续'}</button>` : ''}
-            ${canRequestChanges ? `<button class="action-btn secondary" onclick='window.requestWorkflowStepChanges(${jsString(step.sessionId)}, ${jsString(`Step ${index + 1}`)})'>✎ 要求修改上游产物</button>` : ''}
-            <button class="action-btn secondary" onclick='window.openWorkflowStepMessage(${jsString(step.sessionId)}, ${jsString(`Step ${index + 1}：${title}`)})'>＋ 插入对话</button>
+        ${errorDetail ? `
+          <div class="step-error-status">
+            <div class="step-error-title">⚠ ${escapeHtml(errorTitle)}</div>
+            <div class="step-error-detail">${escapeHtml(errorDetail)}</div>
+            ${session?.lastAgentOutput ? `<div class="step-error-last-output">最后输出：${escapeHtml(summarizeRawStatus(session.lastAgentOutput))}</div>` : ''}
           </div>
         ` : ''}
+
+        ${canResumeStep || canRequestChanges || step.sessionId ? `
+          <div class="step-actions">
+            ${canResumeStep ? `<button class="action-btn primary" onclick='window.approveWorkflowStep(${jsString(step.sessionId)}, ${waitingForHumanApproval})'>${waitingForHumanApproval ? '✓ 通过，确认保存' : `✓ 执行 Step ${index + 1}`}</button>` : ''}
+            <button class="action-btn secondary" onclick='window.rerunWorkflowStep(${jsString(step.sessionId)}, ${jsString(`Step ${index + 1}：${title}`)})'>↻ 重跑本步骤</button>
+            ${canManualArtifacts ? `<button class="action-btn secondary" onclick='window.openManualArtifactsModal(${jsString(step.sessionId)}, ${jsString(`Step ${index + 1}：${title}`)})'>◎ 主进程补图回填</button>` : ''}
+            ${canRequestChanges ? `<button class="action-btn secondary" onclick='window.requestWorkflowStepChanges(${jsString(step.sessionId)}, ${jsString(`Step ${index + 1}`)})'>✎ 要求修改上游产物</button>` : ''}
+            <button class="action-btn live-review-trigger ${liveReviewOpen ? 'active' : ''}" onclick='window.toggleWorkflowLiveReview(${jsString(step.sessionId)})'>◉ Live Review</button>
+          </div>
+        ` : ''}
+
+        ${liveReviewOpen ? renderWorkflowLiveReview(step, session, index, cleaned, waitingForHumanApproval, canResumeStep) : ''}
 
         ${cleaned ? `
           <div class="step-output">
@@ -1544,6 +1606,102 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
   `
 }
 
+function renderWorkflowLiveReview(step, session, index, currentOutput, waitingForHumanApproval, canResumeStep) {
+  const sessionId = step.sessionId
+  const messages = session?.messages || []
+  const reviewMessages = messages.filter(message => message.round > 0).slice(-10)
+  const artifact = state.liveReviewArtifacts.get(sessionId)
+  const reviewContent = artifact?.content || currentOutput
+  const draft = state.liveReviewDrafts.get(sessionId) || ''
+  const pending = state.liveReviewPending.has(sessionId)
+  const busy = pending || session?.status === 'active'
+  const stream = state.streamDeltas.get(sessionId)?.content || ''
+  const status = state.streamStatus.get(sessionId) || (busy ? 'AI 正在处理...' : '可以继续反馈')
+  const speechSupported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)
+
+  return `
+    <section class="live-review" data-live-review="${escapeAttr(sessionId)}">
+      <div class="live-review-head">
+        <div>
+          <div class="live-review-kicker">LIVE REVIEW · STEP ${index + 1}</div>
+          <h4>围绕当前产物连续修改</h4>
+        </div>
+        <div class="live-review-status ${busy ? 'busy' : ''}">
+          <span class="live-review-status-dot"></span>
+          <span data-live-review-status="${escapeAttr(sessionId)}">${escapeHtml(status)}</span>
+        </div>
+      </div>
+
+      <div class="live-review-grid">
+        <div class="live-review-draft">
+          <div class="live-review-section-head">
+            <span>当前草稿${artifact?.path ? ` · ${escapeHtml(workflowFileName(artifact.path))}` : ''}</span>
+            ${session?.versions?.length ? `<button type="button" onclick='window.showWorkflowStepVersions(${jsString(sessionId)})'>${session.versions.length} 个历史版本</button>` : ''}
+          </div>
+          <div class="live-review-draft-body" data-live-review-output="${escapeAttr(sessionId)}">
+            ${reviewContent
+              ? renderWorkflowMarkdown(reviewContent, session?.cwd || '')
+              : '<p class="live-review-empty">本步骤还没有可审阅的输出。</p>'}
+          </div>
+        </div>
+
+        <div class="live-review-chat">
+          <div class="live-review-thread">
+            ${reviewMessages.length ? reviewMessages.map(message => `
+              <div class="live-review-message ${message.from === 'human' ? 'human' : 'agent'}">
+                <div class="live-review-message-label">${message.from === 'human' ? '你' : escapeHtml(message.from || 'AI')}</div>
+                <div class="live-review-message-body">${renderWorkflowMarkdown(message.content || '', session?.cwd || '')}</div>
+              </div>
+            `).join('') : '<p class="live-review-empty">说出你希望修改的地方，AI 会更新当前草稿。</p>'}
+            <div class="live-review-stream ${stream ? 'visible' : ''}" data-live-review-stream="${escapeAttr(sessionId)}">${escapeHtml(stream)}</div>
+          </div>
+
+          <form class="live-review-composer" onsubmit='window.submitWorkflowLiveReview(event, ${jsString(sessionId)})'>
+            <textarea
+              class="live-review-input"
+              rows="3"
+              placeholder="例如：开头再快一点，第三句换成更生活化的表达..."
+              oninput='window.updateWorkflowLiveReviewDraft(${jsString(sessionId)}, this.value)'
+              onkeydown='window.handleWorkflowLiveReviewKeydown(event, ${jsString(sessionId)})'
+            >${escapeHtml(draft)}</textarea>
+            <div class="live-review-composer-actions">
+              <button
+                type="button"
+                class="live-review-voice"
+                onclick='window.toggleWorkflowVoice(${jsString(sessionId)})'
+                ${speechSupported ? '' : 'disabled title="当前浏览器不支持语音识别"'}
+              >
+                <span data-live-review-mic="${escapeAttr(sessionId)}">●</span>
+                语音输入
+              </button>
+              <button type="submit" class="action-btn primary" ${pending ? 'disabled' : ''}>发送并修改</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="live-review-footer">
+        <span>每次发送前会自动保存当前版本；后续步骤会在产物变化后重置。</span>
+        <div>
+          <button type="button" class="action-btn secondary" onclick="window.closeWorkflowLiveReview()">结束审阅</button>
+          ${canResumeStep ? `<button type="button" class="action-btn primary" onclick='window.approveWorkflowStep(${jsString(sessionId)}, ${waitingForHumanApproval})'>${waitingForHumanApproval ? '通过当前版本' : '执行当前步骤'}</button>` : ''}
+        </div>
+      </div>
+    </section>
+  `
+}
+
+function updateWorkflowLiveReviewStream(sessionId) {
+  const status = document.querySelector(`[data-live-review-status="${CSS.escape(sessionId)}"]`)
+  const stream = document.querySelector(`[data-live-review-stream="${CSS.escape(sessionId)}"]`)
+  const content = state.streamDeltas.get(sessionId)?.content || ''
+  if (status) status.textContent = state.streamStatus.get(sessionId) || 'AI 正在修改...'
+  if (stream) {
+    stream.textContent = content
+    stream.classList.toggle('visible', Boolean(content))
+  }
+}
+
 function renderWorkflowStepCard(step, session, index) {
   // Keep old function for compatibility, redirect to timeline
   return renderWorkflowTimelineStep(step, session, index, 999)
@@ -1555,7 +1713,7 @@ function renderWorkflowStepArtifact(session) {
   if (!output) return ''
   const cleaned = output.replace(/\[DONE\]/gi, '').trim()
   if (!cleaned) return ''
-  const files = workflowArtifactFiles(cleaned)
+  const files = workflowSessionArtifactFiles(session, cleaned)
   const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false })
   return `
     <div class="workflow-step-artifact">
@@ -1600,7 +1758,7 @@ function workflowOutputMessage(messages) {
 
 function extractWorkflowArtifactFiles(content) {
   const files = new Set()
-  const extensions = 'md|txt|log|json|yaml|yml|png|jpe?g|webp|gif|svg|mp4|mov|webm'
+  const extensions = 'md|txt|log|json|yaml|yml|csv|tsv|png|jpe?g|webp|gif|svg|mp4|mov|webm|wav|mp3|m4a|aac|flac|pdf|docx|xlsx|pptx|zip'
   const fileExtensionPattern = new RegExp('\\.(' + extensions + ')$', 'i')
   const patterns = [
     new RegExp('`([^`]+\\.(' + extensions + '))`', 'gi'),
@@ -1611,6 +1769,16 @@ function extractWorkflowArtifactFiles(content) {
     for (const match of content.matchAll(pattern)) {
       const file = match.slice(1).map(value => (value || '').trim()).find(value => fileExtensionPattern.test(value))
       if (file && !/^https?:\/\//i.test(file)) files.add(file)
+    }
+  }
+  const directories = []
+  for (const match of String(content || '').matchAll(/(?:目录|路径|文件夹|输出目录|保存目录)\s*[：:]\s*`?([^`\n]+\/)`?/gi)) {
+    const dir = String(match[1] || '').trim()
+    if (dir && !/^https?:\/\//i.test(dir)) directories.push(dir)
+  }
+  for (const dir of directories) {
+    for (const file of [...files]) {
+      if (!file.includes('/') && fileExtensionPattern.test(file)) files.add(`${dir}${file}`)
     }
   }
   const extracted = [...files]
@@ -1627,21 +1795,156 @@ function workflowArtifactFiles(content) {
   return [...expanded]
 }
 
-async function hydrateWorkflowFileReferences(pipeline) {
-  const markdownFiles = new Map()
-  for (const session of pipeline.sessionDetails || []) {
-    for (const message of session.messages || []) {
-      for (const file of extractWorkflowArtifactFiles(message.content || '')) {
-        const resolved = resolveWorkflowFilePath(file)
-        if (/\.md$/i.test(resolved)) markdownFiles.set(resolved, session.cwd || '')
-      }
+function workflowSessionArtifactFiles(session, selectedContent = '', step = undefined) {
+  const files = []
+  const add = value => {
+    const file = String(value || '').trim()
+    if (!file) return
+    if (!files.includes(file)) files.push(file)
+  }
+  const directFiles = content => extractWorkflowArtifactFiles(content || '')
+  for (const file of directFiles(selectedContent || '')) add(file)
+  const lastHumanTimestamp = Math.max(0, ...(session?.messages || []).filter(message => message.from === 'human').map(message => Number(message.timestamp) || 0))
+  for (const message of session?.messages || []) {
+    if (message.from === 'human') continue
+    if ((Number(message.timestamp) || 0) < lastHumanTimestamp) continue
+    for (const file of directFiles(message.content || '')) add(file)
+  }
+  const artifacts = session?.artifacts || {}
+  for (const file of artifacts.generatedFiles || []) {
+    add(file)
+  }
+  for (const changed of artifacts.filesChanged || []) {
+    if (changed?.path) add(changed.path)
+  }
+  if (step?.nodeType === 'video_parse') {
+    for (const file of [...files]) {
+      for (const nested of state.workflowNestedFiles.get(resolveWorkflowFilePath(file)) || []) add(nested)
     }
   }
+  const qualifiedNames = new Set(files.filter(file => String(file).startsWith('/') || String(file).includes('/')).map(file => workflowFileName(file)))
+  const deduped = []
+  const seen = new Set()
+  const outputs = step?.contract?.outputs || []
+  for (const file of files) {
+    if (!String(file).startsWith('/') && !String(file).includes('/') && qualifiedNames.has(workflowFileName(file))) continue
+    const resolved = resolveWorkflowFilePath(file)
+    const resolution = state.workflowFileResolution.get(resolved) || state.workflowFileResolution.get(String(file))
+    if (outputs.length && step?.nodeType !== 'video_parse' && !outputs.some(output => workflowFileMatchesOutput(resolved, output.fileName))) continue
+    const key = resolution === 'exists' ? resolved : String(file)
+    if (seen.has(key)) continue
+    seen.add(key)
+    deduped.push(resolved)
+  }
+  return deduped
+}
+
+function workflowFileMatchesOutput(file, pattern) {
+  const name = workflowFileName(file)
+  const expected = String(pattern || '').trim()
+  if (!expected) return true
+  if (expected.startsWith('*.')) return name.toLowerCase().endsWith(expected.slice(1).toLowerCase())
+  return name === expected || String(file).endsWith(`/${expected}`)
+}
+
+function workflowLiveReviewArtifactFile(step, session, selectedContent = '') {
+  const textFilePattern = /\.(md|txt|log|json|ya?ml|csv|tsv)$/i
+  const files = workflowSessionArtifactFiles(session, selectedContent, step).filter(file => textFilePattern.test(file))
+  const outputs = step?.contract?.outputs || []
+  return files.find(file => outputs.some(output => workflowFileMatchesOutput(file, output.fileName))) || files[0] || ''
+}
+
+async function hydrateWorkflowLiveReviewArtifact(step, session, selectedContent = '', force = false) {
+  const sessionId = step?.sessionId
+  if (!sessionId || state.liveReviewArtifactLoading.has(sessionId)) return
+  if (!force && state.liveReviewArtifacts.has(sessionId)) return
+  const file = workflowLiveReviewArtifactFile(step, session, selectedContent)
+  if (!file) return
+
+  state.liveReviewArtifactLoading.add(sessionId)
+  try {
+    const preview = await api('/api/files/preview', 'POST', {
+      path: resolveWorkflowFilePath(file),
+      cwd: session?.cwd || undefined,
+    })
+    state.liveReviewArtifacts.set(sessionId, {
+      path: preview.path || resolveWorkflowFilePath(file),
+      content: preview.content || '',
+    })
+    if (state.liveReviewStep === sessionId) renderWorkflowSteps(state.currentPipeline)
+  } catch {
+    state.liveReviewArtifacts.delete(sessionId)
+  } finally {
+    state.liveReviewArtifactLoading.delete(sessionId)
+  }
+}
+
+async function hydrateWorkflowFileReferences(pipeline) {
+  const sessionFiles = new Map()
+  for (const session of pipeline.sessionDetails || []) {
+    const files = new Set()
+    for (const message of session.messages || []) {
+      for (const file of extractWorkflowArtifactFiles(message.content || '')) {
+        files.add(file)
+      }
+    }
+    for (const changed of session.artifacts?.filesChanged || []) {
+      if (changed?.path) files.add(changed.path)
+    }
+    for (const file of session.artifacts?.generatedFiles || []) {
+      if (file) files.add(file)
+    }
+    if (files.size) sessionFiles.set(session, [...files])
+  }
+
   let changed = false
-  await Promise.all([...markdownFiles].map(async ([file, cwd]) => {
+  const markdownFiles = []
+  await Promise.all([...sessionFiles].map(async ([session, files]) => {
+    const cwd = session.cwd || ''
+    try {
+      const resolvedFiles = await api('/api/files/resolve', 'POST', { paths: files, cwd: cwd || undefined })
+      const resolvedByName = new Map()
+      for (const result of resolvedFiles) {
+        state.workflowFileResolution.set(result.source, result.exists ? 'exists' : 'missing')
+        if (!result.exists || !result.path) continue
+        if (String(result.source).startsWith('/') || String(result.source).includes('/')) {
+          state.workflowFileAliases.set(result.source, result.path)
+        }
+        state.workflowFileResolution.set(result.path, 'exists')
+        const name = workflowFileName(result.path)
+        const matches = resolvedByName.get(name) || []
+        matches.push(result.path)
+        resolvedByName.set(name, matches)
+        if (/\.md$/i.test(result.path)) markdownFiles.push({ file: result.path, cwd })
+      }
+      for (const result of resolvedFiles) {
+        if (result.exists || String(result.source).includes('/')) continue
+        const matches = [...new Set(resolvedByName.get(workflowFileName(result.source)) || [])]
+        if (matches.length !== 1) continue
+        state.workflowFileAliases.set(result.source, matches[0])
+        state.workflowFileResolution.set(result.source, 'exists')
+      }
+      changed = true
+    } catch {
+      for (const file of files) state.workflowFileResolution.set(file, 'missing')
+    }
+  }))
+
+  await Promise.all(markdownFiles.map(async ({ file, cwd }) => {
     try {
       const preview = await api('/api/files/preview', 'POST', { path: file, cwd: cwd || undefined })
-      const nested = extractWorkflowArtifactFiles(preview.content || '').map(resolveWorkflowFilePath)
+      const nestedSources = extractWorkflowArtifactFiles(preview.content || '')
+      const resolvedNested = nestedSources.length
+        ? await api('/api/files/resolve', 'POST', { paths: nestedSources, cwd: cwd || undefined, baseFile: file })
+        : []
+      const nested = []
+      for (const result of resolvedNested) {
+        state.workflowFileResolution.set(result.source, result.exists ? 'exists' : 'missing')
+        if (!result.exists || !result.path) continue
+        state.workflowFileAliases.set(result.source, result.path)
+        state.workflowFileResolution.set(result.path, 'exists')
+        nested.push(result.path)
+      }
       state.workflowNestedFiles.set(file, nested)
       for (const match of String(preview.content || '').matchAll(/([^,\s\\]+)=([\w.-]+)/g)) {
         if (/\.(png|jpe?g|webp|gif|svg)$/i.test(match[1])) state.workflowFileAliases.set(match[2], match[1])
@@ -1649,7 +1952,15 @@ async function hydrateWorkflowFileReferences(pipeline) {
       changed = true
     } catch {}
   }))
-  if (changed && state.currentPipelineId === pipeline.id) renderWorkflowSteps(state.currentPipeline)
+  if (changed && state.currentPipelineId === pipeline.id) {
+    renderWorkflowSteps(state.currentPipeline)
+    const openStep = pipeline.sessions?.find(step => step.sessionId === state.liveReviewStep)
+    const openSession = pipeline.sessionDetails?.find(session => session.id === state.liveReviewStep)
+    if (openStep && openSession) {
+      const output = workflowOutputMessage(openSession.messages || '') || ''
+      hydrateWorkflowLiveReviewArtifact(openStep, openSession, output, true)
+    }
+  }
 }
 
 function workflowFileName(file) {
@@ -1674,12 +1985,14 @@ function workflowFileMeta(file) {
 
 function resolveWorkflowFilePath(file) {
   const value = String(file)
+  const aliased = state.workflowFileAliases.get(value)
+  if (aliased) return aliased
   if (value.includes('/')) return value
   const matches = new Set()
   for (const session of state.currentPipeline?.sessionDetails || []) {
     for (const message of session.messages || []) {
       for (const candidate of extractWorkflowArtifactFiles(message.content || '')) {
-        if (candidate.startsWith('/') && workflowFileName(candidate) === value) matches.add(candidate)
+        if (candidate.includes('/') && workflowFileName(candidate) === value) matches.add(candidate)
       }
     }
   }
@@ -1689,15 +2002,17 @@ function resolveWorkflowFilePath(file) {
 function renderWorkflowFileItem(file, cwd, prefix = '├─') {
   const resolvedFile = resolveWorkflowFilePath(file)
   const meta = workflowFileMeta(resolvedFile)
+  const resolution = state.workflowFileResolution.get(resolvedFile) || state.workflowFileResolution.get(String(file))
+  const clickable = resolution !== 'missing'
   return `
-    <button class="file-item" onclick='window.previewWorkflowFile(${jsString(resolvedFile)}, ${jsString(cwd || '')})'>
+    <button class="file-item ${clickable ? '' : 'file-item-unavailable'}" ${clickable ? `onclick='window.previewWorkflowFile(${jsString(resolvedFile)}, ${jsString(cwd || '')})'` : 'disabled'}>
       <span class="file-tree">${prefix}</span>
       <span class="file-info">
         <span class="file-name">${escapeHtml(meta.name)}</span>
-        <span class="file-role">${escapeHtml(meta.role)}</span>
+        <span class="file-role">${escapeHtml(clickable ? meta.role : resolution === 'missing' ? '文件不存在' : '正在检查')}</span>
         <span class="file-location">${escapeHtml(resolvedFile)}</span>
       </span>
-      <span class="file-arrow">→</span>
+      <span class="file-arrow">${clickable ? '→' : '—'}</span>
     </button>
   `
 }
@@ -1765,11 +2080,14 @@ window.previewWorkflowFile = async function(filePath, cwd) {
     const isMarkdown = /\.md$/i.test(file.name || file.path || '')
     const isImage = /^image\//i.test(file.mimeType || '') && file.encoding === 'base64'
     const isVideo = /^video\//i.test(file.mimeType || '') && file.encoding === 'stream'
+    const isAudio = /^audio\//i.test(file.mimeType || '') && file.encoding === 'stream'
     const nestedFiles = isMarkdown ? extractWorkflowArtifactFiles(file.content || '').filter(path => path !== file.path) : []
     const body = isImage
       ? `<img class="file-preview-image" src="data:${escapeAttr(file.mimeType)};base64,${escapeAttr(file.content || '')}" alt="${escapeAttr(file.name || filePath)}">`
       : isVideo
         ? `<video class="file-preview-video" src="${escapeAttr(file.streamUrl || '')}" controls preload="metadata"></video>`
+      : isAudio
+        ? `<audio class="file-preview-audio" src="${escapeAttr(file.streamUrl || '')}" controls preload="metadata"></audio>`
       : isMarkdown
         ? renderWorkflowMarkdown(file.content || '', cwd || '')
         : `<pre>${escapeHtml(file.content || '')}</pre>`
@@ -3270,6 +3588,11 @@ window.showNewWorkflowModal = async function() {
           <label>Workflow input</label>
           <textarea class="input" name="workflowInput" rows="4" placeholder="Paste the reference video notes, source copy, or brief for this run..."></textarea>
         </div>
+        <div class="form-group">
+          <label>Start from step</label>
+          <input class="input" name="startAtStep" type="number" min="1" value="1">
+          <small>Steps before this number are kept in the workflow and marked as manually completed.</small>
+        </div>
         <div class="workflow-editor-head">
           <h3>Steps</h3>
           <button type="button" class="btn btn-secondary btn-sm" onclick="window.addWorkflowStep()">+ Add Step</button>
@@ -3284,8 +3607,15 @@ window.showNewWorkflowModal = async function() {
       </form>
     </div>
   `)
-  window.addWorkflowStep()
-  window.addWorkflowStep()
+  const defaultTemplate = state.pipelineTemplates.find(template => /抖音视频生成/.test(template.name))
+  if (defaultTemplate) {
+    const select = document.querySelector('select[name="templateId"]')
+    if (select) select.value = defaultTemplate.id
+    window.applyWorkflowTemplate(defaultTemplate.id)
+  } else {
+    window.addWorkflowStep()
+    window.addWorkflowStep()
+  }
 }
 
 window.addWorkflowStep = function(step = {}, options = {}) {
@@ -3319,10 +3649,41 @@ window.addWorkflowStep = function(step = {}, options = {}) {
   refreshWorkflowStepEditor()
 }
 
+const WORKFLOW_NODE_TYPES = {
+  video_parse: { label: '解析视频', agent: 'codex', inputs: 'source-video', output: 'reference.md', sections: '视频文案/台词,选题 brief,可复用结构' },
+  copy_adapt: { label: '改编文案', agent: 'deepseek', inputs: 'reference.md', output: 'script-adapted.md', sections: '输入来源,改编文案,改编说明,自检' },
+  storyboard_script: { label: '生成分镜脚本', agent: 'codex', inputs: 'script-adapted.md', output: 'reference.md, script.md, prompt.txt', sections: '分镜' },
+  image_generate: { label: '生成视觉资产', agent: 'codex', inputs: 'script.md,prompt.txt', output: 'storyboard-step4.png, character-hero-turnaround.png, character-director-turnaround.png', sections: '' },
+  video_command: { label: '准备视频命令', agent: 'codex', inputs: 'storyboard-step4.png, character-hero-turnaround.png, character-director-turnaround.png, prompt.txt', output: 'video-command.md', sections: '命令,输入文件,输出路径' },
+  video_generate: { label: '生成视频', agent: 'codex', inputs: 'video-command.md', output: '*.mp4', sections: '' },
+  human_review: { label: '人工审核', agent: 'codex', inputs: '*.mp4', output: '*.mp4', sections: '' },
+  custom: { label: '自定义', agent: 'codex', inputs: '', output: '', sections: '' },
+}
+
+function workflowNodeTypeForStep(step) {
+  if (step.nodeType) return step.nodeType
+  const title = String(step.title || '')
+  if (/解析.*视频/.test(title)) return 'video_parse'
+  if (/改编文案/.test(title)) return 'copy_adapt'
+  if (/分镜与 Prompt|分镜脚本/.test(title)) return 'storyboard_script'
+  if (/视觉资产|分镜图|角色三视图/.test(title)) return 'image_generate'
+  if (/命令/.test(title)) return 'video_command'
+  if (/执行视频|生成视频/.test(title)) return 'video_generate'
+  if (/审核|保存/.test(title)) return 'human_review'
+  return 'custom'
+}
+
+function preferredWorkflowAgent(nodeType, fallback = '') {
+  const preferred = WORKFLOW_NODE_TYPES[nodeType]?.agent
+  return state.agents.find(agent => agent.name.toLowerCase().includes(preferred))?.name || fallback || state.agents[0]?.name || ''
+}
+
 function renderWorkflowEditStep(index, step, defaultFrom, defaultTo) {
   const options = state.agents.map(agent => `<option value="${escapeAttr(agent.name)}">${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}</option>`).join('')
   const from = resolveWorkflowAgentName(step.from, step.fromAdapter, defaultFrom)
-  const to = resolveWorkflowAgentName(step.to, step.toAdapter, defaultTo, from)
+  const nodeType = workflowNodeTypeForStep(step)
+  const preset = WORKFLOW_NODE_TYPES[nodeType]
+  const to = resolveWorkflowAgentName(step.agent || step.to, step.toAdapter, preferredWorkflowAgent(nodeType, defaultTo), from)
   const mode = step.mode || 'collaborate'
   const maxRounds = step.maxRounds || state.config?.defaults?.maxRounds || 5
   const title = step.title || `Step ${index + 1}`
@@ -3330,6 +3691,10 @@ function renderWorkflowEditStep(index, step, defaultFrom, defaultTo) {
   const permissionMode = step.permissionMode || 'safe'
   const cwd = step.cwd || ''
   const outputDir = step.outputDir || ''
+  const inputs = (step.contract?.inputs || (preset.inputs ? preset.inputs.split(',') : [])).join(', ')
+  const firstOutput = step.contract?.outputs?.[0]
+  const outputFile = step.contract?.outputs?.map(output => output.fileName).join(', ') || preset.output
+  const requiredSections = (firstOutput?.requiredSections || (preset.sections ? preset.sections.split(',') : [])).join(', ')
   return `
     <div class="workflow-edit-title">
       <span class="drag-handle">↕</span>
@@ -3342,50 +3707,51 @@ function renderWorkflowEditStep(index, step, defaultFrom, defaultTo) {
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Agent A</label>
-        <select class="input" name="from" required>${options.replace(`value="${escapeAttr(from)}"`, `value="${escapeAttr(from)}" selected`)}</select>
-      </div>
-      <div class="form-group">
-        <label>Agent B</label>
-        <select class="input" name="to" required>${options.replace(`value="${escapeAttr(to)}"`, `value="${escapeAttr(to)}" selected`)}</select>
-      </div>
-    </div>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Mode</label>
-        <select class="input" name="mode">
-          <option value="collaborate" ${mode === 'collaborate' ? 'selected' : ''}>Collaboration</option>
-          <option value="discuss" ${mode === 'discuss' ? 'selected' : ''}>Discuss</option>
-          <option value="review" ${mode === 'review' ? 'selected' : ''}>Review</option>
-          <option value="freeform" ${mode === 'freeform' ? 'selected' : ''}>Freeform</option>
+        <label>Node Type</label>
+        <select class="input" name="nodeType" onchange="window.applyWorkflowNodeType(this)">
+          ${Object.entries(WORKFLOW_NODE_TYPES).map(([value, item]) => `<option value="${value}" ${value === nodeType ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
-        <label>Max Turns</label>
-        <input class="input" type="number" name="maxRounds" min="1" value="${escapeAttr(String(maxRounds))}">
+        <label>Primary Agent</label>
+        <select class="input" name="agent" required>${options.replace(`value="${escapeAttr(to)}"`, `value="${escapeAttr(to)}" selected`)}</select>
       </div>
     </div>
-    <div class="form-group">
-      <label>Prompt</label>
-      <textarea class="input" name="initialPrompt" rows="3" required placeholder="Describe this step...">${escapeHtml(prompt)}</textarea>
-    </div>
+    <input type="hidden" name="from" value="${escapeAttr(from)}">
+    <input type="hidden" name="mode" value="${escapeAttr(mode)}">
+    <input type="hidden" name="maxRounds" value="${escapeAttr(String(maxRounds))}">
+    <input type="hidden" name="permissionMode" value="${escapeAttr(permissionMode)}">
     <div class="form-row">
       <div class="form-group">
-        <label>Permission mode</label>
-        <select class="input" name="permissionMode">
-          <option value="safe" ${permissionMode === 'safe' ? 'selected' : ''}>Safe</option>
-          <option value="trusted" ${permissionMode === 'trusted' ? 'selected' : ''}>Trusted · skip CLI approvals</option>
-        </select>
+        <label>Inputs</label>
+        <input class="input" name="contractInputs" value="${escapeAttr(inputs)}" placeholder="reference.md">
       </div>
       <div class="form-group">
-        <label>Working Directory</label>
-        <input class="input" name="cwd" value="${escapeAttr(cwd)}" placeholder="/path/to/project">
+        <label>Output Files</label>
+        <input class="input" name="contractOutput" value="${escapeAttr(outputFile)}" placeholder="script.md, prompt.txt">
       </div>
     </div>
     <div class="form-group">
-      <label>Output Directory</label>
-      <input class="input" name="outputDir" value="${escapeAttr(outputDir)}" placeholder="/path/to/save/outputs">
+      <label>Required Sections</label>
+      <input class="input" name="contractSections" value="${escapeAttr(requiredSections)}" placeholder="改编文案, 改编说明, 自检">
     </div>
+    <details class="workflow-step-advanced">
+      <summary>Advanced</summary>
+      <div class="form-group">
+        <label>Prompt</label>
+        <textarea class="input" name="initialPrompt" rows="3" required placeholder="Describe this step...">${escapeHtml(prompt)}</textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Working Directory</label>
+          <input class="input" name="cwd" value="${escapeAttr(cwd)}" placeholder="/path/to/project">
+        </div>
+        <div class="form-group">
+          <label>Output Directory</label>
+          <input class="input" name="outputDir" value="${escapeAttr(outputDir)}" placeholder="/path/to/save/outputs">
+        </div>
+      </div>
+    </details>
     <label class="check-row">
       <input type="checkbox" name="approveMode" ${step.approveMode ? 'checked' : ''}>
       <span>Pause before this step and require manual approval</span>
@@ -3395,6 +3761,17 @@ function renderWorkflowEditStep(index, step, defaultFrom, defaultTo) {
       <select class="input" name="dependsOn" multiple data-deps></select>
     </div>
   `
+}
+
+window.applyWorkflowNodeType = function(select) {
+  const row = select.closest('.workflow-edit-step')
+  const preset = WORKFLOW_NODE_TYPES[select.value] || WORKFLOW_NODE_TYPES.custom
+  const agent = preferredWorkflowAgent(select.value)
+  if (agent) row.querySelector('[name="agent"]').value = agent
+  row.querySelector('[name="contractInputs"]').value = preset.inputs
+  row.querySelector('[name="contractOutput"]').value = preset.output
+  row.querySelector('[name="contractSections"]').value = preset.sections
+  if (/^Step \d+$/.test(row.querySelector('[name="title"]').value)) row.querySelector('[name="title"]').value = preset.label
 }
 
 function resolveWorkflowAgentName(ref, preferredAdapter, fallback, avoidName) {
@@ -3437,13 +3814,25 @@ function collectWorkflowSteps(workflowInput = '') {
       .map(option => Number(option.value))
       .filter(value => Number.isInteger(value))
     const initialPrompt = row.querySelector('[name="initialPrompt"]').value.trim()
+    const inputs = row.querySelector('[name="contractInputs"]').value.split(',').map(value => value.trim()).filter(Boolean)
+    const outputFiles = row.querySelector('[name="contractOutput"]').value.split(',').map(value => value.trim()).filter(Boolean)
+    const requiredSections = row.querySelector('[name="contractSections"]').value.split(',').map(value => value.trim()).filter(Boolean)
     const promptWithInput = !dependsOn.length && workflowInput
       ? `${initialPrompt}\n\n本次输入：\n${workflowInput}`
       : initialPrompt
     return compactObject({
       from: { adapter: row.querySelector('[name="from"]').value },
-      to: { adapter: row.querySelector('[name="to"]').value },
+      to: { adapter: row.querySelector('[name="agent"]').value },
+      agent: { adapter: row.querySelector('[name="agent"]').value },
       title: row.querySelector('[name="title"]').value.trim(),
+      nodeType: row.querySelector('[name="nodeType"]').value,
+      contract: compactObject({
+        inputs: inputs.length ? inputs : undefined,
+        outputs: outputFiles.length ? outputFiles.map((fileName, index) => ({
+          fileName,
+          requiredSections: index === 0 && requiredSections.length ? requiredSections : undefined,
+        })) : undefined,
+      }),
       initialPrompt: promptWithInput,
       mode: row.querySelector('[name="mode"]').value,
       maxRounds: parseInt(row.querySelector('[name="maxRounds"]').value) || undefined,
@@ -3526,12 +3915,16 @@ function refreshWorkflowStepEditor() {
 window.createWorkflow = async function(e) {
   e.preventDefault()
   const fd = new FormData(e.target)
-  const steps = collectWorkflowSteps(String(fd.get('workflowInput') || '').trim())
+  const workflowInput = String(fd.get('workflowInput') || '').trim()
+  const startAtStep = parseInt(String(fd.get('startAtStep') || '1'), 10)
+  const steps = collectWorkflowSteps(workflowInput)
 
   try {
     const pipeline = await api('/api/pipelines', 'POST', {
       name: String(fd.get('name') || '').trim(),
       steps,
+      startAtStep: Number.isInteger(startAtStep) && startAtStep > 1 ? startAtStep : undefined,
+      manualOutput: workflowInput || undefined,
     })
     closeModal()
     navigate(`/workflow/${pipeline.id}`)
@@ -3570,6 +3963,160 @@ window.approveWorkflowStep = async function(sessionId, waitingForHumanApproval) 
   }
 }
 
+window.rerunWorkflowStep = async function(sessionId, title) {
+  if (!await confirmAction({
+    title: '重跑步骤',
+    message: `重跑 ${title || '当前步骤'}？该步骤之后的产物会被重置。`,
+    confirmText: '重跑',
+  })) return
+  try {
+    const pipeline = await api(`/api/sessions/${sessionId}/rerun`, 'POST')
+    closeModal()
+    applyPipelineUpdate(pipeline)
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.toggleWorkflowLiveReview = async function(sessionId) {
+  if (state.liveReviewStep === sessionId) {
+    window.closeWorkflowLiveReview()
+    return
+  }
+  stopWorkflowSpeechRecognition()
+  state.liveReviewStep = sessionId
+  state.expandedWorkflowStep = sessionId
+  renderWorkflowSteps(state.currentPipeline)
+  const step = state.currentPipeline?.sessions?.find(item => item.sessionId === sessionId)
+  const session = state.currentPipeline?.sessionDetails?.find(item => item.id === sessionId)
+  if (step && session) {
+    await hydrateWorkflowLiveReviewArtifact(step, session, workflowOutputMessage(session.messages || []) || '')
+  }
+  requestAnimationFrame(() => {
+    const panel = document.querySelector(`[data-live-review="${CSS.escape(sessionId)}"]`)
+    panel?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    panel?.querySelector('.live-review-input')?.focus()
+  })
+}
+
+window.closeWorkflowLiveReview = function() {
+  stopWorkflowSpeechRecognition()
+  state.liveReviewStep = null
+  renderWorkflowSteps(state.currentPipeline)
+}
+
+window.updateWorkflowLiveReviewDraft = function(sessionId, value) {
+  state.liveReviewDrafts.set(sessionId, value)
+}
+
+window.handleWorkflowLiveReviewKeydown = function(event, sessionId) {
+  if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+    event.preventDefault()
+    event.currentTarget.form?.requestSubmit()
+  }
+}
+
+window.submitWorkflowLiveReview = async function(event, sessionId) {
+  event.preventDefault()
+  const input = event.currentTarget.querySelector('.live-review-input')
+  const content = String(input?.value || state.liveReviewDrafts.get(sessionId) || '').trim()
+  if (!content || state.liveReviewPending.has(sessionId)) return
+
+  stopWorkflowSpeechRecognition()
+  state.liveReviewPending.add(sessionId)
+  state.liveReviewArtifacts.delete(sessionId)
+  state.liveReviewDrafts.set(sessionId, '')
+  renderWorkflowSteps(state.currentPipeline)
+
+  try {
+    await api(`/api/sessions/${sessionId}/message`, 'POST', { content })
+    if (state.currentPipelineId) {
+      const pipeline = await api(`/api/pipelines/${state.currentPipelineId}`)
+      applyPipelineUpdate(pipeline)
+      const step = pipeline.sessions?.find(item => item.sessionId === sessionId)
+      const session = pipeline.sessionDetails?.find(item => item.id === sessionId)
+      if (step && session) {
+        await hydrateWorkflowLiveReviewArtifact(step, session, workflowOutputMessage(session.messages || []) || '', true)
+      }
+    }
+  } catch (err) {
+    state.liveReviewPending.delete(sessionId)
+    state.liveReviewDrafts.set(sessionId, content)
+    renderWorkflowSteps(state.currentPipeline)
+    showToast(err.message)
+  }
+}
+
+window.toggleWorkflowVoice = function(sessionId) {
+  if (state.workflowSpeechRecognition && state.workflowSpeechSessionId === sessionId) {
+    stopWorkflowSpeechRecognition()
+    return
+  }
+
+  stopWorkflowSpeechRecognition()
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+  if (!SpeechRecognition) {
+    showToast('当前浏览器不支持语音识别')
+    return
+  }
+
+  const recognition = new SpeechRecognition()
+  const base = String(state.liveReviewDrafts.get(sessionId) || '').trim()
+  recognition.lang = 'zh-CN'
+  recognition.continuous = true
+  recognition.interimResults = true
+
+  recognition.onstart = () => {
+    state.workflowSpeechRecognition = recognition
+    state.workflowSpeechSessionId = sessionId
+    updateWorkflowVoiceButton(sessionId, true)
+  }
+  recognition.onresult = (event) => {
+    let finalText = ''
+    let interimText = ''
+    for (let index = 0; index < event.results.length; index += 1) {
+      const text = event.results[index][0]?.transcript || ''
+      if (event.results[index].isFinal) finalText += text
+      else interimText += text
+    }
+    const value = [base, finalText, interimText].filter(Boolean).join(' ').trim()
+    state.liveReviewDrafts.set(sessionId, value)
+    const input = document.querySelector(`[data-live-review="${CSS.escape(sessionId)}"] .live-review-input`)
+    if (input) input.value = value
+  }
+  recognition.onerror = (event) => {
+    if (event.error !== 'aborted' && event.error !== 'no-speech') {
+      showToast(`语音识别失败：${event.error}`)
+    }
+  }
+  recognition.onend = () => {
+    if (state.workflowSpeechRecognition === recognition) {
+      state.workflowSpeechRecognition = null
+      state.workflowSpeechSessionId = null
+    }
+    updateWorkflowVoiceButton(sessionId, false)
+  }
+  recognition.start()
+}
+
+function updateWorkflowVoiceButton(sessionId, listening) {
+  const indicator = document.querySelector(`[data-live-review-mic="${CSS.escape(sessionId)}"]`)
+  const button = indicator?.closest('.live-review-voice')
+  if (indicator) indicator.textContent = listening ? '■' : '●'
+  if (button) button.classList.toggle('listening', listening)
+}
+
+function stopWorkflowSpeechRecognition() {
+  const recognition = state.workflowSpeechRecognition
+  const sessionId = state.workflowSpeechSessionId
+  state.workflowSpeechRecognition = null
+  state.workflowSpeechSessionId = null
+  if (recognition) {
+    try { recognition.stop() } catch { /* already stopped */ }
+  }
+  if (sessionId) updateWorkflowVoiceButton(sessionId, false)
+}
+
 window.openWorkflowStepMessage = function(sessionId, title) {
   showModal(`
     <div class="modal-card">
@@ -3599,6 +4146,50 @@ window.submitWorkflowStepMessage = async function(event, sessionId) {
   if (!content) return
   try {
     await api(`/api/sessions/${sessionId}/message`, 'POST', { content })
+    closeModal()
+    if (state.currentPipelineId) {
+      const pipeline = await api(`/api/pipelines/${state.currentPipelineId}`)
+      applyPipelineUpdate(pipeline)
+    }
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.openManualArtifactsModal = function(sessionId, title) {
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>主进程补图回填：${escapeHtml(title || '当前步骤')}</h3>
+        <button class="icon-btn" onclick="window.closeModal()">×</button>
+      </div>
+      <form onsubmit='window.submitManualArtifacts(event, ${jsString(sessionId)})'>
+        <div class="form-group">
+          <label>本地文件路径</label>
+          <textarea class="input" name="paths" rows="5" required placeholder="/absolute/path/to/image.png&#10;/absolute/path/to/another.png"></textarea>
+          <small class="form-hint">在 Codex 主进程生图并保存到本地后，把图片路径粘贴到这里；提交后会校验文件存在、标记本步骤完成，并自动激活下游步骤。</small>
+        </div>
+        <div class="form-group">
+          <label>结果说明</label>
+          <input class="input" name="summary" placeholder="例如：已由 Codex 主进程生成分镜图和角色三视图">
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">回填并完成本步骤</button>
+        </div>
+      </form>
+    </div>
+  `)
+}
+
+window.submitManualArtifacts = async function(event, sessionId) {
+  event.preventDefault()
+  const fd = new FormData(event.target)
+  const paths = String(fd.get('paths') || '').split(/\r?\n|,/).map(path => path.trim()).filter(Boolean)
+  const summary = String(fd.get('summary') || '').trim()
+  if (!paths.length) return
+  try {
+    await api(`/api/sessions/${sessionId}/manual-artifacts`, 'POST', { paths, summary })
     closeModal()
     if (state.currentPipelineId) {
       const pipeline = await api(`/api/pipelines/${state.currentPipelineId}`)
@@ -4053,7 +4644,13 @@ function renderWorkflowMarkdown(content, cwd) {
   const html = renderMarkdown(content)
   const template = document.createElement('template')
   template.innerHTML = html
-  const previewCode = file => `window.previewWorkflowFile(${jsString(resolveWorkflowFilePath(file))}, ${jsString(cwd || '')}); return false`
+  const previewCode = file => {
+    const resolved = resolveWorkflowFilePath(file)
+    const resolution = state.workflowFileResolution.get(resolved) || state.workflowFileResolution.get(String(file))
+    return resolution !== 'missing'
+      ? `window.previewWorkflowFile(${jsString(resolved)}, ${jsString(cwd || '')}); return false`
+      : ''
+  }
 
   for (const anchor of template.content.querySelectorAll('a[href]')) {
     const href = anchor.getAttribute('href') || ''
@@ -4068,8 +4665,14 @@ function renderWorkflowMarkdown(content, cwd) {
       anchor.setAttribute('href', '#')
       anchor.removeAttribute('target')
       anchor.removeAttribute('rel')
-      anchor.setAttribute('onclick', previewCode(file))
-      anchor.classList.add('workflow-inline-file')
+      const handler = previewCode(file)
+      if (handler) {
+        anchor.setAttribute('onclick', handler)
+        anchor.classList.add('workflow-inline-file')
+      } else {
+        anchor.removeAttribute('onclick')
+        anchor.classList.add('workflow-inline-file-unavailable')
+      }
     }
   }
 
@@ -4095,10 +4698,13 @@ function renderWorkflowMarkdown(content, cwd) {
       if (match.index > offset) fragment.appendChild(document.createTextNode(text.slice(offset, match.index)))
       const reference = referenceBySource.get(match[0])
       const link = document.createElement('span')
-      link.className = 'workflow-inline-file'
-      link.setAttribute('role', 'button')
-      link.setAttribute('tabindex', '0')
-      link.setAttribute('onclick', previewCode(reference?.resolved || match[0]))
+      const handler = previewCode(reference?.resolved || match[0])
+      link.className = handler ? 'workflow-inline-file' : 'workflow-inline-file-unavailable'
+      if (handler) {
+        link.setAttribute('role', 'button')
+        link.setAttribute('tabindex', '0')
+        link.setAttribute('onclick', handler)
+      }
       link.textContent = match[0]
       fragment.appendChild(link)
       offset = match.index + match[0].length

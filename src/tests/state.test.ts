@@ -204,7 +204,12 @@ test('pipeline CRUD persists ordered steps and dependencies', () => {
       id: 'pipeline-1',
       name: 'Pipeline Test',
       sessions: [
-        { sessionId: 'pipeline-session-1', status: 'active' },
+        {
+          sessionId: 'pipeline-session-1',
+          nodeType: 'copy_adapt',
+          contract: { inputs: ['reference.md'], outputs: [{ fileName: 'script-adapted.md', requiredSections: ['改编文案'] }] },
+          status: 'active',
+        },
         { sessionId: 'pipeline-session-2', dependsOn: ['pipeline-session-1'], status: 'pending' },
       ],
     })
@@ -212,7 +217,12 @@ test('pipeline CRUD persists ordered steps and dependencies', () => {
     assert.equal(pipeline.name, 'Pipeline Test')
     assert.equal(pipeline.status, 'active')
     assert.deepEqual(pipeline.sessions, [
-      { sessionId: 'pipeline-session-1', status: 'active' },
+      {
+        sessionId: 'pipeline-session-1',
+        nodeType: 'copy_adapt',
+        contract: { inputs: ['reference.md'], outputs: [{ fileName: 'script-adapted.md', requiredSections: ['改编文案'] }] },
+        status: 'active',
+      },
       { sessionId: 'pipeline-session-2', dependsOn: ['pipeline-session-1'], status: 'pending' },
     ])
 

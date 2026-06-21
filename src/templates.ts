@@ -1,6 +1,6 @@
 // Session templates — predefined scenario presets
 
-import type { PermissionMode, SessionContextInput, SessionMode } from './types.js'
+import type { PermissionMode, SessionContextInput, SessionMode, WorkflowNodeType, WorkflowStepContract } from './types.js'
 
 export interface SessionTemplate {
   id: string
@@ -32,6 +32,9 @@ export interface SessionTemplate {
 
 export interface PipelineTemplateStep {
   title: string
+  nodeType?: WorkflowNodeType
+  agent?: { adapter: string }
+  contract?: WorkflowStepContract
   from: { adapter: string }
   to: { adapter: string }
   initialPrompt: string
@@ -43,6 +46,8 @@ export interface PipelineTemplateStep {
   outputDir?: string
   context?: SessionContextInput
   dependsOn?: number[]
+  manualDone?: boolean
+  manualOutput?: string
 }
 
 export interface PipelineTemplate {

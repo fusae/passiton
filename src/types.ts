@@ -3,6 +3,17 @@
 export type SessionStatus = 'active' | 'paused' | 'done' | 'error' | 'stopped'
 export type TaskStatus = 'queued' | 'running' | 'done' | 'error' | 'stopped'
 export type PermissionMode = 'safe' | 'trusted'
+export type WorkflowNodeType = 'video_parse' | 'copy_adapt' | 'storyboard_script' | 'image_generate' | 'video_command' | 'video_generate' | 'human_review' | 'custom'
+
+export interface WorkflowOutputContract {
+  fileName: string
+  requiredSections?: string[]
+}
+
+export interface WorkflowStepContract {
+  inputs?: string[]
+  outputs?: WorkflowOutputContract[]
+}
 
 // Session modes determine the system prompts and interaction style
 export type SessionMode = 'collaborate' | 'discuss' | 'review' | 'freeform'
@@ -31,6 +42,7 @@ export interface SessionLog {
 }
 
 export interface SessionArtifacts {
+  generatedFiles?: string[]
   gitDiffStat?: string
   gitDiffFull?: string
   filesChanged?: Array<{
@@ -125,12 +137,17 @@ export interface Pipeline {
 export interface PipelineStep {
   sessionId: string
   title?: string
+  nodeType?: WorkflowNodeType
+  contract?: WorkflowStepContract
   dependsOn?: string[]
   status: 'pending' | 'active' | 'done' | 'error'
 }
 
 export interface PipelineTemplateRecordStep {
   title?: string
+  nodeType?: WorkflowNodeType
+  agent?: AgentRef
+  contract?: WorkflowStepContract
   from: AgentRef
   to: AgentRef
   initialPrompt: string
@@ -142,6 +159,8 @@ export interface PipelineTemplateRecordStep {
   outputDir?: string
   context?: SessionContextInput
   dependsOn?: number[]
+  manualDone?: boolean
+  manualOutput?: string
 }
 
 export interface PipelineTemplateRecord {
@@ -250,6 +269,7 @@ export interface AdapterCapabilities {
   tools: boolean
   fileSystem: boolean
   shell: boolean
+  imageGeneration?: boolean
 }
 
 // Adapter interface — one per agent type

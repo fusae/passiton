@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
@@ -150,6 +150,41 @@ test('video preview returns stream metadata and supports range requests', async 
   })
 })
 
+test('file resolver handles cwd, base file, unique basename, and missing paths', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'file-resolver@example.com')
+    const dir = mkdtempSync(join(tmpdir(), 'turing-file-resolver-'))
+    try {
+      const outputDir = join(dir, 'output', 'episode')
+      mkdirSync(outputDir, { recursive: true })
+      const referencePath = join(outputDir, 'reference.md')
+      const videoPath = join(outputDir, 'video.mp4')
+      writeFileSync(referencePath, 'video: `video.mp4`')
+      writeFileSync(videoPath, 'video')
+
+      const response = await fetch(`${baseUrl}/api/files/resolve`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          cwd: dir,
+          baseFile: 'output/episode/reference.md',
+          paths: ['output/episode/reference.md', 'video.mp4', 'reference.md', 'missing.mp4'],
+        }),
+      })
+      assert.equal(response.status, 200)
+      const payload = await response.json() as Array<{ source: string; exists: boolean; path?: string }>
+      assert.deepEqual(payload, [
+        { source: 'output/episode/reference.md', exists: true, path: referencePath },
+        { source: 'video.mp4', exists: true, path: videoPath },
+        { source: 'reference.md', exists: true, path: referencePath },
+        { source: 'missing.mp4', exists: false },
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 test('GET /api/docs returns unauthenticated API reference', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/docs`)
@@ -198,6 +233,61 @@ test('pipeline template API creates, lists, and deletes user templates', async (
       headers: authHeaders(auth.token),
     })
     assert.equal(deleted.status, 200)
+  })
+})
+
+test('POST /api/pipelines can start from a later step with manual completed predecessors', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'pipeline-start-at@example.com')
+    const created = await fetch(`${baseUrl}/api/pipelines`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Start from storyboard',
+        startAtStep: 3,
+        manualOutput: 'reference and script were already discussed',
+        steps: [
+          {
+            from: { adapter: 'codex' },
+            to: { adapter: 'codex' },
+            title: '解析对标视频',
+            initialPrompt: 'parse',
+            mode: 'freeform',
+          },
+          {
+            from: { adapter: 'codex' },
+            to: { adapter: 'codex' },
+            title: '改编文案',
+            initialPrompt: 'adapt',
+            mode: 'freeform',
+            dependsOn: [0],
+          },
+          {
+            from: { adapter: 'codex' },
+            to: { adapter: 'codex' },
+            title: '生成分镜与 Prompt',
+            initialPrompt: 'storyboard',
+            mode: 'freeform',
+            dependsOn: [1],
+            approveMode: true,
+          },
+        ],
+      }),
+    })
+    assert.equal(created.status, 201)
+    const pipeline = await created.json() as { id: string; sessions: Array<{ sessionId: string; status: string }> }
+    assert.deepEqual(pipeline.sessions.slice(0, 2).map((step) => step.status), ['done', 'done'])
+
+    await waitFor(async () => {
+      const response = await fetch(`${baseUrl}/api/pipelines/${pipeline.id}`, { headers: authHeaders(auth.token) })
+      const refreshed = await response.json() as { sessions: Array<{ status: string }> }
+      return refreshed.sessions[2]?.status === 'active'
+    })
+
+    const firstSession = await fetch(`${baseUrl}/api/sessions/${pipeline.sessions[0]!.sessionId}`, { headers: authHeaders(auth.token) })
+    const payload = await firstSession.json() as { status: string; messages: Array<{ from: string; content: string }> }
+    assert.equal(payload.status, 'done')
+    assert.equal(payload.messages.some((message) => message.from === 'workflow' && message.content.includes('reference and script were already discussed')), true)
   })
 })
 

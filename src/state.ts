@@ -247,6 +247,8 @@ function createTables(): void {
       session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       position    INTEGER NOT NULL,
       title       TEXT,
+      node_type   TEXT,
+      contract    TEXT,
       depends_on  TEXT,
       status      TEXT NOT NULL DEFAULT 'pending',
       PRIMARY KEY (pipeline_id, session_id)
@@ -337,6 +339,12 @@ function createTables(): void {
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE pipeline_steps ADD COLUMN title TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE pipeline_steps ADD COLUMN node_type TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE pipeline_steps ADD COLUMN contract TEXT`)
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE messages ADD COLUMN metadata TEXT`)
@@ -937,6 +945,8 @@ function rowToPipelineStep(row: Record<string, unknown>): PipelineStep {
   return {
     sessionId: row.session_id as string,
     ...(typeof row.title === 'string' && row.title ? { title: row.title } : {}),
+    ...(typeof row.node_type === 'string' && row.node_type ? { nodeType: row.node_type as PipelineStep['nodeType'] } : {}),
+    ...(typeof row.contract === 'string' && row.contract ? { contract: JSON.parse(row.contract) as PipelineStep['contract'] } : {}),
     ...(dependsOn && dependsOn.length > 0 ? { dependsOn } : {}),
     status: row.status as PipelineStep['status'],
   }
@@ -951,8 +961,8 @@ function getPipelineSteps(pipelineId: string): PipelineStep[] {
 
 function insertPipelineSteps(pipelineId: string, steps: PipelineStep[]): void {
   const stmt = db.prepare(`
-    INSERT INTO pipeline_steps (pipeline_id, session_id, position, title, depends_on, status)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO pipeline_steps (pipeline_id, session_id, position, title, node_type, contract, depends_on, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `)
   steps.forEach((step, index) => {
     stmt.run(
@@ -960,6 +970,8 @@ function insertPipelineSteps(pipelineId: string, steps: PipelineStep[]): void {
       step.sessionId,
       index,
       step.title ?? null,
+      step.nodeType ?? null,
+      step.contract ? JSON.stringify(step.contract) : null,
       step.dependsOn && step.dependsOn.length > 0 ? JSON.stringify(step.dependsOn) : null,
       step.status
     )
@@ -1320,6 +1332,10 @@ export function stopExternalJobsForSession(sessionId: string): void {
     SET status = 'stopped', updated_at = ?
     WHERE session_id = ? AND status = 'querying'
   `).run(Date.now(), sessionId)
+}
+
+export function clearExternalJobsForSession(sessionId: string): void {
+  db.prepare('DELETE FROM external_jobs WHERE session_id = ?').run(sessionId)
 }
 
 function rowToExternalJob(row: Record<string, unknown>): ExternalJob {

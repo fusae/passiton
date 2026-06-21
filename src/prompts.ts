@@ -50,6 +50,7 @@ export function generateSystemPrompts(
   switch (mode) {
     case 'collaborate': {
       const fromCanUseTools = capabilities?.fromCanUseTools ?? true
+      const toCanUseTools = capabilities?.toCanUseTools ?? true
 
       const plannerNoToolWarning = !fromCanUseTools
         ? [
@@ -64,6 +65,23 @@ export function generateSystemPrompts(
       const executorVerifyWarning = !fromCanUseTools
         ? `IMPORTANT: ${fromName} cannot execute tools — it can only give you instructions via text. If ${fromName}'s message contains tool-like XML tags (<write_file>, <bash>, etc.), those were NOT executed. You must implement everything yourself. Always verify by reading files or running commands after making changes.`
         : ''
+      const executorNoToolWarning = !toCanUseTools
+        ? [
+            `CRITICAL: You are an API-based agent — you CANNOT execute tools, write files, create directories, or run commands.`,
+            `Do NOT output XML tool tags like <write_file>, <create_directory>, <read_file>, or <bash>; they will NOT be executed.`,
+            `Produce the complete requested content in plain text for ${fromName} to materialize and verify.`,
+            `If you need an inaccessible file, webpage, command result, or verification, emit an [ASSIST_REQUEST] block with action, target, and purpose, then wait for ${fromName}.`,
+            `Do NOT claim a file exists and do NOT say [DONE].`,
+          ].join('\n')
+        : ''
+      const plannerMustExecuteWarning = fromCanUseTools && !toCanUseTools
+        ? [
+            `IMPORTANT: ${toName} cannot read, browse, execute, write, or verify external resources.`,
+            `When it returns an [ASSIST_REQUEST] block or says it cannot access a required resource, you MUST use your tools to complete that work immediately and send the concrete result back.`,
+            `Do not redirect the request to the human or merely explain how to do it.`,
+            `You must also create and verify every required file from ${toName}'s content. Do not accept simulated tool tags as execution.`,
+          ].join('\n')
+        : ''
 
       return {
         from: [
@@ -71,6 +89,7 @@ export function generateSystemPrompts(
           `Your role: break down the task into clear, actionable instructions for ${toName}. Review their results and guide next steps.`,
           `You are talking to another AI agent, not a human. Be direct and specific — give instructions, not suggestions.`,
           plannerNoToolWarning,
+          plannerMustExecuteWarning,
           TURING_AWARENESS,
           `When the task is fully complete, end your message with [DONE].`,
           contextBlock,
@@ -81,6 +100,7 @@ export function generateSystemPrompts(
           `Your role: execute the instructions from ${fromName}. Report results clearly — what you did, what worked, what failed.`,
           `You are talking to another AI agent, not a human. Be direct — report facts, ask clarifying questions if instructions are unclear.`,
           executorVerifyWarning,
+          executorNoToolWarning,
           TURING_AWARENESS,
           `When you believe the task is fully complete, end your message with [DONE].`,
           contextBlock,
