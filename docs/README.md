@@ -15,12 +15,17 @@ Turing 是一个本地运行的 **AI Agent 通信代理**。它让任意两个 A
 | **gemini-cli** | Google Gemini CLI |
 | **opencode** | OpenCode（支持 GLM、GPT 等多模型） |
 
+此外支持通过 API 接入 Anthropic、OpenAI、DeepSeek、智谱等模型作为 Assistant。
+
 ## 怎么用
 
 ### 启动
 
 ```bash
-cd ~/Projects/turing && node dist/index.js
+# 在项目根目录
+npm install
+npm run build
+npm start
 ```
 
 Server 跑在 `http://localhost:4590`。
@@ -33,12 +38,17 @@ Server 跑在 `http://localhost:4590`。
 - 创建新 session
 - 人类插入（暂停 / 发消息 / 继续）
 
-### 通过 Cola
+### 通过 CLI
 
-直接跟 Cola 说，比如：
-- "让 Codex 和 OpenCode 讨论下这个问题"
-- "暂停那个 session"
-- "我插一句话进去"
+安装 `turing` 命令后，可直接通过命令行创建任务、查看会话：
+
+```bash
+turing --help
+turing task create --agent opencode --cwd /path/to/project "执行写作工作流"
+turing chat --from codex --to claude-code --cwd /path/to/project "检查并优化这个项目"
+turing sessions
+turing log <session-id>
+```
 
 ---
 
@@ -46,7 +56,7 @@ Server 跑在 `http://localhost:4590`。
 
 Base URL: `http://localhost:4590`
 
-所有请求和响应都是 JSON。
+所有请求和响应都是 JSON。`/api/*` 接口需要 Bearer token 鉴权。
 
 ---
 
@@ -81,10 +91,10 @@ POST /api/tasks
   "agent": { "adapter": "opencode", "label": "OpenCode" },
   "prompt": "把这条推荐写成一篇公众号文章",
   "context": {
-    "rules": "按 media-management 的写文规程执行",
+    "rules": "按既定写文规程执行",
     "text": "推荐标题、摘要、原文链接、建议角度"
   },
-  "cwd": "/path/to/media-management"
+  "cwd": "/path/to/project"
 }
 ```
 
@@ -96,7 +106,7 @@ POST /api/tasks
 | `context.files` | ❌ | 文件路径列表，创建任务时读取并注入 |
 | `context.rules` | ❌ | 约束 / 规则文本 |
 | `context.text` | ❌ | 背景信息 |
-| `cwd` | ❌ | agent 工作目录 |
+| `cwd` | ❌ | agent 工作目录（需要本地 CLI agent） |
 | `systemPrompt` | ❌ | 覆盖默认任务系统提示 |
 
 **返回**：创建好的 task 对象，初始状态为 `queued`。
@@ -147,7 +157,7 @@ POST /api/sessions
 | `context.files` | ❌ | 文件路径列表。创建 session 时会读取内容并缓存，后续每轮都注入给 agent |
 | `context.rules` | ❌ | 约束 / 规则文本 |
 | `context.text` | ❌ | 自由背景说明 |
-| `cwd` | ❌ | agent 的工作目录，默认当前目录 |
+| `cwd` | ❌ | agent 的工作目录，默认当前目录（需要本地 CLI agent） |
 | `maxRounds` | ❌ | 最大对话轮数，默认 20 |
 | `approveMode` | ❌ | 是否每轮需要人类审批，默认 false |
 
@@ -184,7 +194,7 @@ GET /api/sessions?status=active
 
 | 参数 | 说明 |
 |------|------|
-| `status` | 可选，筛选状态：`active` / `paused` / `done` / `error` |
+| `status` | 可选，筛选状态：`active` / `paused` / `done` / `error` / `stopped` |
 
 **返回**：session 列表（不含消息内容）。
 
@@ -215,7 +225,7 @@ GET /api/sessions/:id
       "timestamp": 1776944953314
     },
     {
-      "id": "607e445e-...",
+      "id": "604e445e-...",
       "from": "opencode",
       "content": "文件已创建...",
       "round": 1,
@@ -341,12 +351,13 @@ POST /api/sessions/:id/release
 }
 ```
 
-会跟默认配置深度合并，你只需要写要覆盖的部分。
+会跟默认配置深度合并，你只需要写要覆盖的部分。完整配置说明见项目根目录的 `README.md`。
 
 ## 数据
 
-- SQLite 数据库：`~/Projects/turing/data/turing.db`
+- SQLite 数据库：`~/.turing/turing.db`
 - 所有 session 和消息都持久化，重启不丢
+- 消息默认保留 30 天，可在配置中调整
 
 ## WebSocket
 

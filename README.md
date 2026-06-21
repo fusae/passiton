@@ -2,7 +2,37 @@
 
 本地运行的多 Agent 编排工具。它把 CLI Agent 和 API Assistant 接到同一个 Web UI、HTTP API 和 SQLite 状态库中，用于分派任务、双 Agent 协作和多步骤工作流。
 
-默认地址：`http://localhost:4590`
+Turing 是 **local-first** 的：默认跑在本机，数据存在 `~/.turing/`，不需要外部服务。
+
+## 快速开始
+
+### 安装与启动
+
+```bash
+git clone <repo-url> turing
+cd turing
+npm install
+npm run build
+npm start
+```
+
+打开 `http://localhost:4590` 即可使用。
+
+### 前置条件
+
+- **Node.js 20+**
+- 至少一个 CLI Agent（用于需要本地文件读写的任务）：[Codex](https://github.com/openai/codex)、[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Gemini CLI](https://github.com/google-gemini/gemini-cli)、[OpenCode](https://github.com/sst/opencode)
+- 或者一个 API Provider Key（Anthropic / OpenAI / DeepSeek / 智谱）用于纯 API 模式
+
+首次启动时，Turing 会：
+1. 自动生成 JWT secret 并写入 `~/.turing/config.json`（无需手动配置即可安全运行）
+2. 自动探测本机已安装的 CLI Agent（可在 Settings 页查看）
+
+### 验证
+
+```bash
+npm test
+```
 
 ## 核心能力
 
@@ -14,20 +44,6 @@
 - **能力约束**：带 `cwd` 的 Task/Session 需要本地 CLI Agent 执行文件读写；API Assistant 可做规划，但不能直接操作本地文件。
 - **文件预览**：Workflow 产出的 Markdown、文本、图片和视频可直接在页面中预览。
 - **运行恢复**：服务重启后会恢复队列，并将中断的 Session 标记为可恢复状态。
-
-## 安装与启动
-
-```bash
-npm install
-npm run build
-npm start
-```
-
-开发验证：
-
-```bash
-npm test
-```
 
 ## Web UI
 
@@ -43,7 +59,7 @@ npm test
 
 ## 配置
 
-配置文件：`~/.turing/config.json`
+配置文件：`~/.turing/config.json`，与默认配置深度合并，只需写要覆盖的部分。
 
 示例：
 
@@ -69,18 +85,6 @@ npm test
       "command": "claude",
       "args": ["-p", "{prompt}", "--output-format", "stream-json", "--verbose"],
       "timeout": 600000
-    },
-    "opencode": {
-      "adapter": "opencode",
-      "command": "opencode",
-      "args": ["run", "{prompt}"],
-      "timeout": 600000
-    },
-    "gemini-cli": {
-      "adapter": "gemini-cli",
-      "command": "gemini",
-      "args": ["-p", "{prompt}"],
-      "timeout": 600000
     }
   }
 }
@@ -99,16 +103,9 @@ npm test
 }
 ```
 
-也支持环境变量覆盖默认命令：
+所有可用的环境变量见 [`.env.example`](./.env.example)。
 
-```bash
-TURING_CODEX_COMMAND=/path/to/codex
-TURING_CLAUDE_COMMAND=/path/to/claude
-TURING_GEMINI_COMMAND=/path/to/gemini
-TURING_OPENCODE_COMMAND=/path/to/opencode
-```
-
-## 权限模式
+### 权限模式
 
 Session 和 Workflow Step 支持两种权限模式：
 
@@ -117,9 +114,17 @@ Session 和 Workflow Step 支持两种权限模式：
 | `safe` | 默认值，不自动绕过 CLI Agent 的权限检查。 |
 | `trusted` | 仅用于可信工作流；要求填写 `cwd`，并为支持的 CLI Agent 注入自动放权参数。 |
 
-`trusted` 模式应配合 `policy.allowedWorkspaces` 限制工作目录。
+`trusted` 模式应配合 `policy.allowedWorkspaces` 限制工作目录。详见 [SECURITY.md](./SECURITY.md)。
 
-## Agent 能力约束
+### 暴露到本机之外
+
+Turing 默认只服务 `localhost` 且开启本机自动登录。**如果你要通过 Tailscale、Cloudflare Tunnel、局域网或公网暴露它**，必须：
+
+1. 关闭本地自动登录：`TURING_LOCAL_ACCESS=false`
+2. 显式设置 `TURING_JWT_SECRET`
+3. 用 `policy.allowedWorkspaces` 限制 CLI Agent 可操作的目录
+
+### Agent 能力约束
 
 API Assistant 只能通过模型 API 返回文本，不能读取或写入本地项目文件。CLI Agent 由本机进程启动，可以在 `cwd` 指定目录内执行命令和改文件。
 
@@ -204,6 +209,15 @@ Workflow 是由多个 Session 组成的 Pipeline。每一步可以设置：
 
 `dependsOn` 使用从 `0` 开始的步骤索引。没有依赖的步骤可以并行启动。
 
+## 实验性功能
+
+以下功能需要外部二进制或凭证，默认关闭，不影响核心运行：
+
+- **Dreamina 视频生成**：`video_generate` 工作流步骤需要即梦 CLI。设置 `TURING_DREAMINA_COMMAND` 启用。
+- **Gemini Image 分镜生成**：`image_generate` 步骤的 Gemini Web 执行器。设置 `TURING_GEMINI_SKILL_SCRIPT` 启用。
+
+未配置时，相关 workflow 步骤会返回明确的配置错误，服务本身正常启动。
+
 ## HTTP API
 
 常用接口：
@@ -262,3 +276,11 @@ GET    /api/files/content
 ```
 
 设为 `0` 可关闭消息 GC。
+
+## 贡献
+
+欢迎贡献。开发指南、项目结构和提交规范见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+
+## 许可证
+
+[MIT](./LICENSE)

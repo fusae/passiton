@@ -25,7 +25,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     mode: 'collaborate',
   },
   features: {
-    localCliAgents: parseBooleanEnv(process.env.TURING_LOCAL_CLI_AGENTS) ?? false,
+    localCliAgents: parseBooleanEnv(process.env.TURING_LOCAL_CLI_AGENTS) ?? true,
   },
   agents: {},
   policy: {

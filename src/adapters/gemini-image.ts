@@ -4,8 +4,8 @@ import path from 'path'
 import type { Adapter, AdapterResponse, AdapterSendOpts, Session } from '../types.js'
 import { buildPrompt, runCommand } from './shared.js'
 
-const SKILL_SCRIPT = '/Users/jamesyu/.agents/skills/baoyu-danger-gemini-web/scripts/main.ts'
-const NPX_COMMAND = process.env.TURING_NPX_COMMAND ?? '/opt/homebrew/bin/npx'
+const SKILL_SCRIPT = process.env.TURING_GEMINI_SKILL_SCRIPT ?? ''
+const NPX_COMMAND = process.env.TURING_NPX_COMMAND ?? 'npx'
 const COOKIE_PATH = process.env.GEMINI_WEB_COOKIE_PATH ??
   path.join(os.homedir(), 'Library', 'Application Support', 'baoyu-skills', 'gemini-web', 'cookies.json')
 

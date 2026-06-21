@@ -25,7 +25,7 @@ const GIT_DIFF_TIMEOUT_MS = 10_000
 const PIPELINE_DEP_MAX_FILES = 8
 const PIPELINE_DEP_FILE_CHARS = 12_000
 const PIPELINE_DEP_TEXT_CHARS = 4_000
-const DREAMINA_COMMAND = process.env.TURING_DREAMINA_COMMAND ?? '/Users/jamesyu/.local/bin/dreamina'
+const DREAMINA_COMMAND = process.env.TURING_DREAMINA_COMMAND ?? ''
 const DREAMINA_POLL_INTERVAL_MS = 10_000
 const CURL_COMMAND = process.env.TURING_CURL_COMMAND ?? 'curl'
 const FFMPEG_COMMAND = process.env.TURING_FFMPEG_COMMAND ?? 'ffmpeg'
@@ -1433,7 +1433,9 @@ export class Router extends EventEmitter {
       .reverse()
       .find((message) => message.from !== 'human' && message.content.trim())
       ?.content
-    return state.updateSession(sessionId, { status: 'done', artifacts, ...(lastAgentOutput ? { lastAgentOutput } : {}) })
+    const completed = state.updateSession(sessionId, { status: 'done', artifacts, ...(lastAgentOutput ? { lastAgentOutput } : {}) })
+    this.clearRuntimeState(sessionId)
+    return completed
   }
 
   private registerDreaminaJob(sessionId: string, pending: { externalId: string; downloadDir: string }): void {
@@ -1540,6 +1542,11 @@ export class Router extends EventEmitter {
   private abortActiveTurn(sessionId: string): void {
     this.turnControllers.get(sessionId)?.abort()
     this.turnControllers.delete(sessionId)
+  }
+
+  private clearRuntimeState(sessionId: string): void {
+    this.runEpochs.delete(sessionId)
+    this.lastStreamStepSignatures.delete(sessionId)
   }
 
   private shouldCompleteSession(sessionId: string, session: Session, response: string): boolean {
@@ -1991,9 +1998,16 @@ function extractVideoPaths(content: string): string[] {
   ))
 }
 
+function requireDreaminaCommand(): string {
+  if (!DREAMINA_COMMAND) {
+    throw new Error('Dreamina is not configured. Set TURING_DREAMINA_COMMAND to the dreamina binary path to enable video generation steps.')
+  }
+  return DREAMINA_COMMAND
+}
+
 async function queryDreaminaResult(externalId: string, downloadDir: string): Promise<DreaminaQueryResult> {
   fs.mkdirSync(downloadDir, { recursive: true })
-  const stdout = await execFileText(DREAMINA_COMMAND, [
+  const stdout = await execFileText(requireDreaminaCommand(), [
     'query_result',
     `--submit_id=${externalId}`,
   ])

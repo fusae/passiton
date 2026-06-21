@@ -3,7 +3,7 @@
     "port": 4590
   },
   "features": {
-    "localCliAgents": false
+    "localCliAgents": true
   },
   "auth": {
     "allowRegistration": false,

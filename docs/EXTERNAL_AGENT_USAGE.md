@@ -141,7 +141,7 @@ GET /api/sessions/<id>
 
 **Response:** Session object with `status` and `messages` array.
 
-Status values: `active`, `paused`, `done`, `error`
+Status values: `active`, `paused`, `done`, `error`, `stopped`.
 
 When `status` is `done`, the result is in the last message's content. If the agent used `[RESULT]...[/RESULT]` tags, the result is extracted into `artifacts.summary`.
 
