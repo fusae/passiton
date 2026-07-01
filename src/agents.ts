@@ -79,21 +79,9 @@ const DISCOVERY_PRESETS: DiscoveryPreset[] = [
   { name: 'claude-code', adapter: 'claude-code', commands: ['claude'], envVars: ['TURING_CLAUDE_COMMAND'], supported: true },
   { name: 'gemini-cli', adapter: 'gemini-cli', commands: ['gemini'], envVars: ['TURING_GEMINI_COMMAND'], supported: true },
   { name: 'opencode', adapter: 'opencode', commands: ['opencode'], envVars: ['TURING_OPENCODE_COMMAND'], supported: true },
-  { name: 'amp', adapter: 'amp', commands: ['amp'], supported: false },
-  { name: 'aider', adapter: 'aider', commands: ['aider'], supported: false },
-  { name: 'cline', adapter: 'cline', commands: ['cline'], supported: false },
-  { name: 'continue', adapter: 'continue', commands: ['continue', 'cn'], supported: false },
-  { name: 'copilot', adapter: 'copilot', commands: ['copilot'], supported: false },
-  { name: 'cursor', adapter: 'cursor', commands: ['cursor-agent', 'cursor'], supported: false },
-  { name: 'devin', adapter: 'devin', commands: ['devin'], supported: false },
-  { name: 'goose', adapter: 'goose', commands: ['goose'], supported: false },
-  { name: 'kiro', adapter: 'kiro', commands: ['kiro'], supported: false },
-  { name: 'kilo-code', adapter: 'kilo-code', commands: ['kilo', 'kilo-code'], supported: false },
-  { name: 'openhands', adapter: 'openhands', commands: ['openhands', 'openhands-cli'], supported: false },
-  { name: 'roo-code', adapter: 'roo-code', commands: ['roo', 'roo-code'], supported: false },
-  { name: 'swe-agent', adapter: 'swe-agent', commands: ['sweagent', 'swe-agent'], supported: false },
-  { name: 'windsurf', adapter: 'windsurf', commands: ['windsurf'], supported: false },
-  { name: 'zed-agent', adapter: 'zed-agent', commands: ['zed'], supported: false },
+  // Other CLI agents (aider, goose, amp, cursor, windsurf, ...) are deliberately
+  // not auto-discovered. They have no bundled adapter yet; users who want one can
+  // register a custom adapter or contribute. See docs/community-adapters.md.
 ]
 
 export class AgentCatalog {

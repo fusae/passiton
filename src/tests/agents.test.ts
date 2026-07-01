@@ -38,9 +38,12 @@ test('findExecutable searches fallback bin paths outside PATH', async () => {
   }
 })
 
-test('AgentCatalog discovers supported and unsupported local agents', async () => {
+test('AgentCatalog discovers bundled CLI agents and ignores unknown binaries', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-discover-'))
   writeExecutable(join(dir, 'codex'), 'echo codex-test')
+  // An agent without a bundled adapter (aider) should NOT be auto-discovered —
+  // only the four shipped CLI presets are. Users can still register custom
+  // adapters explicitly. See docs/community-adapters.md.
   writeExecutable(join(dir, 'aider'), 'echo aider-test')
   setExtraAgentSearchPathsForTesting([dir])
 
@@ -54,8 +57,7 @@ test('AgentCatalog discovers supported and unsupported local agents', async () =
     assert.equal(codex?.source, 'discovered')
     assert.equal(codex?.availableForSessions, true)
     assert.equal(codex?.healthy, true)
-    assert.equal(aider?.availableForSessions, false)
-    assert.equal(aider?.healthy, true)
+    assert.equal(aider, undefined)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

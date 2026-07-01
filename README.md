@@ -1,8 +1,10 @@
 # Turing
 
-本地运行的多 Agent 编排工具。它把 CLI Agent 和 API Assistant 接到同一个 Web UI、HTTP API 和 SQLite 状态库中，用于分派任务、双 Agent 协作和多步骤工作流。
+**开源的多 Agent 编排引擎**：把任意 AI agent（CLI 工具或 API 模型）串成可复用、带人工审核的工作流。
 
-Turing 是 **local-first** 的：默认跑在本机，数据存在 `~/.turing/`，不需要外部服务。
+Turing 把 CLI Agent（Codex / Claude Code / Gemini CLI / OpenCode）和 API Assistant（Anthropic / OpenAI / 智谱等）接到同一个 Web UI、HTTP API 和 SQLite 状态库——你用它分派任务、编排双 Agent 协作、或把多步骤任务串成可复用的 Pipeline。
+
+Turing 是 **local-first** 的：默认跑在本机，数据存在 `~/.turing/`，不需要外部服务。引擎内核本身不绑定任何厂商——视频/渲染等外部任务都通过可插拔的 Provider 接入（见 [扩展点](#扩展点external-task-providers)）。
 
 ## 快速开始
 
@@ -22,7 +24,7 @@ npm start
 
 - **Node.js 20+**
 - 至少一个 CLI Agent（用于需要本地文件读写的任务）：[Codex](https://github.com/openai/codex)、[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Gemini CLI](https://github.com/google-gemini/gemini-cli)、[OpenCode](https://github.com/sst/opencode)
-- 或者一个 API Provider Key（Anthropic / OpenAI / DeepSeek / 智谱）用于纯 API 模式
+- 或者一个 API Provider Key（Anthropic / OpenAI / 智谱等 OpenAI-compatible）用于纯 API 模式
 
 首次启动时，Turing 会：
 1. 自动生成 JWT secret 并写入 `~/.turing/config.json`（无需手动配置即可安全运行）
@@ -40,7 +42,7 @@ npm test
 - **Session**：让两个 Agent 往返协作；人类可以随时插话、暂停、恢复或接管。
 - **Workflow**：把多个 Session 串成有依赖关系的步骤；支持模板、并行步骤、人工审核和上游修改后重新执行下游。
 - **CLI Agent**：支持 Codex、Claude Code、OpenCode、Gemini CLI。
-- **API Assistant**：支持 Anthropic、OpenAI、DeepSeek、智谱和 OpenAI-compatible API。
+- **API Assistant**：支持 Anthropic、OpenAI、智谱和 OpenAI-compatible API。
 - **能力约束**：带 `cwd` 的 Task/Session 需要本地 CLI Agent 执行文件读写；API Assistant 可做规划，但不能直接操作本地文件。
 - **文件预览**：Workflow 产出的 Markdown、文本、图片和视频可直接在页面中预览。
 - **运行恢复**：服务重启后会恢复队列，并将中断的 Session 标记为可恢复状态。
@@ -209,11 +211,41 @@ Workflow 是由多个 Session 组成的 Pipeline。每一步可以设置：
 
 `dependsOn` 使用从 `0` 开始的步骤索引。没有依赖的步骤可以并行启动。
 
-## 实验性功能
+## 扩展点：External Task Providers
 
-以下功能需要外部二进制或凭证，默认关闭，不影响核心运行：
+Turing 引擎内核不绑定任何厂商——任何「提交任务 → 轮询直到完成」的集成（视频生成、渲染、批处理）都通过实现 `ExternalTaskProvider` 接口接入，而不是写死在核心里。一个 Provider 可以：
 
-- **Dreamina 视频生成**：`video_generate` 工作流步骤需要即梦 CLI。设置 `TURING_DREAMINA_COMMAND` 启用。
+1. **内联检测**：每轮 agent 输出后，`parseAgentOutput()` 检查是否引用了一个待处理任务（例如 agent 吐出 `submit_id`）。
+2. **接管 pipeline 步骤**：`handlePipelineStep()` 完全接管某个 `nodeType` 的步骤（例如 `video_generate`），跳过 adapter 执行循环。
+
+最小示例：
+
+```ts
+import type { ExternalTaskProvider } from 'turing'
+
+const myProvider: ExternalTaskProvider = {
+  name: 'my-renderer',
+  handledNodeTypes: ['render'],
+  parseAgentOutput(content) {
+    const m = content.match(/render_id:\s*([a-z0-9-]+)/i)
+    return m ? { externalId: m[1], downloadDir: './output' } : undefined
+  },
+  async submit(args, cwd) { /* 调二进制，返回 stdout */ },
+  async query(id, dir) { /* 轮询，返回 { status, paths?, errorMessage? } */ },
+  pollIntervalMs: 15_000,
+  async handlePipelineStep(hooks, sessionId) { /* 读计划、提交、注册任务或完成 */ },
+}
+
+router.registerExternalTaskProvider(myProvider)
+```
+
+参考实现：`src/examples/dreamina/`（即梦视频流水线，本机入口默认注册）。完整文档见 [docs/EXTERNAL_AGENT_USAGE.md](docs/EXTERNAL_AGENT_USAGE.md#external-task-providers-extending-the-engine)。
+
+## 内置示例 Provider
+
+以下 Provider 需要外部二进制或凭证，默认惰性（未配置时不报错、不参与检测）：
+
+- **Dreamina 视频生成**（`src/examples/dreamina/`）：`video_generate` 工作流步骤需要即梦 CLI。设置 `TURING_DREAMINA_COMMAND` 启用。`src/index.ts` 默认注册它，便于本机直接使用；开源用户如需纯净内核可去掉这行调用。
 - **Gemini Image 分镜生成**：`image_generate` 步骤的 Gemini Web 执行器。设置 `TURING_GEMINI_SKILL_SCRIPT` 启用。
 
 未配置时，相关 workflow 步骤会返回明确的配置错误，服务本身正常启动。
@@ -225,6 +257,8 @@ Workflow 是由多个 Session 组成的 Pipeline。每一步可以设置：
 ```text
 GET    /health
 GET    /api/docs
+GET    /mcp
+POST   /mcp
 
 GET    /api/agents
 POST   /api/agents
@@ -262,6 +296,31 @@ GET    /api/files/content
 ```
 
 完整调用示例见 [docs/EXTERNAL_AGENT_USAGE.md](docs/EXTERNAL_AGENT_USAGE.md)。
+
+## MCP / ChatGPT 集成
+
+Turing 提供 Streamable HTTP 风格的 MCP 网关：`POST /mcp`。它使用现有认证，连接端需要传：
+
+```text
+Authorization: Bearer <turing token>
+```
+
+适合把 ChatGPT 网页当规划 Agent，让它通过 MCP 调用 Turing 去创建、监控和反馈本机 Agent 任务。
+
+当前工具：
+
+- `turing_list_agents`
+- `turing_create_task` / `turing_get_task`
+- `turing_create_session` / `turing_get_session`
+- `turing_create_workflow` / `turing_get_workflow`
+- `turing_get_progress`
+- `turing_send_feedback`
+- `turing_approve_step`
+- `turing_retry_step`
+- `turing_stop_run`
+- `turing_read_artifact`
+
+公网接入 ChatGPT 时，必须使用 HTTPS，并配置稳定的 `TURING_JWT_SECRET` 和 `policy.allowedWorkspaces`。
 
 ## 数据保留
 
