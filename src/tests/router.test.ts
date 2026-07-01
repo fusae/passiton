@@ -4,7 +4,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Router, detectAgentAssistanceRequest, detectDreaminaSubmittedJob, detectHumanInputWait } from '../router.js'
+import { Router, detectAgentAssistanceRequest, detectHumanInputWait, extractHumanInputRequest } from '../router.js'
+import { createDreaminaProvider } from '../examples/dreamina/provider.js'
 import * as state from '../state.js'
 import type { Adapter, AdapterCapabilities, AdapterSendOpts, Session } from '../types.js'
 
@@ -528,8 +529,9 @@ test('recoverSessions pauses interrupted active sessions', async () => {
   })
 })
 
-test('detectDreaminaSubmittedJob ignores completed local video output', () => {
-  const pending = detectDreaminaSubmittedJob(
+test('dreamina provider.parseAgentOutput ignores completed local video output', () => {
+  const provider = createDreaminaProvider({ binary: '/usr/bin/true' })
+  const pending = provider.parseAgentOutput(
     'submit_id: `5db07d3a-4d66-44b7-ac53-b2f9f660ce11` querying',
     { cwd: '/tmp/project' }
   )
@@ -537,7 +539,7 @@ test('detectDreaminaSubmittedJob ignores completed local video output', () => {
     externalId: '5db07d3a-4d66-44b7-ac53-b2f9f660ce11',
     downloadDir: '/tmp/project/output',
   })
-  assert.equal(detectDreaminaSubmittedJob(
+  assert.equal(provider.parseAgentOutput(
     'submit_id: `5db07d3a-4d66-44b7-ac53-b2f9f660ce11`\n本地视频：`/tmp/video.mp4`',
     { cwd: '/tmp/project' }
   ), undefined)
@@ -547,6 +549,28 @@ test('detectHumanInputWait recognizes explicit approval requests', () => {
   assert.equal(detectHumanInputWait('请回复“OK/通过/确认保存”或修改意见。'), true)
   assert.equal(detectHumanInputWait('本步骤等待人工确认。'), true)
   assert.equal(detectHumanInputWait('任务已完成。'), false)
+})
+
+test('detectHumanInputWait recognizes English natural-language approval cues', () => {
+  assert.equal(detectHumanInputWait('Waiting for human approval before proceeding.'), true)
+  assert.equal(detectHumanInputWait('Awaiting your confirmation to publish.'), true)
+  assert.equal(detectHumanInputWait('Please reply with OK to continue.'), true)
+  assert.equal(detectHumanInputWait('The task is complete.'), false)
+})
+
+test('detectHumanInputWait recognizes [HUMAN_NEEDED] summon block', () => {
+  assert.equal(detectHumanInputWait('some work\n[HUMAN_NEEDED]\nwhich direction?\n[/HUMAN_NEEDED]'), true)
+  assert.equal(detectHumanInputWait('[human_needed]lowercase works[/human_needed]'), true)
+  assert.equal(detectHumanInputWait('just normal progress, no summon'), false)
+})
+
+test('extractHumanInputRequest pulls the question out of the block', () => {
+  assert.equal(
+    extractHumanInputRequest('draft done\n[HUMAN_NEEDED]\npublish now or revise?\nOptions:\n- A: publish\n- B: revise\n[/HUMAN_NEEDED]'),
+    'publish now or revise?\nOptions:\n- A: publish\n- B: revise'
+  )
+  assert.equal(extractHumanInputRequest('no block here'), null)
+  assert.equal(extractHumanInputRequest('[HUMAN_NEEDED][/HUMAN_NEEDED]'), null)
 })
 
 test('explicit human approval request pauses the session', async () => {
@@ -646,10 +670,12 @@ test('confirmSession completes human approval without calling an adapter', async
 
 test('dreamina pending output is reconciled automatically', async () => {
   await withTempDb(async () => {
-    const router = new Router({}, {
-      dreaminaPollIntervalMs: 1,
-      dreaminaQuery: async () => ({ status: 'success', paths: ['/tmp/generated.mp4'] }),
-    })
+    const router = new Router()
+    router.registerExternalTaskProvider(createDreaminaProvider({
+      binary: '/usr/bin/true',
+      pollIntervalMs: 1,
+      queryFn: async () => ({ status: 'success', paths: ['/tmp/generated.mp4'] }),
+    }))
     router.registerAdapter(new StubAdapter('codex', async () => (
       '[RESULT]submit_id: `5db07d3a-4d66-44b7-ac53-b2f9f660ce11` querying[/RESULT]\n[DONE]'
     )))
@@ -679,13 +705,15 @@ test('video_generate pipeline step submits Dreamina directly without adapter', a
       ].join('\n')
       writeFileSync(commandPath, commandContent, 'utf-8')
 
-      let submittedArgs: string[] | undefined
-      const router = new Router({}, {
-        dreaminaSubmit: async (args) => {
-          submittedArgs = args
+      const submittedArgs: string[][] = []
+      const router = new Router()
+      router.registerExternalTaskProvider(createDreaminaProvider({
+        binary: '/usr/bin/true',
+        submitFn: async (args) => {
+          submittedArgs.push(args)
           return 'submit_id: 5db07d3a-4d66-44b7-ac53-b2f9f660ce11'
         },
-      })
+      }))
       router.registerAdapter(new StubAdapter('codex', async () => {
         throw new Error('adapter should not run for video_generate')
       }))
@@ -705,13 +733,34 @@ test('video_generate pipeline step submits Dreamina directly without adapter', a
       const sessionId = pipeline.sessions[0].sessionId
 
       await waitFor(() => state.listExternalJobs('querying').length === 1)
-      assert.equal(submittedArgs?.[0], 'multimodal2video')
-      assert.ok(submittedArgs?.includes('--image'))
+      assert.equal(submittedArgs[0]?.[0], 'multimodal2video')
+      assert.ok(submittedArgs[0]?.includes('--image'))
       assert.equal(state.getSession(sessionId)?.status, 'active')
       assert.match(state.getSession(sessionId)?.lastAgentOutput ?? '', /submit_id/)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+test('core engine ignores dreamina-like agent output when no provider is registered', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => (
+      '[RESULT]submit_id: `5db07d3a-4d66-44b7-ac53-b2f9f660ce11` querying[/RESULT]\n[DONE]'
+    )))
+
+    const session = router.startSession({
+      from: { adapter: 'codex' },
+      to: { adapter: 'codex' },
+      initialPrompt: 'generate video',
+      cwd: '/tmp/project',
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+    // No provider → no external job ever registered, session completes normally
+    assert.equal(state.listExternalJobs('querying').length, 0)
+    assert.equal(state.listExternalJobs('done').length, 0)
   })
 })
 

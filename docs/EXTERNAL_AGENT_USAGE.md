@@ -306,6 +306,52 @@ curl -s -X POST http://localhost:4590/api/sessions \
 
 ---
 
+## External Task Providers (extending the engine)
+
+The Turing core is vendor-free. Any "submit a job, poll until done" integration
+(rendering, video generation, batch processing) plugs in as an
+`ExternalTaskProvider` instead of hard-coding into the router.
+
+A provider participates in two flows:
+
+1. **Inline detection** — after each agent round, `parseAgentOutput()` inspects
+   the agent's text and may surface a pending job (e.g. an agent emitting a
+   `submit_id`).
+2. **Pipeline step takeover** — `handlePipelineStep()` fully owns a pipeline
+   step whose `nodeType` is in `handledNodeTypes`, bypassing the adapter run
+   loop entirely.
+
+Minimal example:
+
+```ts
+import { Router } from 'turing'
+import type { ExternalTaskProvider } from 'turing'
+
+const myProvider: ExternalTaskProvider = {
+  name: 'my-renderer',
+  handledNodeTypes: ['render'],
+  parseAgentOutput(content) {
+    const m = content.match(/render_id:\s*([a-z0-9-]+)/i)
+    return m ? { externalId: m[1], downloadDir: './output' } : undefined
+  },
+  async submit(args, cwd) { /* run binary, return stdout */ },
+  async query(id, dir) { /* poll remote, return {status, paths?, errorMessage?} */ },
+  pollIntervalMs: 15_000,
+  async handlePipelineStep(hooks, sessionId) {
+    /* read plan, submit, register job, or finalize + completeSession */
+  },
+}
+
+const router = new Router()
+router.registerExternalTaskProvider(myProvider)
+```
+
+The bundled **Dreamina** video provider (`src/examples/dreamina/`) is a complete
+reference implementation — register it via `registerDreamina(router)` (the local
+entry point does this by default; open-source consumers may omit it).
+
+---
+
 ## Available Agents
 
 To see what agents are configured:

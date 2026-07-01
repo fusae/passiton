@@ -3,7 +3,17 @@
 export type SessionStatus = 'active' | 'paused' | 'done' | 'error' | 'stopped'
 export type TaskStatus = 'queued' | 'running' | 'done' | 'error' | 'stopped'
 export type PermissionMode = 'safe' | 'trusted'
-export type WorkflowNodeType = 'video_parse' | 'copy_adapt' | 'storyboard_script' | 'image_generate' | 'video_command' | 'video_generate' | 'human_review' | 'custom'
+/**
+ * Workflow node types are intentionally open-ended: the engine only treats a
+ * node as a generic pipeline step and does not recognize any specific value.
+ * Providers register their own node types (e.g. the bundled Dreamina video
+ * provider uses 'video_generate'). Two values are conventionally treated by
+ * the engine itself:
+ *   - 'custom'       — plain agent-driven step (the default)
+ *   - 'human_review' — step gated on human approval
+ */
+export type WorkflowNodeType = string
+export const BUILTIN_NODE_TYPES = ['custom', 'human_review'] as const
 
 export interface WorkflowOutputContract {
   fileName: string
@@ -255,7 +265,8 @@ export interface SessionVersion {
 export interface ExternalJob {
   id: string
   sessionId: string
-  provider: 'dreamina'
+  /** Provider name — arbitrary string, matches ExternalTaskProvider.name (e.g. 'dreamina'). */
+  provider: string
   externalId: string
   status: 'querying' | 'done' | 'error' | 'stopped'
   downloadDir: string
@@ -263,6 +274,79 @@ export interface ExternalJob {
   errorMessage?: string
   createdAt: number
   updatedAt: number
+}
+
+/**
+ * Result returned by an ExternalTaskProvider when it polls its remote task.
+ *   - 'querying' → still running, poll again later
+ *   - 'success'  → finished, deliver resultPaths
+ *   - 'error'    → failed, surface errorMessage
+ */
+export interface ExternalTaskQueryResult {
+  status: 'querying' | 'success' | 'error'
+  paths?: string[]
+  errorMessage?: string
+}
+
+/**
+ * Pluggable external-task provider. The engine stays free of any specific
+ * vendor (Dreamina etc.) — it only knows how to talk to registered providers.
+ *
+ * A provider participates in two flows:
+ *   1. Inline detection — after each agent round, parseAgentOutput() inspects
+ *      the agent's free text and may surface a pending external job (e.g. an
+ *      agent emitting a `submit_id`).
+ *   2. Pipeline step takeover — handlePipelineStep() fully owns a pipeline
+ *      step whose nodeType is in handledNodeTypes, bypassing the adapter run
+ *      loop entirely.
+ */
+export interface ExternalTaskProvider {
+  /** Unique provider name; stored on ExternalJob.provider. */
+  name: string
+  /** Pipeline nodeTypes this provider fully owns (e.g. ['video_generate']). */
+  handledNodeTypes: string[]
+  /** Inspect agent output and, if present, return the pending job descriptor. */
+  parseAgentOutput: (content: string, session: Pick<Session, 'cwd'>) =>
+    { externalId: string; downloadDir: string } | undefined
+  /** Submit a fresh job and return the raw stdout (provider parses submit_id). */
+  submit: (args: string[], cwd?: string) => Promise<string>
+  /** Poll a submitted job for its current status. */
+  query: (externalId: string, downloadDir: string) => Promise<ExternalTaskQueryResult>
+  /** Default poll interval; overrides per-job if returned. */
+  pollIntervalMs?: number
+  /** Take over a pipeline step (e.g. read a plan file, submit, and chain completion). */
+  handlePipelineStep?: (hooks: RouterExternalTaskHooks, sessionId: string) => Promise<void>
+}
+
+/**
+ * The limited surface the Router exposes to providers so they can drive
+ * sessions and pipelines without touching Router internals directly.
+ */
+export interface RouterExternalTaskHooks {
+  /** Emit a structured event + log entry; also stored in session log table. */
+  emitLog: (level: 'info' | 'warn' | 'error', message: string, sessionId: string) => void
+  /** Record an assistant-style message on the session. */
+  recordMessage: (sessionId: string, from: string, content: string, round: number) => void
+  /** Patch session fields (status, currentRound, lastAgentOutput, ...). */
+  updateSession: (sessionId: string, patch: Record<string, unknown>) => void
+  /** Mark the session errored with the given cause. */
+  markError: (sessionId: string, err: unknown) => void
+  /** Mark the session done and emit session:done / pipeline finished events. */
+  completeSession: (sessionId: string) => Promise<void>
+  /** Read session by id. */
+  getSession: (sessionId: string) => Session | undefined
+  /** Read the pipeline that contains a session (if any). */
+  getPipelineBySession: (sessionId: string) => Pipeline | undefined
+  /** Read external jobs of a given status. */
+  listExternalJobs: (status: ExternalJob['status']) => ExternalJob[]
+  /** Create or replace an external job row keyed by (provider, externalId). */
+  upsertExternalJob: (job: ExternalJob) => ExternalJob
+  /** Patch an external job row. */
+  updateExternalJob: (provider: string, externalId: string, patch: Partial<ExternalJob>) => void
+  /** Cancel all timers + mark querying jobs for a session as stopped. */
+  stopExternalJobsForSession: (sessionId: string) => void
+  /** Schedule the next poll for an external job (debounced by job id). */
+  scheduleExternalJobPoll: (job: ExternalJob, delayMs?: number) => void
 }
 
 export interface AdapterCapabilities {

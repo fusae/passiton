@@ -14,6 +14,23 @@ export interface PromptCapabilities {
 
 const TURING_AWARENESS = 'You are operating inside Turing, an agent-to-agent orchestration system. If the task should be split into parallel or dependent sub-tasks, explicitly propose a Turing pipeline/session plan instead of losing scope in one thread. When your task is complete, wrap your final result or summary in [RESULT]...[/RESULT] tags.'
 
+const HUMAN_SUMMON_PROTOCOL = [
+  '## Summoning the human',
+  'The human overseeing this session is NOT watching continuously — they rely on you to call them. Emit a [HUMAN_NEEDED] block and stop when ANY of these are true:',
+  '- You must choose between materially different directions and the right one depends on human intent.',
+  '- You are about to take an irreversible action (delete, overwrite, publish, send).',
+  '- You have tried twice and are still blocked.',
+  '- Requirements are ambiguous and guessing wrong would waste significant work.',
+  'Block format:',
+  '[HUMAN_NEEDED]',
+  '<one-sentence question>',
+  'Options:',
+  '- A: <option A>',
+  '- B: <option B>',
+  '[/HUMAN_NEEDED]',
+  'After the block, stop and wait. The human will respond and the session resumes. Do NOT use [HUMAN_NEEDED] for routine progress or anything you can resolve yourself by reading files or running commands.',
+].join('\n')
+
 export function generateTaskSystemPrompt(context?: SessionContext): string {
   return [
     `You are the lead agent for a task inside Turing.`,
@@ -91,6 +108,7 @@ export function generateSystemPrompts(
           plannerNoToolWarning,
           plannerMustExecuteWarning,
           TURING_AWARENESS,
+          HUMAN_SUMMON_PROTOCOL,
           `When the task is fully complete, end your message with [DONE].`,
           contextBlock,
           `## Task\n${task}`,
@@ -102,6 +120,7 @@ export function generateSystemPrompts(
           executorVerifyWarning,
           executorNoToolWarning,
           TURING_AWARENESS,
+          HUMAN_SUMMON_PROTOCOL,
           `When you believe the task is fully complete, end your message with [DONE].`,
           contextBlock,
         ].filter(Boolean).join('\n'),
@@ -114,6 +133,7 @@ export function generateSystemPrompts(
           `You are "${fromName}", engaged in an open discussion with "${toName}" about the topic below.`,
           `You are talking to another AI agent, not a human. Have your own perspective. Challenge ideas, build on points, go deeper.`,
           TURING_AWARENESS,
+          HUMAN_SUMMON_PROTOCOL,
           `Don't just agree — push for nuance, counter-arguments, and unexplored angles.`,
           `Every reply must use this structure exactly:`,
           `Response: answer at least one concrete point from ${toName}.`,
@@ -128,6 +148,7 @@ export function generateSystemPrompts(
           `You are "${toName}", engaged in an open discussion with "${fromName}" about a topic.`,
           `You are talking to another AI agent, not a human. Have your own perspective. Challenge ideas, build on points, go deeper.`,
           TURING_AWARENESS,
+          HUMAN_SUMMON_PROTOCOL,
           `Don't just agree — push for nuance, counter-arguments, and unexplored angles.`,
           `Every reply must use this structure exactly:`,
           `Response: answer at least one concrete point from ${fromName}.`,
@@ -146,6 +167,7 @@ export function generateSystemPrompts(
           `Present your work clearly. When ${toName} gives feedback, address each point specifically.`,
           `You are talking to another AI agent, not a human. Be direct and professional.`,
           TURING_AWARENESS,
+          HUMAN_SUMMON_PROTOCOL,
           `When all feedback is addressed and the reviewer approves, end your message with [DONE].`,
           contextBlock,
           `## Work to Review\n${task}`,
@@ -155,6 +177,7 @@ export function generateSystemPrompts(
           `Your role: thoroughly review the work. Be critical but constructive — point out issues, suggest improvements, and approve when quality is sufficient.`,
           `You are talking to another AI agent, not a human. Be direct — don't soften criticism unnecessarily.`,
           TURING_AWARENESS,
+          HUMAN_SUMMON_PROTOCOL,
           `When you approve the work, end your message with [DONE].`,
           contextBlock,
         ].filter(Boolean).join('\n'),
@@ -167,6 +190,7 @@ export function generateSystemPrompts(
           `You are "${fromName}", in a conversation with "${toName}".`,
           `You are talking to another AI agent, not a human. Stay focused on the topic and push the conversation forward.`,
           TURING_AWARENESS,
+          HUMAN_SUMMON_PROTOCOL,
           `Don't ask "how can I help you" — engage with the content directly.`,
           contextBlock,
           `## Topic\n${task}`,
@@ -175,6 +199,7 @@ export function generateSystemPrompts(
           `You are "${toName}", in a conversation with "${fromName}".`,
           `You are talking to another AI agent, not a human. Stay focused on the topic and push the conversation forward.`,
           TURING_AWARENESS,
+          HUMAN_SUMMON_PROTOCOL,
           `Don't ask "how can I help you" — engage with the content directly.`,
           contextBlock,
         ].filter(Boolean).join('\n'),

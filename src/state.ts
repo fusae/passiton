@@ -59,7 +59,7 @@ export interface ApiTokenRecord {
 export interface StoredApiKeyRecord {
   id: string
   userId: string
-  provider: 'anthropic' | 'openai' | 'deepseek' | 'zhipu'
+  provider: 'anthropic' | 'openai' | 'deepseek' | 'zhipu' | 'qwen' | 'moonshot'
   encryptedKey: string
   iv: string
   authTag: string

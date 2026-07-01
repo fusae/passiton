@@ -5,7 +5,7 @@ import { execFile, execFileSync } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
-import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts, Task, ExternalJob, WorkflowNodeType, WorkflowStepContract } from './types.js'
+import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts, Task, ExternalJob, WorkflowNodeType, WorkflowStepContract, ExternalTaskProvider, RouterExternalTaskHooks } from './types.js'
 import * as state from './state.js'
 import { decryptKey } from './keyvault.js'
 import {
@@ -25,39 +25,13 @@ const GIT_DIFF_TIMEOUT_MS = 10_000
 const PIPELINE_DEP_MAX_FILES = 8
 const PIPELINE_DEP_FILE_CHARS = 12_000
 const PIPELINE_DEP_TEXT_CHARS = 4_000
-const DREAMINA_COMMAND = process.env.TURING_DREAMINA_COMMAND ?? ''
-const DREAMINA_POLL_INTERVAL_MS = 10_000
-const CURL_COMMAND = process.env.TURING_CURL_COMMAND ?? 'curl'
-const FFMPEG_COMMAND = process.env.TURING_FFMPEG_COMMAND ?? 'ffmpeg'
+const DEFAULT_EXTERNAL_JOB_POLL_INTERVAL_MS = 10_000
 const ACTIVE_SESSION_WATCHDOG_INTERVAL_MS = 30_000
-
-type DreaminaQueryResult = {
-  status: 'querying' | 'success' | 'error'
-  paths?: string[]
-  errorMessage?: string
-}
-
-type RouterOptions = {
-  dreaminaQuery?: (externalId: string, downloadDir: string) => Promise<DreaminaQueryResult>
-  dreaminaSubmit?: (args: string[], cwd?: string) => Promise<string>
-  dreaminaPollIntervalMs?: number
-}
 
 type StreamStep = {
   type: 'read' | 'write' | 'exec' | 'think' | 'done'
   summary: string
   detail?: string
-}
-
-type DreaminaVideoCommand = {
-  args: string[]
-  downloadDir: string
-}
-
-type DreaminaVideoPlan = {
-  commands: DreaminaVideoCommand[]
-  outputDir: string
-  finalOutputPath?: string
 }
 
 export class Router extends EventEmitter {
@@ -72,17 +46,53 @@ export class Router extends EventEmitter {
   private lastStreamStepSignatures = new Map<string, string>()
   private externalJobTimers = new Map<string, NodeJS.Timeout>()
   private activeSessionWatchdog?: NodeJS.Timeout
-  private dreaminaQuery: NonNullable<RouterOptions['dreaminaQuery']>
-  private dreaminaSubmit: NonNullable<RouterOptions['dreaminaSubmit']>
-  private dreaminaPollIntervalMs: number
+  // Pluggable external-task providers (e.g. Dreamina). Router stays free of any vendor.
+  private externalProviders = new Map<string, ExternalTaskProvider>()
+  private externalProvidersByNodeType = new Map<string, ExternalTaskProvider>()
 
-  constructor(policy: Partial<PolicyConfig> = {}, options: RouterOptions = {}) {
+  constructor(policy: Partial<PolicyConfig> = {}) {
     super()
     this.policy = { ...DEFAULT_POLICY, ...policy }
-    this.dreaminaQuery = options.dreaminaQuery ?? queryDreaminaResult
-    this.dreaminaSubmit = options.dreaminaSubmit ?? submitDreaminaCommand
-    this.dreaminaPollIntervalMs = options.dreaminaPollIntervalMs ?? DREAMINA_POLL_INTERVAL_MS
     this.startActiveSessionWatchdog()
+  }
+
+  // ── External task provider registry ─────────────────────────────────────────
+
+  registerExternalTaskProvider(provider: ExternalTaskProvider): void {
+    this.externalProviders.set(provider.name, provider)
+    for (const nodeType of provider.handledNodeTypes) {
+      this.externalProvidersByNodeType.set(nodeType, provider)
+    }
+  }
+
+  unregisterExternalTaskProvider(name: string): void {
+    const provider = this.externalProviders.get(name)
+    if (!provider) return
+    for (const nodeType of provider.handledNodeTypes) {
+      if (this.externalProvidersByNodeType.get(nodeType) === provider) {
+        this.externalProvidersByNodeType.delete(nodeType)
+      }
+    }
+    this.externalProviders.delete(name)
+  }
+
+  listExternalTaskProviders(): ExternalTaskProvider[] {
+    return Array.from(this.externalProviders.values())
+  }
+
+  /** Ask all registered providers whether the agent's output references a pending job. */
+  private detectExternalTaskFromOutput(content: string, session: Session):
+    { provider: ExternalTaskProvider; externalId: string; downloadDir: string } | undefined {
+    for (const provider of this.externalProviders.values()) {
+      const pending = provider.parseAgentOutput(content, session)
+      if (pending) return { provider, ...pending }
+    }
+    return undefined
+  }
+
+  private providerForNodeType(nodeType: WorkflowNodeType | undefined): ExternalTaskProvider | undefined {
+    if (!nodeType) return undefined
+    return this.externalProvidersByNodeType.get(nodeType)
   }
 
   // ── Adapter registry ────────────────────────────────────────────────────────
@@ -392,8 +402,8 @@ export class Router extends EventEmitter {
       if (!step.manualDone && !step.dependsOn?.length) {
         if (this.shouldUseHostImageGenerationStep(step.nodeType, created[index])) {
           this.prepareHostImageGenerationStep(created[index].id)
-        } else if (this.shouldUseDirectVideoGenerationStep(step.nodeType)) {
-          this.submitDreaminaVideoStep(created[index].id).catch((err) => this.markVideoStepSubmitError(created[index].id, err))
+        } else if (this.providerTakesOverStep(step.nodeType)) {
+          this.runProviderPipelineStep(created[index].id).catch((err) => this.markProviderStepError(created[index].id, err))
         } else {
           this.startRunLoop(created[index].id, step.initialPrompt)
         }
@@ -429,11 +439,12 @@ export class Router extends EventEmitter {
     if (this.shouldUseHostImageGenerationStep(pipelineStep?.nodeType, session)) {
       return this.prepareHostImageGenerationStep(id)
     }
-    if (this.shouldUseDirectVideoGenerationStep(pipelineStep?.nodeType)) {
+    if (this.providerTakesOverStep(pipelineStep?.nodeType)) {
       try {
-        return await this.submitDreaminaVideoStep(id)
+        await this.runProviderPipelineStep(id)
+        return state.getSession(id)!
       } catch (err) {
-        this.markVideoStepSubmitError(id, err)
+        this.markProviderStepError(id, err)
         return state.getSession(id)!
       }
     }
@@ -670,8 +681,8 @@ export class Router extends EventEmitter {
     const updated = state.updatePipeline(pipeline.id, { status: 'active', sessions })
     this.emit('event', { type: 'pipeline:updated', payload: updated } satisfies WsEvent)
     this.emitLog('info', `Pipeline step rerun [${sessionId.slice(0, 8)}] reset ${affected.size - 1} descendant step(s)`, sessionId)
-    if (this.shouldUseDirectVideoGenerationStep(step.nodeType)) {
-      this.submitDreaminaVideoStep(sessionId).catch((err) => this.markVideoStepSubmitError(sessionId, err))
+    if (this.providerTakesOverStep(step.nodeType)) {
+      this.runProviderPipelineStep(sessionId).catch((err) => this.markProviderStepError(sessionId, err))
       return updated
     }
     this.startRunLoop(sessionId, initialMessage.content, epoch)
@@ -966,9 +977,9 @@ export class Router extends EventEmitter {
         currentRound: round,
         nextTurn: 'from',
       })
-      const pendingJob = detectDreaminaSubmittedJob(content, session)
+      const pendingJob = this.detectExternalTaskFromOutput(content, session)
       if (pendingJob) {
-        this.registerDreaminaJob(sessionId, pendingJob)
+        this.registerExternalJob(sessionId, pendingJob.provider, pendingJob)
         return { done: false, waiting: true, nextMessage: content }
       }
       if (detectHumanInputWait(content)) {
@@ -988,9 +999,9 @@ export class Router extends EventEmitter {
     }
 
     state.updateSession(sessionId, { nextTurn: 'to' })
-    const pendingJob = detectDreaminaSubmittedJob(content, session)
+    const pendingJob = this.detectExternalTaskFromOutput(content, session)
     if (pendingJob) {
-      this.registerDreaminaJob(sessionId, pendingJob)
+      this.registerExternalJob(sessionId, pendingJob.provider, pendingJob)
       return { done: false, waiting: true, nextMessage: content }
     }
     if (detectHumanInputWait(content)) {
@@ -1186,13 +1197,25 @@ export class Router extends EventEmitter {
     return nodeType === 'image_generate' && session.to.adapter === 'codex'
   }
 
-  private shouldUseDirectVideoGenerationStep(nodeType: WorkflowNodeType | undefined): boolean {
-    return nodeType === 'video_generate'
+  /** True when an external-task provider fully owns this pipeline nodeType. */
+  private providerTakesOverStep(nodeType: WorkflowNodeType | undefined): boolean {
+    return !!nodeType && this.externalProvidersByNodeType.has(nodeType)
   }
 
-  private async submitDreaminaVideoStep(sessionId: string): Promise<Session> {
+  /**
+   * Hand a pipeline step to its owning provider. The provider gets a
+   * RouterExternalTaskHooks handle to drive session state, record messages,
+   * submit jobs, and chain to the next step. Returns when the provider has
+   * either finished or registered a pending job.
+   */
+  private async runProviderPipelineStep(sessionId: string): Promise<void> {
     const session = state.getSession(sessionId)
     if (!session) throw new Error(`Session ${sessionId} not found`)
+    const pipelineStep = state.getPipelineBySession(sessionId)?.sessions.find((step) => step.sessionId === sessionId)
+    const provider = this.providerForNodeType(pipelineStep?.nodeType)
+    if (!provider?.handlePipelineStep) {
+      throw new Error(`No provider handler registered for nodeType '${pipelineStep?.nodeType}'`)
+    }
 
     this.runningLoops.delete(sessionId)
     this.timeoutExtensions.delete(sessionId)
@@ -1205,86 +1228,38 @@ export class Router extends EventEmitter {
       resumeCount: session.resumeCount + 1,
     })
     this.emit('event', { type: 'session:resumed', payload: active } satisfies WsEvent)
-    this.emitLog('info', `Direct Dreamina video submission [${sessionId.slice(0, 8)}]`, sessionId)
+    this.emitLog('info', `External provider '${provider.name}' taking over step [${sessionId.slice(0, 8)}]`, sessionId)
 
-    const plan = readDreaminaVideoPlan(active)
-    const doneJobs = state.listExternalJobs('done')
-      .filter((job) => job.sessionId === sessionId && job.resultPaths?.length)
-      .sort((a, b) => a.createdAt - b.createdAt)
-    const next = plan.commands[doneJobs.length]
-    if (!next) return this.completeDreaminaVideoPlan(sessionId, plan)
-
-    const stdout = await this.dreaminaSubmit(next.args, active.cwd)
-    const externalId = parseDreaminaSubmitId(stdout)
-    if (!externalId) {
-      throw new Error(`Dreamina did not return submit_id. Output: ${truncate(stdout, 1000)}`)
-    }
-
-    const content = [
-      '[RESULT]',
-      `已提交即梦视频片段 ${doneJobs.length + 1}/${plan.commands.length}。`,
-      '',
-      `submit_id：\`${externalId}\``,
-      `命令：\`${DREAMINA_COMMAND} ${next.args.map(shellQuote).join(' ')}\``,
-      `下载目录：\`${next.downloadDir}\``,
-      '状态：`querying`',
-      '[/RESULT]',
-    ].join('\n')
-    this.recordMessage(sessionId, 'dreamina', content, Math.max(1, active.currentRound + 1))
-    state.updateSession(sessionId, {
-      currentRound: Math.max(1, active.currentRound + 1),
-      lastAgentOutput: content,
-    })
-    this.registerDreaminaJob(sessionId, { externalId, downloadDir: next.downloadDir })
-    return state.getSession(sessionId)!
+    await provider.handlePipelineStep(this.externalTaskHooks(), sessionId)
   }
 
-  private async completeDreaminaVideoPlan(sessionId: string, plan: DreaminaVideoPlan): Promise<Session> {
-    const doneJobs = state.listExternalJobs('done')
-      .filter((job) => job.sessionId === sessionId && job.resultPaths?.length)
-      .sort((a, b) => a.createdAt - b.createdAt)
-    const inputVideos = doneJobs.flatMap((job) => job.resultPaths ?? [])
-    if (!inputVideos.length) throw new Error('No generated video files found for concat')
-
-    let finalPath = plan.finalOutputPath ?? inputVideos[0]
-    if (inputVideos.length > 1) {
-      finalPath = plan.finalOutputPath ?? path.join(plan.outputDir, 'final-draft.mp4')
-      await concatVideos(inputVideos, finalPath)
-    }
-
-    const content = [
-      '[RESULT]',
-      '即梦视频生成完成。',
-      '',
-      '片段文件：',
-      ...inputVideos.map((filePath) => `\`${filePath}\``),
-      '',
-      `最终视频：\`${finalPath}\``,
-      '[/RESULT]',
-      '[DONE]',
-    ].join('\n')
+  private markProviderStepError(sessionId: string, err: unknown): void {
     const session = state.getSession(sessionId)
-    this.recordMessage(sessionId, 'dreamina', content, Math.max(1, session?.currentRound ?? 1))
-    state.updateSession(sessionId, { lastAgentOutput: content })
-    const completed = await this.completeSession(sessionId)
-    this.emit('event', { type: 'session:done', payload: completed } satisfies WsEvent)
-    this.emitLog('info', `Dreamina video plan completed [${sessionId.slice(0, 8)}]`, sessionId)
-    this.handlePipelineSessionFinished(sessionId, 'done')
-    return completed
-  }
-
-  private markVideoStepSubmitError(sessionId: string, err: unknown): void {
-    const content = [
-      '[RESULT]',
-      '视频生成提交失败。',
-      '',
-      `原因：${errorMessage(err)}`,
-      '[/RESULT]',
-    ].join('\n')
-    const session = state.getSession(sessionId)
-    this.recordMessage(sessionId, 'turing', content, Math.max(1, session?.currentRound ?? 1))
-    state.updateSession(sessionId, { lastAgentOutput: content })
+    this.recordMessage(sessionId, 'turing', `[RESULT]\n外部任务步骤执行失败。\n\n原因：${errorMessage(err)}\n[/RESULT]`, Math.max(1, session?.currentRound ?? 1))
+    state.updateSession(sessionId, { lastAgentOutput: `[RESULT]\n外部任务步骤执行失败。\n\n原因：${errorMessage(err)}\n[/RESULT]` })
     this.markError(sessionId, err)
+  }
+
+  /** Build the limited hooks handle handed to providers. */
+  private externalTaskHooks(): RouterExternalTaskHooks {
+    return {
+      emitLog: (level, message, sessionId) => this.emitLog(level, message, sessionId),
+      recordMessage: (sessionId, from, content, round) => this.recordMessage(sessionId, from, content, round),
+      updateSession: (sessionId, patch) => { state.updateSession(sessionId, patch) },
+      markError: (sessionId, err) => this.markError(sessionId, err),
+      completeSession: async (sessionId) => {
+        const completed = await this.completeSession(sessionId)
+        this.emit('event', { type: 'session:done', payload: completed } satisfies WsEvent)
+        this.handlePipelineSessionFinished(sessionId, 'done')
+      },
+      getSession: (sessionId) => state.getSession(sessionId) ?? undefined,
+      getPipelineBySession: (sessionId) => state.getPipelineBySession(sessionId) ?? undefined,
+      listExternalJobs: (status) => state.listExternalJobs(status),
+      upsertExternalJob: (job) => state.upsertExternalJob(job),
+      updateExternalJob: (provider, externalId, patch) => state.updateExternalJob(provider, externalId, patch),
+      stopExternalJobsForSession: (sessionId) => state.stopExternalJobsForSession(sessionId),
+      scheduleExternalJobPoll: (job, delayMs) => this.scheduleExternalJobPoll(job, delayMs),
+    }
   }
 
   private prepareHostImageGenerationStep(sessionId: string): Session {
@@ -1380,8 +1355,8 @@ export class Router extends EventEmitter {
           changed = true
           return { ...step, status: 'active' as const }
         }
-        if (this.shouldUseDirectVideoGenerationStep(step.nodeType)) {
-          this.submitDreaminaVideoStep(step.sessionId).catch((err) => this.markVideoStepSubmitError(step.sessionId, err))
+        if (this.providerTakesOverStep(step.nodeType)) {
+          this.runProviderPipelineStep(step.sessionId).catch((err) => this.markProviderStepError(step.sessionId, err))
           changed = true
           return { ...step, status: 'active' as const }
         }
@@ -1438,28 +1413,28 @@ export class Router extends EventEmitter {
     return completed
   }
 
-  private registerDreaminaJob(sessionId: string, pending: { externalId: string; downloadDir: string }): void {
+  private registerExternalJob(sessionId: string, provider: ExternalTaskProvider, pending: { externalId: string; downloadDir: string }): void {
     const now = Date.now()
     const job = state.upsertExternalJob({
       id: uuidv4(),
       sessionId,
-      provider: 'dreamina',
+      provider: provider.name,
       externalId: pending.externalId,
       status: 'querying',
       downloadDir: pending.downloadDir,
       createdAt: now,
       updatedAt: now,
     })
-    this.emitLog('info', `Dreamina task waiting [${sessionId.slice(0, 8)}] submit_id=${job.externalId}`, sessionId)
-    this.scheduleExternalJobPoll(job)
+    this.emitLog('info', `External task '${provider.name}' waiting [${sessionId.slice(0, 8)}] id=${job.externalId}`, sessionId)
+    this.scheduleExternalJobPoll(job, provider.pollIntervalMs)
   }
 
-  private scheduleExternalJobPoll(job: ExternalJob, delay = this.dreaminaPollIntervalMs): void {
+  private scheduleExternalJobPoll(job: ExternalJob, delay = DEFAULT_EXTERNAL_JOB_POLL_INTERVAL_MS): void {
     if (this.externalJobTimers.has(job.id)) return
     const timer = setTimeout(() => {
       this.externalJobTimers.delete(job.id)
-      this.pollDreaminaJob(job).catch((err) => {
-        this.emitLog('warn', `Dreamina poll failed [${job.sessionId.slice(0, 8)}]: ${errorMessage(err)}`, job.sessionId)
+      this.pollExternalJob(job).catch((err) => {
+        this.emitLog('warn', `External task '${job.provider}' poll failed [${job.sessionId.slice(0, 8)}]: ${errorMessage(err)}`, job.sessionId)
         this.scheduleExternalJobPoll(job)
       })
     }, delay)
@@ -1467,7 +1442,7 @@ export class Router extends EventEmitter {
     this.externalJobTimers.set(job.id, timer)
   }
 
-  private async pollDreaminaJob(job: ExternalJob): Promise<void> {
+  private async pollExternalJob(job: ExternalJob): Promise<void> {
     const current = state.getExternalJob(job.provider, job.externalId)
     if (!current || current.status !== 'querying') return
     const session = state.getSession(current.sessionId)
@@ -1476,46 +1451,59 @@ export class Router extends EventEmitter {
       return
     }
 
-    const result = await this.dreaminaQuery(current.externalId, current.downloadDir)
+    const provider = this.externalProviders.get(current.provider)
+    if (!provider) {
+      state.updateExternalJob(current.provider, current.externalId, { status: 'error', errorMessage: `Provider '${current.provider}' not registered` })
+      this.markError(current.sessionId, new Error(`Provider '${current.provider}' not registered`))
+      return
+    }
+
+    const result = await provider.query(current.externalId, current.downloadDir)
     if (result.status === 'querying') {
-      this.scheduleExternalJobPoll(current)
+      this.scheduleExternalJobPoll(current, provider.pollIntervalMs)
       return
     }
     if (result.status === 'error') {
       state.updateExternalJob(current.provider, current.externalId, {
         status: 'error',
-        errorMessage: result.errorMessage ?? 'Dreamina generation failed',
+        errorMessage: result.errorMessage ?? `${provider.name} task failed`,
       })
-      this.markError(current.sessionId, new Error(result.errorMessage ?? 'Dreamina generation failed'))
+      this.markError(current.sessionId, new Error(result.errorMessage ?? `${provider.name} task failed`))
       return
     }
 
     const paths = result.paths ?? []
     state.updateExternalJob(current.provider, current.externalId, { status: 'done', resultPaths: paths })
-    if (this.shouldUseDirectVideoGenerationStep(state.getPipelineBySession(current.sessionId)?.sessions.find((step) => step.sessionId === current.sessionId)?.nodeType)) {
+
+    // Pipeline-owned step: hand back to the provider to chain the next chunk
+    // or finish the plan. Inline-detected job: provider marks the session done.
+    const stepNodeType = state.getPipelineBySession(current.sessionId)
+      ?.sessions.find((step) => step.sessionId === current.sessionId)?.nodeType
+    if (provider.handlePipelineStep && provider.handledNodeTypes.includes(stepNodeType ?? '')) {
       try {
-        await this.submitDreaminaVideoStep(current.sessionId)
+        await provider.handlePipelineStep(this.externalTaskHooks(), current.sessionId)
       } catch (err) {
-        this.markVideoStepSubmitError(current.sessionId, err)
+        this.markProviderStepError(current.sessionId, err)
       }
       return
     }
+
     const content = [
       '[RESULT]',
-      '即梦视频生成完成。',
+      `外部任务 ${provider.name} 已完成。`,
       '',
-      `submit_id：\`${current.externalId}\``,
+      `id：\`${current.externalId}\``,
       '状态：`success`',
-      '本地视频：',
+      '本地文件：',
       ...paths.map((filePath) => `\`${filePath}\``),
       '[/RESULT]',
       '[DONE]',
     ].join('\n')
-    this.recordMessage(current.sessionId, 'dreamina', content, Math.max(1, session.currentRound))
+    this.recordMessage(current.sessionId, provider.name, content, Math.max(1, session.currentRound))
     state.updateSession(current.sessionId, { lastAgentOutput: content })
     const updated = await this.completeSession(current.sessionId)
     this.emit('event', { type: 'session:done', payload: updated } satisfies WsEvent)
-    this.emitLog('info', `Dreamina task completed [${current.sessionId.slice(0, 8)}] submit_id=${current.externalId}`, current.sessionId)
+    this.emitLog('info', `External task '${provider.name}' completed [${current.sessionId.slice(0, 8)}] id=${current.externalId}`, current.sessionId)
     this.handlePipelineSessionFinished(current.sessionId, 'done')
   }
 
@@ -1780,214 +1768,28 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-export function detectDreaminaSubmittedJob(content: string, session: Pick<Session, 'cwd'>): { externalId: string; downloadDir: string } | undefined {
-  if (!/submit[_ -]?id/i.test(content)) return undefined
-  if (/(?:本地视频|local video|downloaded)[\s\S]{0,300}\.mp4\b/i.test(content)) return undefined
-  const match = content.match(/submit[_ -]?id[^\da-f-]*([0-9a-f]{8}-[0-9a-f-]{27,})/i)
-  if (!match?.[1]) return undefined
-  return {
-    externalId: match[1],
-    downloadDir: path.join(session.cwd ?? process.cwd(), 'output'),
-  }
-}
+const HUMAN_NEEDED_RE = /\[HUMAN_NEEDED\]([\s\S]*?)\[\/HUMAN_NEEDED\]/i
 
-function readDreaminaVideoPlan(session: Session): DreaminaVideoPlan {
-  const commandSource = findVideoCommandSource(session)
-  if (!commandSource?.content.trim()) {
-    throw new Error('video-command.md not found in upstream outputs')
-  }
-  const outputDir = commandSource.filePath
-    ? path.dirname(commandSource.filePath)
-    : sessionOutputDirectory(session) ?? session.cwd ?? process.cwd()
-  const rawCommands = extractDreaminaCommands(commandSource.content)
-  if (!rawCommands.length) {
-    throw new Error('video-command.md does not contain a dreamina generation command')
-  }
-  const commands = rawCommands.map((command) => normalizeDreaminaVideoCommand(command, outputDir))
-  return {
-    commands,
-    outputDir,
-    finalOutputPath: extractFinalVideoOutputPath(commandSource.content, outputDir),
-  }
-}
-
-function findVideoCommandSource(session: Session): { filePath?: string; content: string } | undefined {
-  const contextFile = session.context?.files?.find((file) => /video-command\.md/i.test(file.path))
-  const contextPath = contextFile ? extractAbsolutePath(contextFile.path) : undefined
-  if (contextPath && fs.existsSync(contextPath) && fs.statSync(contextPath).isFile()) {
-    return { filePath: contextPath, content: fs.readFileSync(contextPath, 'utf-8') }
-  }
-  if (contextFile?.content) return { filePath: contextPath, content: contextFile.content }
-
-  const messages = state.getMessages(session.id).map((message) => message.content).join('\n\n')
-  const outputPath = extractExistingOutputFile(messages, 'video-command.md', session.cwd, session.createdAt)
-  if (outputPath) return { filePath: outputPath, content: fs.readFileSync(outputPath, 'utf-8') }
-  return undefined
-}
-
-function extractDreaminaCommands(content: string): string[] {
-  const normalized = content.replace(/\\\r?\n\s*/g, ' ')
-  const commands: string[] = []
-  const pattern = /(?:^|\n)\s*((?:dreamina|\/[^\s`"'<>]*dreamina)\s+(?:image2video|multiframe2video|multimodal2video|text2video|video)\b[^\n`]*)/gi
-  for (const match of normalized.matchAll(pattern)) {
-    if (match[1]) commands.push(match[1].trim())
-  }
-  return commands
-}
-
-function normalizeDreaminaVideoCommand(command: string, outputDir: string): DreaminaVideoCommand {
-  const argv = parseShellWords(command)
-  if (argv.length < 2 || path.basename(argv[0]) !== 'dreamina') {
-    throw new Error(`Unsupported Dreamina command: ${command}`)
-  }
-  const subcommand = argv[1]
-  const flags = parseFlags(argv.slice(2))
-  if (subcommand === 'video') return normalizeLegacyDreaminaVideoFlags(flags, outputDir)
-  if (!['image2video', 'multiframe2video', 'multimodal2video', 'text2video'].includes(subcommand)) {
-    throw new Error(`Unsupported Dreamina video subcommand: ${subcommand}`)
-  }
-
-  const args = [subcommand]
-  let outputPath: string | undefined
-  for (const flag of flags) {
-    if (flag.name === 'output') {
-      outputPath = resolveMaybePath(flag.value, outputDir)
-      continue
-    }
-    args.push(formatFlag(flag, outputDir))
-  }
-  ensurePollDisabled(args)
-  return { args, downloadDir: outputPath ? path.dirname(outputPath) : outputDir }
-}
-
-function normalizeLegacyDreaminaVideoFlags(flags: ParsedFlag[], outputDir: string): DreaminaVideoCommand {
-  const args = ['multimodal2video']
-  const images: string[] = []
-  let outputPath: string | undefined
-  for (const flag of flags) {
-    if ((flag.name === 'image' || flag.name === 'reference') && flag.value) {
-      images.push(resolveMaybePath(flag.value, outputDir))
-      continue
-    }
-    if (flag.name === 'output') {
-      outputPath = resolveMaybePath(flag.value, outputDir)
-      continue
-    }
-    if (['prompt', 'duration', 'ratio', 'session', 'model_version', 'video_resolution'].includes(flag.name)) {
-      args.push(`--${flag.name}`, flag.value ?? '')
-    }
-  }
-  for (const image of images) args.push('--image', image)
-  ensurePollDisabled(args)
-  return { args, downloadDir: outputPath ? path.dirname(outputPath) : outputDir }
-}
-
-type ParsedFlag = {
-  name: string
-  value?: string
-}
-
-function parseFlags(tokens: string[]): ParsedFlag[] {
-  const flags: ParsedFlag[] = []
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i]
-    if (!token.startsWith('--')) continue
-    const eq = token.indexOf('=')
-    if (eq !== -1) {
-      flags.push({ name: token.slice(2, eq), value: token.slice(eq + 1) })
-      continue
-    }
-    const next = tokens[i + 1]
-    if (next && !next.startsWith('--')) {
-      flags.push({ name: token.slice(2), value: next })
-      i += 1
-    } else {
-      flags.push({ name: token.slice(2) })
-    }
-  }
-  return flags
-}
-
-function formatFlag(flag: ParsedFlag, baseDir: string): string {
-  const valuePathFlags = new Set(['image', 'images', 'video', 'audio'])
-  if (flag.value === undefined) return `--${flag.name}`
-  const value = valuePathFlags.has(flag.name) ? resolveMaybePath(flag.value, baseDir) : flag.value
-  return `--${flag.name}=${value}`
-}
-
-function ensurePollDisabled(args: string[]): void {
-  if (!args.some((arg) => arg === '--poll' || arg.startsWith('--poll='))) args.push('--poll=0')
-}
-
-function extractFinalVideoOutputPath(content: string, baseDir: string): string | undefined {
-  const refs = Array.from(content.matchAll(/((?:\/|\.{1,2}\/)[^`\s"'<>，。；：、)）]+\.mp4)/gi)).map((match) => match[1])
-  const finalRef = [...refs].reverse().find((ref) => /final|draft|成片|最终/i.test(ref)) ?? refs.at(-1)
-  return finalRef ? resolveMaybePath(finalRef, baseDir) : undefined
-}
-
-function resolveMaybePath(value: string | undefined, baseDir: string): string {
-  if (!value) return ''
-  if (value.includes(',') && !value.includes('/,')) {
-    return value.split(',').map((part) => resolveMaybePath(part.trim(), baseDir)).join(',')
-  }
-  return path.isAbsolute(value) ? path.resolve(value) : path.resolve(baseDir, value)
-}
-
-function extractAbsolutePath(value: string): string | undefined {
-  const match = value.match(/(\/[^\n\r]+)$/)
-  return match?.[1]?.trim()
-}
-
-function parseDreaminaSubmitId(stdout: string): string | undefined {
-  return stdout.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0]
-}
-
-function parseShellWords(input: string): string[] {
-  const words: string[] = []
-  let current = ''
-  let quote: '"' | "'" | undefined
-  let escaped = false
-  for (const char of input) {
-    if (escaped) {
-      current += char
-      escaped = false
-      continue
-    }
-    if (char === '\\' && quote !== "'") {
-      escaped = true
-      continue
-    }
-    if (quote) {
-      if (char === quote) quote = undefined
-      else current += char
-      continue
-    }
-    if (char === '"' || char === "'") {
-      quote = char
-      continue
-    }
-    if (/\s/.test(char)) {
-      if (current) {
-        words.push(current)
-        current = ''
-      }
-      continue
-    }
-    current += char
-  }
-  if (current) words.push(current)
-  return words
-}
-
-function shellQuote(value: string): string {
-  if (/^[\w./:=,-]+$/.test(value)) return value
-  return `'${value.replace(/'/g, "'\\''")}'`
+export function extractHumanInputRequest(content: string): string | null {
+  const match = content.match(HUMAN_NEEDED_RE)
+  if (!match) return null
+  const text = match[1].trim()
+  return text || null
 }
 
 export function detectHumanInputWait(content: string): boolean {
+  // Primary path: the explicit protocol block from HUMAN_SUMMON_PROTOCOL.
+  if (HUMAN_NEEDED_RE.test(content)) return true
+  // Secondary path: natural-language cues. The engine should not assume any
+  // specific language, so we match both the original Chinese phrasings (kept
+  // for backward compatibility) and common English equivalents. These are
+  // soft fallbacks — agents are expected to use [HUMAN_NEEDED] blocks.
   return (
     /等待人工(?:确认|审核|回复|输入)/i.test(content) ||
-    /请回复[“"'` ]*(?:OK|通过|确认保存)/i.test(content)
+    /请回复[“"'` ]*(?:OK|通过|确认保存)/i.test(content) ||
+    /\bwaiting (?:for|on) (?:human |your )?(?:approval|confirmation|review|input|reply|response)\b/i.test(content) ||
+    /\b(?:please )?(?:reply|respond) (?:with )?(?:OK|approve|confirm|yes)\b/i.test(content) ||
+    /\bawaiting (?:human |your )?(?:approval|confirmation|review|input|decision)\b/i.test(content)
   )
 }
 
@@ -1996,104 +1798,6 @@ function extractVideoPaths(content: string): string[] {
     [...content.matchAll(/(?:^|[`(\s])((?:\/|\.{1,2}\/)[^`\s)]+?\.(?:mp4|mov|webm))(?=$|[`\s)])/gi)]
       .map((match) => match[1])
   ))
-}
-
-function requireDreaminaCommand(): string {
-  if (!DREAMINA_COMMAND) {
-    throw new Error('Dreamina is not configured. Set TURING_DREAMINA_COMMAND to the dreamina binary path to enable video generation steps.')
-  }
-  return DREAMINA_COMMAND
-}
-
-async function queryDreaminaResult(externalId: string, downloadDir: string): Promise<DreaminaQueryResult> {
-  fs.mkdirSync(downloadDir, { recursive: true })
-  const stdout = await execFileText(requireDreaminaCommand(), [
-    'query_result',
-    `--submit_id=${externalId}`,
-  ])
-  const payload = JSON.parse(stdout) as {
-    gen_status?: string
-    message?: string
-    result_json?: {
-      videos?: Array<{ video_url?: string; format?: string }>
-    }
-  }
-  const status = payload.gen_status?.toLowerCase()
-  if (status === 'success') {
-    const videos = payload.result_json?.videos ?? []
-    const paths: string[] = []
-    for (const [index, video] of videos.entries()) {
-      if (!video.video_url) continue
-      const ext = video.format?.toLowerCase() === 'webm' ? 'webm' : 'mp4'
-      const destination = path.join(downloadDir, `${externalId}_video_${index + 1}.${ext}`)
-      await downloadAndValidateVideo(video.video_url, destination)
-      paths.push(destination)
-    }
-    if (paths.length > 0) return { status: 'success', paths }
-    return { status: 'querying' }
-  }
-  if (status === 'failed' || status === 'error') {
-    return { status: 'error', errorMessage: payload.message ?? `Dreamina task ${status}` }
-  }
-  return { status: 'querying' }
-}
-
-async function submitDreaminaCommand(args: string[], cwd?: string): Promise<string> {
-  return execFileText(DREAMINA_COMMAND, args, 5 * 60_000, cwd)
-}
-
-async function concatVideos(inputVideos: string[], destination: string): Promise<void> {
-  fs.mkdirSync(path.dirname(destination), { recursive: true })
-  const listPath = path.join(path.dirname(destination), `.concat-${Date.now()}.txt`)
-  const listContent = inputVideos
-    .map((filePath) => `file '${filePath.replace(/'/g, "'\\''")}'`)
-    .join('\n')
-  fs.writeFileSync(listPath, listContent)
-  try {
-    await execFileText(FFMPEG_COMMAND, [
-      '-y',
-      '-f', 'concat',
-      '-safe', '0',
-      '-i', listPath,
-      '-c', 'copy',
-      destination,
-    ], 20 * 60_000)
-    await execFileText(FFMPEG_COMMAND, ['-v', 'error', '-i', destination, '-f', 'null', '-'], 5 * 60_000)
-  } finally {
-    fs.rmSync(listPath, { force: true })
-  }
-}
-
-async function downloadAndValidateVideo(url: string, destination: string): Promise<void> {
-  const partial = `${destination}.part`
-  await execFileText(CURL_COMMAND, [
-    '--location',
-    '--fail',
-    '--retry', '3',
-    '--retry-delay', '2',
-    '--continue-at', '-',
-    '--output', partial,
-    url,
-  ], 20 * 60_000)
-  try {
-    await execFileText(FFMPEG_COMMAND, ['-v', 'error', '-i', partial, '-f', 'null', '-'], 5 * 60_000)
-  } catch (err) {
-    fs.rmSync(partial, { force: true })
-    throw new Error(`Downloaded video failed integrity check: ${errorMessage(err)}`)
-  }
-  fs.renameSync(partial, destination)
-}
-
-function execFileText(command: string, args: string[], timeout = 60_000, cwd?: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(command, args, { timeout, maxBuffer: 10 * 1024 * 1024, cwd }, (err, stdout, stderr) => {
-      if (err) {
-        reject(new Error((stderr || err.message).trim()))
-        return
-      }
-      resolve(stdout.trim())
-    })
-  })
 }
 
 function agentLabel(ref: AgentRef): string {
@@ -2459,7 +2163,7 @@ function validateWorkflowStepOutput(title: string, content: string, cwd?: string
   return true
 }
 
-function extractExistingOutputFile(content: string, fileName: string, cwd?: string, createdAt?: number): string | undefined {
+export function extractExistingOutputFile(content: string, fileName: string, cwd?: string, createdAt?: number): string | undefined {
   const escapedName = fileName.startsWith('*.')
     ? `[^\\s\\x60"'<>，。；：、)）]*${fileName.slice(1).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`
     : fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -2528,7 +2232,7 @@ function formatManualPipelineOutput(output?: string): string {
   ].join('\n')
 }
 
-function sessionOutputDirectory(session: Session): string | undefined {
+export function sessionOutputDirectory(session: Session): string | undefined {
   const sources = [session.context?.rules, session.context?.text].filter((value): value is string => Boolean(value))
   for (const source of sources) {
     const tagged = source.match(/\[\[Turing Output Directory\]\]\s*Save this step's durable outputs under:\s*(.+?)\s*\[\[End Turing Output Directory\]\]/s)
@@ -2539,7 +2243,7 @@ function sessionOutputDirectory(session: Session): string | undefined {
   return undefined
 }
 
-function truncate(value: string, maxLength: number): string {
+export function truncate(value: string, maxLength: number): string {
   if (value.length <= maxLength) return value
   return `${value.slice(0, maxLength)}...`
 }

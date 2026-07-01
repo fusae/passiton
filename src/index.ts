@@ -7,6 +7,7 @@ import { Router } from './router.js'
 import { registerBuiltinAdapters, registerConfiguredAdapters } from './adapters/factory.js'
 import { createServer, registerPersistedUserAgents } from './server.js'
 import { installGracefulShutdown } from './shutdown.js'
+import { registerDreamina } from './examples/dreamina/index.js'
 
 async function main(): Promise<void> {
   const config = loadConfig()
@@ -24,6 +25,9 @@ async function main(): Promise<void> {
   registerConfiguredAdapters(router, agents)
   registerBuiltinAdapters(router)
   registerPersistedUserAgents(router)
+  // Register bundled external-task providers. The Dreamina video provider is
+  // a local convenience; open-source consumers may omit it for a clean core.
+  registerDreamina(router)
   router.recoverTasks()
   router.recoverSessions()
   router.recoverExternalJobs()
