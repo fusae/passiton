@@ -7,6 +7,9 @@ import { OpenCodeAdapter } from './opencode.js'
 import { AnthropicApiAdapter } from './api/anthropic.js'
 import { OpenAIApiAdapter } from './api/openai.js'
 import { ZhipuApiAdapter } from './api/zhipu.js'
+import { DeepSeekApiAdapter } from './api/deepseek.js'
+import { QwenApiAdapter } from './api/qwen.js'
+import { MoonshotApiAdapter } from './api/moonshot.js'
 import { GeminiImageAdapter } from './gemini-image.js'
 
 const DISCOVERED_DEFAULTS: Record<string, Omit<AgentConfig, 'command'>> = {
@@ -105,6 +108,30 @@ export function createAdapter(agentCfg: AgentConfig): Adapter | undefined {
         timeout: agentCfg.timeout,
       })
       break
+    case 'deepseek-api':
+      adapter = new DeepSeekApiAdapter({
+        apiKey: requireApiKey(agentCfg),
+        model: agentCfg.model,
+        baseUrl: agentCfg.baseUrl,
+        timeout: agentCfg.timeout,
+      })
+      break
+    case 'qwen-api':
+      adapter = new QwenApiAdapter({
+        apiKey: requireApiKey(agentCfg),
+        model: agentCfg.model,
+        baseUrl: agentCfg.baseUrl,
+        timeout: agentCfg.timeout,
+      })
+      break
+    case 'moonshot-api':
+      adapter = new MoonshotApiAdapter({
+        apiKey: requireApiKey(agentCfg),
+        model: agentCfg.model,
+        baseUrl: agentCfg.baseUrl,
+        timeout: agentCfg.timeout,
+      })
+      break
     default:
       return undefined
   }
@@ -171,6 +198,9 @@ function isApiAdapterType(adapterType: string): boolean {
   return adapterType === 'anthropic-api' ||
     adapterType === 'openai-api' ||
     adapterType === 'zhipu-api' ||
+    adapterType === 'deepseek-api' ||
+    adapterType === 'qwen-api' ||
+    adapterType === 'moonshot-api' ||
     adapterType === 'custom-api'
 }
 

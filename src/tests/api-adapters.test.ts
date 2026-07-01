@@ -224,6 +224,20 @@ test('factory requires apiKey for API adapters', () => {
   assert.equal(createAdapter({ adapter: 'zhipu-api', apiKey: 'zhipu-test' })?.name, 'zhipu-api')
 })
 
+test('factory creates domestic OpenAI-compatible API adapters', () => {
+  // All three subclass OpenAIApiAdapter; only name + defaults differ.
+  assert.equal(createAdapter({ adapter: 'deepseek-api', apiKey: 'k' })?.name, 'deepseek-api')
+  assert.equal(createAdapter({ adapter: 'qwen-api', apiKey: 'k' })?.name, 'qwen-api')
+  assert.equal(createAdapter({ adapter: 'moonshot-api', apiKey: 'k' })?.name, 'moonshot-api')
+
+  // API adapters must be marked as filesystem-less.
+  for (const adapterType of ['deepseek-api', 'qwen-api', 'moonshot-api']) {
+    const adapter = createAdapter({ adapter: adapterType, apiKey: 'k' })!
+    assert.equal(adapter.capabilities?.fileSystem, false, `${adapterType} should not have filesystem`)
+    assert.equal(adapter.capabilities?.shell, false, `${adapterType} should not have shell`)
+  }
+})
+
 test('factory creates Gemini CLI adapter', () => {
   const adapter = createAdapter({
     adapter: 'gemini-cli',

@@ -450,6 +450,73 @@ test('POST /api/tasks runs a lead-agent task and exposes its result', async () =
   })
 })
 
+test('POST /mcp exposes tools and can create a task', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'mcp@example.com')
+
+    const initialize = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+    })
+    assert.equal(initialize.status, 200)
+    assert.equal((await initialize.json() as { result: { serverInfo: { name: string } } }).result.serverInfo.name, 'turing')
+
+    const tools = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+    })
+    assert.equal(tools.status, 200)
+    const toolsPayload = await tools.json() as { result: { tools: Array<{ name: string }> } }
+    assert.ok(toolsPayload.result.tools.some((tool) => tool.name === 'turing_create_task'))
+
+    const created = await fetch(`${baseUrl}/mcp`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'turing_create_task',
+          arguments: {
+            agent: 'opencode',
+            prompt: 'write mcp article',
+          },
+        },
+      }),
+    })
+    assert.equal(created.status, 200)
+    const createPayload = await created.json() as { result: { structuredContent: { task: { id: string; status: string } } } }
+    const taskId = createPayload.result.structuredContent.task.id
+    assert.equal(createPayload.result.structuredContent.task.status, 'queued')
+
+    await waitFor(async () => {
+      const response = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 4,
+          method: 'tools/call',
+          params: { name: 'turing_get_task', arguments: { id: taskId } },
+        }),
+      })
+      const payload = await response.json() as { result: { structuredContent: { task: { status: string; result?: string } } } }
+      return payload.result.structuredContent.task.status === 'done'
+    })
+  }, {
+    allowRegistration: true,
+    configureRouter: (router) => {
+      router.registerAdapter(new StubAdapter('opencode', async (_session, message) => {
+        assert.equal(message, 'write mcp article')
+        return '[RESULT]mcp ready[/RESULT]'
+      }))
+    },
+  })
+})
+
 test('POST /api/tasks/:id/stop stops a running task', async () => {
   let release!: () => void
   const gate = new Promise<void>((resolve) => { release = resolve })

@@ -4,7 +4,7 @@ import * as state from './state.js'
 
 type Provider = state.StoredApiKeyRecord['provider']
 
-const PROVIDERS = new Set<Provider>(['anthropic', 'openai', 'deepseek', 'zhipu'])
+const PROVIDERS = new Set<Provider>(['anthropic', 'openai', 'deepseek', 'zhipu', 'qwen', 'moonshot'])
 
 export class KeyVaultError extends Error {
   constructor(
@@ -17,7 +17,7 @@ export class KeyVaultError extends Error {
 
 export function validateProvider(value: string): Provider {
   if (!PROVIDERS.has(value as Provider)) {
-    throw new KeyVaultError(400, '"provider" must be one of anthropic, openai, deepseek, zhipu')
+    throw new KeyVaultError(400, '"provider" must be one of anthropic, openai, deepseek, zhipu, qwen, moonshot')
   }
   return value as Provider
 }
@@ -135,6 +135,10 @@ export function envVarForProvider(provider: Provider): string {
       return 'DEEPSEEK_API_KEY'
     case 'zhipu':
       return 'ZHIPU_API_KEY'
+    case 'qwen':
+      return 'DASHSCOPE_API_KEY'
+    case 'moonshot':
+      return 'MOONSHOT_API_KEY'
   }
 }
 

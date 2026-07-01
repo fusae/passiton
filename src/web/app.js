@@ -32,11 +32,33 @@ const PROVIDER_PRESETS = {
   },
   deepseek: {
     label: 'DeepSeek',
-    adapter: 'custom-api',
-    baseUrl: 'https://api.deepseek.com/chat/completions',
+    adapter: 'deepseek-api',
+    baseUrl: '',
     models: [
+      { value: 'deepseek-chat', label: 'DeepSeek Chat' },
       { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
       { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+    ],
+  },
+  qwen: {
+    label: 'Qwen (DashScope)',
+    adapter: 'qwen-api',
+    baseUrl: '',
+    models: [
+      { value: 'qwen-plus', label: 'Qwen Plus' },
+      { value: 'qwen-max', label: 'Qwen Max' },
+      { value: 'qwen-turbo', label: 'Qwen Turbo' },
+      { value: 'qwen-long', label: 'Qwen Long' },
+    ],
+  },
+  moonshot: {
+    label: 'Moonshot (Kimi)',
+    adapter: 'moonshot-api',
+    baseUrl: '',
+    models: [
+      { value: 'moonshot-v1-32k', label: 'Moonshot v1 32k' },
+      { value: 'moonshot-v1-128k', label: 'Moonshot v1 128k' },
+      { value: 'kimi-k2', label: 'Kimi K2' },
     ],
   },
   zhipu: {
@@ -4870,9 +4892,14 @@ function defaultModelForProvider(provider) {
 function providerPresetForAgent(agent) {
   if (!agent) return 'anthropic'
   if (agent.baseUrl?.includes('api.deepseek.com')) return 'deepseek'
+  if (agent.baseUrl?.includes('dashscope.aliyuncs.com')) return 'qwen'
+  if (agent.baseUrl?.includes('api.moonshot.cn')) return 'moonshot'
   if (agent.adapter === 'anthropic-api') return 'anthropic'
   if (agent.adapter === 'openai-api') return 'openai'
   if (agent.adapter === 'zhipu-api') return 'zhipu'
+  if (agent.adapter === 'deepseek-api') return 'deepseek'
+  if (agent.adapter === 'qwen-api') return 'qwen'
+  if (agent.adapter === 'moonshot-api') return 'moonshot'
   return 'custom'
 }
 

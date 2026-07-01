@@ -35,17 +35,23 @@ const MAX_FILE_PREVIEW_SIZE = 1024 * 1024
 const MAX_IMAGE_FILE_PREVIEW_SIZE = 10 * 1024 * 1024
 const WS_HEARTBEAT_MS = 30_000
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const API_ADAPTERS = new Set(['anthropic-api', 'openai-api', 'zhipu-api', 'custom-api'])
+const API_ADAPTERS = new Set(['anthropic-api', 'openai-api', 'zhipu-api', 'deepseek-api', 'qwen-api', 'moonshot-api', 'custom-api'])
 const PROVIDER_BY_ADAPTER: Record<string, string> = {
   'anthropic-api': 'Anthropic',
   'openai-api': 'OpenAI',
   'zhipu-api': '智谱',
+  'deepseek-api': 'DeepSeek',
+  'qwen-api': 'Qwen',
+  'moonshot-api': 'Moonshot',
   'custom-api': 'Custom',
 }
 const DEFAULT_BASE_URLS: Record<string, string> = {
   'anthropic-api': 'https://api.anthropic.com/v1/messages',
   'openai-api': 'https://api.openai.com/v1/chat/completions',
   'zhipu-api': 'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+  'deepseek-api': 'https://api.deepseek.com/chat/completions',
+  'qwen-api': 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+  'moonshot-api': 'https://api.moonshot.cn/v1/chat/completions',
 }
 
 type ProviderKeyInfo = {
@@ -57,6 +63,28 @@ type ProviderKeyInfo = {
   source: 'vault' | 'assistant' | 'global'
   usedBy?: string[]
   readOnly?: boolean
+}
+
+type JsonRpcId = string | number | null
+type JsonRpcRequest = {
+  jsonrpc?: string
+  id?: JsonRpcId
+  method?: string
+  params?: unknown
+}
+
+type McpTool = {
+  name: string
+  title?: string
+  description: string
+  inputSchema: Record<string, unknown>
+  annotations?: Record<string, unknown>
+}
+
+type McpContext = {
+  router: Router
+  agentCatalog: AgentCatalog
+  authUser: AuthUser
 }
 
 const MIME: Record<string, string> = {
@@ -125,8 +153,8 @@ function parseTokenBody(body: unknown): { name?: string } {
 function parseApiKeyBody(body: unknown): { provider: string; key: string; name?: string } {
   const data = requireRecord(body, 'body')
   const provider = requireNonEmptyString(data.provider, 'provider').toLowerCase()
-  if (provider !== 'anthropic' && provider !== 'openai' && provider !== 'deepseek' && provider !== 'zhipu') {
-    throw new HttpError(400, '"provider" must be one of anthropic, openai, deepseek, zhipu')
+  if (provider !== 'anthropic' && provider !== 'openai' && provider !== 'deepseek' && provider !== 'zhipu' && provider !== 'qwen' && provider !== 'moonshot') {
+    throw new HttpError(400, '"provider" must be one of anthropic, openai, deepseek, zhipu, qwen, moonshot')
   }
   return {
     provider,
@@ -307,7 +335,7 @@ function parseApiAgentConfigBody(body: unknown, existing?: state.UserAgentRecord
   if (!name) throw new HttpError(400, '"name" must be a non-empty string')
   const adapter = requireNonEmptyString(data.adapter ?? existing?.adapter, 'adapter')
   if (!API_ADAPTERS.has(adapter)) {
-    throw new HttpError(400, '"adapter" must be one of anthropic-api, openai-api, zhipu-api, custom-api')
+    throw new HttpError(400, '"adapter" must be one of anthropic-api, openai-api, zhipu-api, deepseek-api, qwen-api, moonshot-api, custom-api')
   }
   const baseUrl = optionalString(data.baseUrl, 'baseUrl') ?? existing?.baseUrl
   if (adapter === 'custom-api' && !baseUrl) {
@@ -534,6 +562,9 @@ function providerValueForAdapter(adapter: string, baseUrl?: string): state.Store
   if (adapter === 'anthropic-api') return 'anthropic'
   if (adapter === 'openai-api' || adapter === 'custom-api') return 'openai'
   if (adapter === 'zhipu-api') return 'zhipu'
+  if (adapter === 'deepseek-api') return 'deepseek'
+  if (adapter === 'qwen-api') return 'qwen'
+  if (adapter === 'moonshot-api') return 'moonshot'
   return 'openai'
 }
 
@@ -904,6 +935,491 @@ function assertPermissionModeAllowed(permissionMode: 'safe' | 'trusted' | undefi
   }
 }
 
+function mcpServerMetadata() {
+  return {
+    name: 'turing',
+    transport: 'streamable-http',
+    protocolVersion: '2025-06-18',
+    endpoint: '/mcp',
+    auth: 'Authorization: Bearer <turing token>',
+    tools: mcpTools().map((tool) => tool.name),
+  }
+}
+
+async function handleMcpRpc(body: unknown, ctx: McpContext): Promise<unknown> {
+  if (Array.isArray(body)) {
+    const responses = await Promise.all(body.map((item) => handleMcpSingleRpc(item, ctx)))
+    return responses.filter((item) => item !== undefined)
+  }
+  return handleMcpSingleRpc(body, ctx)
+}
+
+async function handleMcpSingleRpc(body: unknown, ctx: McpContext): Promise<unknown> {
+  const request = body as JsonRpcRequest
+  const id = request.id
+  if (!request || typeof request !== 'object' || typeof request.method !== 'string') {
+    return mcpError(id ?? null, -32600, 'Invalid JSON-RPC request')
+  }
+
+  try {
+    switch (request.method) {
+      case 'initialize':
+        return mcpResult(id, {
+          protocolVersion: '2025-06-18',
+          capabilities: { tools: { listChanged: false } },
+          serverInfo: { name: 'turing', version: '0.1.0' },
+          instructions: 'Use Turing tools to create and monitor agent tasks, sessions, and workflows. Ask before destructive operations.',
+        })
+      case 'notifications/initialized':
+      case 'ping':
+        return id === undefined ? undefined : mcpResult(id, {})
+      case 'tools/list':
+        return mcpResult(id, { tools: mcpTools() })
+      case 'tools/call': {
+        const params = requireRecord(request.params, 'params')
+        const name = requireNonEmptyString(params.name, 'params.name')
+        const args = params.arguments ?? {}
+        const data = await callMcpTool(name, args, ctx)
+        return mcpResult(id, {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+          structuredContent: data,
+        })
+      }
+      default:
+        return mcpError(id, -32601, `Unsupported MCP method: ${request.method}`)
+    }
+  } catch (err) {
+    return mcpError(id, -32000, err instanceof Error ? err.message : String(err))
+  }
+}
+
+function mcpResult(id: JsonRpcId | undefined, result: unknown): unknown {
+  if (id === undefined) return undefined
+  return { jsonrpc: '2.0', id, result }
+}
+
+function mcpError(id: JsonRpcId | undefined, code: number, message: string): unknown {
+  return { jsonrpc: '2.0', id: id ?? null, error: { code, message } }
+}
+
+function mcpTools(): McpTool[] {
+  return [
+    {
+      name: 'turing_list_agents',
+      title: 'List Turing agents',
+      description: 'List agents available to create Turing tasks, sessions, and workflows.',
+      inputSchema: objectSchema({ refresh: { type: 'boolean', description: 'Run live diagnostics where supported.' } }),
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'turing_create_task',
+      title: 'Create Turing task',
+      description: 'Create a single-agent Turing task. Use this for one-shot work.',
+      inputSchema: objectSchema({
+        agent: agentSchema('Agent adapter name or agent reference.'),
+        prompt: { type: 'string' },
+        cwd: { type: 'string', description: 'Optional working directory. Required for filesystem work.' },
+        systemPrompt: { type: 'string' },
+        context: contextSchema(),
+      }, ['agent', 'prompt']),
+      annotations: { destructiveHint: false },
+    },
+    {
+      name: 'turing_get_task',
+      title: 'Get Turing task',
+      description: 'Read a task by id, including status, output, result, and errors.',
+      inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'turing_create_session',
+      title: 'Create Turing session',
+      description: 'Create an agent-to-agent Turing session. Use this when planning and execution should be split between agents.',
+      inputSchema: objectSchema({
+        from: agentSchema('Planner or first speaker.'),
+        to: agentSchema('Executor or second speaker.'),
+        initialPrompt: { type: 'string' },
+        mode: { type: 'string', enum: ['collaborate', 'discuss', 'review', 'freeform'] },
+        maxRounds: { type: 'integer', minimum: 1 },
+        approveMode: { type: 'boolean' },
+        permissionMode: { type: 'string', enum: ['safe', 'trusted'] },
+        cwd: { type: 'string' },
+        systemPrompts: objectSchema({ from: { type: 'string' }, to: { type: 'string' } }, ['from', 'to']),
+        context: contextSchema(),
+      }, ['from', 'to', 'initialPrompt']),
+      annotations: { destructiveHint: false },
+    },
+    {
+      name: 'turing_get_session',
+      title: 'Get Turing session',
+      description: 'Read a session by id, including messages and current status.',
+      inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'turing_create_workflow',
+      title: 'Create Turing workflow',
+      description: 'Create a multi-step Turing workflow/pipeline.',
+      inputSchema: objectSchema({
+        name: { type: 'string' },
+        steps: {
+          type: 'array',
+          minItems: 1,
+          items: objectSchema({
+            title: { type: 'string' },
+            nodeType: { type: 'string' },
+            from: agentSchema('Step planner/source agent.'),
+            to: agentSchema('Step executor/target agent.'),
+            agent: agentSchema('Single agent shortcut for this step.'),
+            initialPrompt: { type: 'string' },
+            mode: { type: 'string', enum: ['collaborate', 'discuss', 'review', 'freeform'] },
+            maxRounds: { type: 'integer', minimum: 1 },
+            approveMode: { type: 'boolean' },
+            permissionMode: { type: 'string', enum: ['safe', 'trusted'] },
+            cwd: { type: 'string' },
+            outputDir: { type: 'string' },
+            dependsOn: { type: 'array', items: { type: 'integer', minimum: 0 } },
+            context: contextSchema(),
+          }, ['initialPrompt']),
+        },
+        startAtStep: { type: 'integer', minimum: 1 },
+        manualOutput: { type: 'string' },
+      }, ['name', 'steps']),
+      annotations: { destructiveHint: false },
+    },
+    {
+      name: 'turing_get_workflow',
+      title: 'Get Turing workflow',
+      description: 'Read a workflow by id, including step sessions and messages.',
+      inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'turing_get_progress',
+      title: 'Get Turing progress',
+      description: 'Get progress for a task, session, workflow, or the current active runs.',
+      inputSchema: objectSchema({
+        kind: { type: 'string', enum: ['task', 'session', 'workflow'] },
+        id: { type: 'string' },
+      }),
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'turing_send_feedback',
+      title: 'Send Turing feedback',
+      description: 'Inject human feedback into a session or workflow step and resume it.',
+      inputSchema: objectSchema({
+        sessionId: { type: 'string' },
+        content: { type: 'string' },
+      }, ['sessionId', 'content']),
+    },
+    {
+      name: 'turing_approve_step',
+      title: 'Approve Turing step',
+      description: 'Approve a session or workflow step that is waiting for human confirmation.',
+      inputSchema: objectSchema({ sessionId: { type: 'string' } }, ['sessionId']),
+    },
+    {
+      name: 'turing_retry_step',
+      title: 'Retry Turing step',
+      description: 'Rerun one workflow step and reset its downstream steps.',
+      inputSchema: objectSchema({ sessionId: { type: 'string' } }, ['sessionId']),
+    },
+    {
+      name: 'turing_stop_run',
+      title: 'Stop Turing run',
+      description: 'Stop a task/session, or pause a workflow.',
+      inputSchema: objectSchema({
+        kind: { type: 'string', enum: ['task', 'session', 'workflow'] },
+        id: { type: 'string' },
+      }, ['kind', 'id']),
+      annotations: { destructiveHint: true },
+    },
+    {
+      name: 'turing_read_artifact',
+      title: 'Read Turing artifact',
+      description: 'Read a text artifact file from an allowed workspace.',
+      inputSchema: objectSchema({
+        path: { type: 'string' },
+        cwd: { type: 'string' },
+        maxChars: { type: 'integer', minimum: 1, maximum: 200000 },
+      }, ['path']),
+      annotations: { readOnlyHint: true },
+    },
+  ]
+}
+
+function objectSchema(properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties,
+    additionalProperties: false,
+    ...(required.length ? { required } : {}),
+  }
+}
+
+function agentSchema(description: string): Record<string, unknown> {
+  return {
+    anyOf: [
+      { type: 'string', description },
+      objectSchema({
+        adapter: { type: 'string' },
+        label: { type: 'string' },
+      }, ['adapter']),
+    ],
+  }
+}
+
+function contextSchema(): Record<string, unknown> {
+  return objectSchema({
+    text: { type: 'string' },
+    rules: { type: 'string' },
+    files: { type: 'array', items: { type: 'string' } },
+  })
+}
+
+async function callMcpTool(name: string, args: unknown, ctx: McpContext): Promise<unknown> {
+  switch (name) {
+    case 'turing_list_agents':
+      return mcpListAgents(args, ctx)
+    case 'turing_create_task':
+      return mcpCreateTask(args, ctx)
+    case 'turing_get_task':
+      return mcpGetTask(args, ctx)
+    case 'turing_create_session':
+      return mcpCreateSession(args, ctx)
+    case 'turing_get_session':
+      return mcpGetSession(args, ctx)
+    case 'turing_create_workflow':
+      return mcpCreateWorkflow(args, ctx)
+    case 'turing_get_workflow':
+      return mcpGetWorkflow(args, ctx)
+    case 'turing_get_progress':
+      return mcpGetProgress(args, ctx)
+    case 'turing_send_feedback':
+      return mcpSendFeedback(args, ctx)
+    case 'turing_approve_step':
+      return mcpApproveStep(args, ctx)
+    case 'turing_retry_step':
+      return mcpRetryStep(args, ctx)
+    case 'turing_stop_run':
+      return mcpStopRun(args, ctx)
+    case 'turing_read_artifact':
+      return mcpReadArtifact(args)
+    default:
+      throw new HttpError(404, `Unknown MCP tool: ${name}`)
+  }
+}
+
+async function mcpListAgents(args: unknown, ctx: McpContext): Promise<unknown> {
+  const data = requireRecord(args, 'arguments')
+  const refresh = optionalBoolean(data.refresh, 'refresh') ?? false
+  const catalogAgents = await ctx.agentCatalog.listAgents({ refresh })
+  const assistantAgents = state.listUserAgents(ctx.authUser.userId).map((agent) => ({
+    name: agent.name,
+    adapter: agent.adapter,
+    source: 'assistant',
+    supported: true,
+    availableForSessions: true,
+    healthy: true,
+    model: agent.model,
+    baseUrl: agent.baseUrl,
+  }))
+  return { agents: [...assistantAgents, ...catalogAgents] }
+}
+
+function mcpCreateTask(args: unknown, ctx: McpContext): unknown {
+  const params = parseTaskBody(normalizeTaskArgs(args))
+  assertAllowedWorkspace(params.cwd)
+  assertTaskFilesystemCapability(ctx.authUser.userId, params.agent, params.cwd)
+  const task = ctx.router.startTask({
+    userId: ctx.authUser.userId,
+    ...params,
+    context: resolveSessionContext(params.context, params.cwd),
+  })
+  return { task, url: `/tasks/${task.id}` }
+}
+
+function mcpGetTask(args: unknown, ctx: McpContext): unknown {
+  const data = requireRecord(args, 'arguments')
+  const task = state.getTask(requireNonEmptyString(data.id, 'id'), ctx.authUser.userId)
+  if (!task) throw new HttpError(404, 'Task not found')
+  return { task }
+}
+
+function mcpCreateSession(args: unknown, ctx: McpContext): unknown {
+  const defaults = loadConfig().defaults
+  const params = parseSessionBody(normalizeSessionArgs(args))
+  assertAllowedWorkspace(params.cwd)
+  assertPermissionModeAllowed(params.permissionMode, params.cwd)
+  assertSessionFilesystemCapability(ctx.authUser.userId, params.to, params.cwd)
+  const session = ctx.router.startSession({
+    userId: ctx.authUser.userId,
+    ...params,
+    context: resolveSessionContext(params.context, params.cwd),
+    mode: params.mode ?? defaults.mode,
+    maxRounds: params.maxRounds ?? defaults.maxRounds,
+  })
+  return { session, url: `/sessions/${session.id}` }
+}
+
+function mcpGetSession(args: unknown, ctx: McpContext): unknown {
+  const data = requireRecord(args, 'arguments')
+  const id = requireNonEmptyString(data.id, 'id')
+  const session = state.getSession(id, ctx.authUser.userId)
+  if (!session) throw new HttpError(404, 'Session not found')
+  return { session: sessionForClient(session), messages: state.getMessages(id), logs: state.getLogs(id) }
+}
+
+function mcpCreateWorkflow(args: unknown, ctx: McpContext): unknown {
+  const defaults = loadConfig().defaults
+  const params = parsePipelineBody(normalizeWorkflowArgs(args))
+  for (const [index, step] of params.steps.entries()) {
+    assertAllowedWorkspace(step.cwd, `steps[${index}].cwd`)
+    assertAllowedWorkspace(step.outputDir, `steps[${index}].outputDir`)
+    assertPermissionModeAllowed(step.permissionMode, step.cwd, `steps[${index}].permissionMode`)
+  }
+  const workflow = ctx.router.startPipeline({
+    userId: ctx.authUser.userId,
+    name: params.name,
+    steps: params.steps.map((step) => ({
+      ...step,
+      context: appendOutputDirContext(resolveSessionContext(step.context, step.cwd), step.outputDir),
+      mode: step.mode ?? defaults.mode,
+      maxRounds: step.maxRounds ?? defaults.maxRounds,
+    })),
+  })
+  return { workflow, url: `/workflow/${workflow.id}` }
+}
+
+function mcpGetWorkflow(args: unknown, ctx: McpContext): unknown {
+  const data = requireRecord(args, 'arguments')
+  const workflow = state.getPipelineWithSessions(requireNonEmptyString(data.id, 'id'), ctx.authUser.userId)
+  if (!workflow) throw new HttpError(404, 'Workflow not found')
+  return { workflow }
+}
+
+function mcpGetProgress(args: unknown, ctx: McpContext): unknown {
+  const data = requireRecord(args, 'arguments')
+  const id = optionalString(data.id, 'id')
+  const kind = optionalString(data.kind, 'kind')
+  if (id && kind === 'task') return mcpGetTask({ id }, ctx)
+  if (id && kind === 'session') return mcpGetSession({ id }, ctx)
+  if (id && kind === 'workflow') return mcpGetWorkflow({ id }, ctx)
+  if (id) {
+    const task = state.getTask(id, ctx.authUser.userId)
+    if (task) return { kind: 'task', task }
+    const session = state.getSession(id, ctx.authUser.userId)
+    if (session) return { kind: 'session', session: sessionForClient(session), messages: state.getMessages(id) }
+    const workflow = state.getPipelineWithSessions(id, ctx.authUser.userId)
+    if (workflow) return { kind: 'workflow', workflow }
+    throw new HttpError(404, 'Run not found')
+  }
+  return {
+    tasks: state.listTasks({ userId: ctx.authUser.userId }).filter((task) => task.status === 'queued' || task.status === 'running'),
+    sessions: state.listSessions({ userId: ctx.authUser.userId }).filter((session) => session.status === 'active' || session.status === 'paused'),
+    workflows: state.listPipelines(ctx.authUser.userId).filter((workflow) => workflow.status === 'active' || workflow.status === 'paused'),
+  }
+}
+
+async function mcpSendFeedback(args: unknown, ctx: McpContext): Promise<unknown> {
+  const data = requireRecord(args, 'arguments')
+  const sessionId = requireNonEmptyString(data.sessionId, 'sessionId')
+  if (!state.getSession(sessionId, ctx.authUser.userId)) throw new HttpError(404, 'Session not found')
+  const message = ctx.router.injectMessage(sessionId, requireNonEmptyString(data.content, 'content'))
+  return { message, session: state.getSession(sessionId, ctx.authUser.userId) }
+}
+
+async function mcpApproveStep(args: unknown, ctx: McpContext): Promise<unknown> {
+  const data = requireRecord(args, 'arguments')
+  const sessionId = requireNonEmptyString(data.sessionId, 'sessionId')
+  if (!state.getSession(sessionId, ctx.authUser.userId)) throw new HttpError(404, 'Session not found')
+  const session = await ctx.router.confirmSession(sessionId)
+  return { session }
+}
+
+async function mcpRetryStep(args: unknown, ctx: McpContext): Promise<unknown> {
+  const data = requireRecord(args, 'arguments')
+  const sessionId = requireNonEmptyString(data.sessionId, 'sessionId')
+  if (!state.getSession(sessionId, ctx.authUser.userId)) throw new HttpError(404, 'Session not found')
+  return { workflow: await ctx.router.rerunPipelineStep(sessionId) }
+}
+
+async function mcpStopRun(args: unknown, ctx: McpContext): Promise<unknown> {
+  const data = requireRecord(args, 'arguments')
+  const id = requireNonEmptyString(data.id, 'id')
+  const kind = requireNonEmptyString(data.kind, 'kind')
+  if (kind === 'task') {
+    if (!state.getTask(id, ctx.authUser.userId)) throw new HttpError(404, 'Task not found')
+    return { task: await ctx.router.stopTask(id) }
+  }
+  if (kind === 'session') {
+    if (!state.getSession(id, ctx.authUser.userId)) throw new HttpError(404, 'Session not found')
+    return { session: await ctx.router.stopSession(id) }
+  }
+  if (kind === 'workflow') {
+    if (!state.getPipeline(id, ctx.authUser.userId)) throw new HttpError(404, 'Workflow not found')
+    return { workflow: await ctx.router.pausePipeline(id) }
+  }
+  throw new HttpError(400, '"kind" must be one of task, session, workflow')
+}
+
+function mcpReadArtifact(args: unknown): unknown {
+  const data = requireRecord(args, 'arguments')
+  const filePath = resolvePreviewFile(requireNonEmptyString(data.path, 'path'), optionalString(data.cwd, 'cwd'))
+  const mimeType = previewMimeType(filePath)
+  if (!mimeType.startsWith('text/') && !mimeType.includes('json') && !mimeType.includes('yaml')) {
+    throw new HttpError(415, 'Only text artifacts can be read through MCP')
+  }
+  const maxChars = optionalPositiveInt(data.maxChars, 'maxChars') ?? 50_000
+  const content = fs.readFileSync(filePath, 'utf-8')
+  return {
+    path: filePath,
+    mimeType,
+    truncated: content.length > maxChars,
+    content: content.slice(0, maxChars),
+  }
+}
+
+function normalizeTaskArgs(args: unknown): unknown {
+  const data = requireRecord(args, 'arguments')
+  return {
+    ...data,
+    agent: normalizeAgentArg(data.agent, 'agent'),
+  }
+}
+
+function normalizeSessionArgs(args: unknown): unknown {
+  const data = requireRecord(args, 'arguments')
+  return {
+    ...data,
+    from: normalizeAgentArg(data.from, 'from'),
+    to: normalizeAgentArg(data.to, 'to'),
+  }
+}
+
+function normalizeWorkflowArgs(args: unknown): unknown {
+  const data = requireRecord(args, 'arguments')
+  if (!Array.isArray(data.steps)) return data
+  return {
+    ...data,
+    steps: data.steps.map((rawStep, index) => {
+      const step = requireRecord(rawStep, `steps[${index}]`)
+      return {
+        ...step,
+        ...(step.agent !== undefined ? { agent: normalizeAgentArg(step.agent, `steps[${index}].agent`) } : {}),
+        ...(step.from !== undefined ? { from: normalizeAgentArg(step.from, `steps[${index}].from`) } : {}),
+        ...(step.to !== undefined ? { to: normalizeAgentArg(step.to, `steps[${index}].to`) } : {}),
+      }
+    }),
+  }
+}
+
+function normalizeAgentArg(value: unknown, field: string): AgentRef {
+  if (typeof value === 'string') return { adapter: value }
+  return parseAgentRef(value, field)
+}
+
 function sessionApiDocs() {
   return {
     auth: {
@@ -1144,7 +1660,8 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
     // CORS for local dev
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version')
+    res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id')
     if (method === 'OPTIONS') { res.writeHead(204); res.end(); return }
 
     try {
@@ -1158,6 +1675,23 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // GET /api/docs — public machine-readable HTTP API reference.
       if (pathname === '/api/docs' && method === 'GET') {
         return json(res, 200, sessionApiDocs())
+      }
+
+      if ((pathname === '/mcp' || pathname === '/api/mcp') && method === 'GET') {
+        authenticateRequest(req)
+        return json(res, 200, mcpServerMetadata())
+      }
+
+      if ((pathname === '/mcp' || pathname === '/api/mcp') && method === 'POST') {
+        const authUser = authenticateRequest(req)
+        const result = await handleMcpRpc(await parseBody(req), { router, agentCatalog, authUser })
+        if (result === undefined) {
+          res.writeHead(202, { 'Cache-Control': 'no-store' })
+          res.end()
+          return
+        }
+        res.setHeader('Mcp-Session-Id', authUser.userId)
+        return json(res, 200, result)
       }
 
       // POST /api/auth/login

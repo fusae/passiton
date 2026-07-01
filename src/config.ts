@@ -156,7 +156,7 @@ function validateConfig(config: AppConfig): AppConfig {
 }
 
 function isApiAdapter(adapter: string): boolean {
-  return adapter === 'anthropic-api' || adapter === 'openai-api' || adapter === 'zhipu-api' || adapter === 'custom-api'
+  return adapter === 'anthropic-api' || adapter === 'openai-api' || adapter === 'zhipu-api' || adapter === 'deepseek-api' || adapter === 'qwen-api' || adapter === 'moonshot-api' || adapter === 'custom-api'
 }
 
 function normalizeConfig(config: AppConfig): AppConfig {
