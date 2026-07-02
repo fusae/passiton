@@ -4,7 +4,7 @@ import { activeAgents, loadConfig } from './config.js'
 import { AgentCatalog } from './agents.js'
 import { initDb } from './state.js'
 import { Router } from './router.js'
-import { registerBuiltinAdapters, registerConfiguredAdapters } from './adapters/factory.js'
+import { registerBuiltinAdapters, registerConfiguredAdapters, registerGeminiImageAdapter } from './adapters/factory.js'
 import { createServer, registerPersistedUserAgents } from './server.js'
 import { installGracefulShutdown } from './shutdown.js'
 import { registerDreamina } from './examples/dreamina/index.js'
@@ -25,9 +25,10 @@ async function main(): Promise<void> {
   registerConfiguredAdapters(router, agents)
   registerBuiltinAdapters(router)
   registerPersistedUserAgents(router)
-  // Register bundled external-task providers. The Dreamina video provider is
-  // a local convenience; open-source consumers may omit it for a clean core.
+  // Register bundled experimental providers/adapters. These are local
+  // conveniences; open-source consumers may omit them for a clean core.
   registerDreamina(router)
+  registerGeminiImageAdapter(router)
   router.recoverTasks()
   router.recoverSessions()
   router.recoverExternalJobs()

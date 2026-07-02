@@ -8,6 +8,7 @@ export const DEFAULT_POLICY: PolicyConfig = {
   messageRetentionMs: 30 * 24 * 60 * 60 * 1000, // 30 days
   sessionTimeout: 2 * 60 * 60 * 1000, // 2 hours
   retries: 1,
+  maxConcurrentTasks: 3,
 }
 
 // Check whether we can start another round

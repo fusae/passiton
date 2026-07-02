@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { Router, detectAgentAssistanceRequest, detectHumanInputWait, extractHumanInputRequest } from '../router.js'
 import { createDreaminaProvider } from '../examples/dreamina/provider.js'
 import * as state from '../state.js'
-import type { Adapter, AdapterCapabilities, AdapterSendOpts, Session } from '../types.js'
+import type { Adapter, AdapterCapabilities, AdapterResponse, AdapterSendOpts, Session } from '../types.js'
 
 class StubAdapter implements Adapter {
   readonly config: Record<string, unknown>
@@ -764,6 +764,38 @@ test('core engine ignores dreamina-like agent output when no provider is registe
   })
 })
 
+test('adapter status:completed finishes a session without [DONE] in text', async () => {
+  await withTempDb(async () => {
+    // A capable adapter (e.g. an API agent) reports a native stop reason;
+    // its text does NOT contain [DONE]. The router must trust the structured
+    // signal and complete the session — this is the "contract → mechanism" path.
+    const apiAdapter: Adapter = {
+      name: 'api-agent',
+      config: {},
+      capabilities: { tools: false, fileSystem: false, shell: false },
+      async send(): Promise<AdapterResponse> {
+        return { content: 'Here is the answer, no done marker anywhere in this text.', status: 'completed' }
+      },
+      async healthCheck() { return true },
+    }
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => 'ack'))
+    router.registerAdapter(apiAdapter)
+
+    const session = router.startSession({
+      from: { adapter: 'api-agent' },
+      to: { adapter: 'codex' },
+      initialPrompt: 'explain something',
+      mode: 'freeform',
+      maxRounds: 5,
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+    // Confirm it was the native signal, not a text marker.
+    assert.doesNotMatch(state.getSession(session.id)?.lastAgentOutput ?? '', /\[DONE\]/)
+  })
+})
+
 test('stopTask keeps stopped status when a late agent result arrives', async () => {
   await withTempDb(async () => {
     let release!: () => void
@@ -786,6 +818,36 @@ test('stopTask keeps stopped status when a late agent result arrives', async () 
 
     assert.equal(state.getTask(task.id)?.status, 'stopped')
     assert.equal(state.getTask(task.id)?.result, undefined)
+  })
+})
+
+test('task concurrency limit queues excess tasks until a slot frees', async () => {
+  await withTempDb(async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const router = new Router({ maxConcurrentTasks: 2 })
+    // All three tasks block on the same gate, so the first two occupy slots and
+    // the third must stay queued until release() lets a slot free up.
+    router.registerAdapter(new StubAdapter('opencode', async () => {
+      await gate
+      return '[RESULT]done[/RESULT]'
+    }))
+
+    const t1 = router.startTask({ agent: { adapter: 'opencode' }, prompt: 'a' })
+    const t2 = router.startTask({ agent: { adapter: 'opencode' }, prompt: 'b' })
+    const t3 = router.startTask({ agent: { adapter: 'opencode' }, prompt: 'c' })
+
+    // Two slots fill; the third stays queued.
+    await waitFor(() => state.getTask(t1.id)?.status === 'running')
+    await waitFor(() => state.getTask(t2.id)?.status === 'running')
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    assert.equal(state.getTask(t3.id)?.status, 'queued')
+
+    // Release everything; the queued task drains into a slot and completes.
+    release()
+    await waitFor(() => state.getTask(t1.id)?.status === 'done')
+    await waitFor(() => state.getTask(t2.id)?.status === 'done')
+    await waitFor(() => state.getTask(t3.id)?.status === 'done')
   })
 })
 

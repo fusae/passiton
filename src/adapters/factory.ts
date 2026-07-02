@@ -154,6 +154,15 @@ export function registerConfiguredAdapters(
 }
 
 export function registerBuiltinAdapters(router: Router): void {
+  // Core adapters are all user/config-driven (see registerConfiguredAdapters).
+  // Experimental, vendor-specific adapters (GeminiImage) are registered
+  // separately by the local entry point so the engine core stays clean —
+  // open-source consumers may opt out. See src/index.ts.
+}
+
+/** Register the experimental Gemini image adapter (host-image generation).
+ *  Kept optional: the local entry calls it for convenience. */
+export function registerGeminiImageAdapter(router: Router): void {
   router.registerAdapter(new GeminiImageAdapter())
 }
 

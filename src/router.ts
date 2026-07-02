@@ -145,11 +145,7 @@ export class Router extends EventEmitter {
 
     this.emit('event', { type: 'task:created', payload: task } satisfies WsEvent)
 
-    setImmediate(() => {
-      this.runTask(task.id).catch((err) => {
-        console.error(`[router] task error ${task.id}:`, err)
-      })
-    })
+    this.scheduleTask(task.id)
 
     return task
   }
@@ -163,11 +159,45 @@ export class Router extends EventEmitter {
       }, task.userId)
       this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
     }
-    for (const task of state.listTasks({ status: 'queued' })) {
+    // Re-enqueue any previously-queued tasks through the concurrency limiter.
+    this.drainTaskQueue()
+  }
+
+  /**
+   * Enqueue a task and, if concurrency allows, start it now. Cap on
+   * simultaneously-running tasks (policy.maxConcurrentTasks, default 3) so
+   * queuing dozens of tasks doesn't spawn dozens of agent subprocesses at once.
+   *
+   * A dedicated counter (`taskSlotsInUse`) gates dispatch — not the DB
+   * `running` status — because that status flips asynchronously inside runTask
+   * and would let several tasks slip past the limit in the same tick.
+   */
+  private taskSlotsInUse = 0
+
+  private scheduleTask(taskId: string): void {
+    const max = this.policy.maxConcurrentTasks ?? 3
+    if (max <= 0 || this.taskSlotsInUse < max) {
+      this.taskSlotsInUse += 1
       setImmediate(() => {
-        this.runTask(task.id).catch((err) => {
-          console.error(`[router] recovered task error ${task.id}:`, err)
-        })
+        this.runTask(taskId)
+          .catch((err) => console.error(`[router] task error ${taskId}:`, err))
+          .finally(() => { this.taskSlotsInUse -= 1; this.drainTaskQueue() })
+      })
+    }
+    // else: stays 'queued' in state; drainTaskQueue (on slot release) picks it up.
+  }
+
+  /** Pull queued tasks into running slots up to the concurrency limit. */
+  private drainTaskQueue(): void {
+    const max = this.policy.maxConcurrentTasks ?? 3
+    const slots = max <= 0 ? Infinity : Math.max(0, max - this.taskSlotsInUse)
+    if (slots <= 0) return
+    for (const task of state.listTasks({ status: 'queued' }).slice(0, slots)) {
+      this.taskSlotsInUse += 1
+      setImmediate(() => {
+        this.runTask(task.id)
+          .catch((err) => console.error(`[router] queued task error ${task.id}:`, err))
+          .finally(() => { this.taskSlotsInUse -= 1; this.drainTaskQueue() })
       })
     }
   }
@@ -286,6 +316,7 @@ export class Router extends EventEmitter {
       }, task.userId)
       this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
     }
+    // Slot release + next-task drain happen in the .finally() of scheduleTask.
   }
 
   private async callTaskWithRetry(adapter: Adapter, task: Task, opts?: AdapterSendOpts): Promise<AdapterResponse> {
@@ -1009,7 +1040,7 @@ export class Router extends EventEmitter {
       this.emitLog('info', `Waiting for human input [${sessionId.slice(0, 8)}]`, sessionId)
       return { done: false, waiting: true, nextMessage: content }
     }
-    if (this.shouldCompleteSession(sessionId, session, content)) {
+    if (this.shouldCompleteSession(sessionId, session, response)) {
       return { done: true, nextMessage: content }
     }
 
@@ -1537,9 +1568,14 @@ export class Router extends EventEmitter {
     this.lastStreamStepSignatures.delete(sessionId)
   }
 
-  private shouldCompleteSession(sessionId: string, session: Session, response: string): boolean {
-    const workflowReady = this.isWorkflowCompletionReady(sessionId, response)
-    if (detectCompletion(response)) {
+  private shouldCompleteSession(sessionId: string, session: Session, response: AdapterResponse): boolean {
+    const content = response.content
+    // A completion signal is trusted when EITHER the adapter reports a native
+    // stop ('completed') OR the agent's text carries the [DONE] marker. API
+    // adapters report it structurally; CLI adapters fall back to the regex.
+    const signalComplete = response.status === 'completed' || detectCompletion(content)
+    const workflowReady = this.isWorkflowCompletionReady(sessionId, content)
+    if (signalComplete) {
       if (!workflowReady) return false
       if (session.mode !== 'discuss') return true
       if (session.currentRound < DISCUSS_MIN_ROUNDS) return false
@@ -1879,6 +1915,7 @@ function normalizeAdapterResponse(result: string | AdapterResponse): AdapterResp
   return {
     content: result.content,
     metadata: result.metadata,
+    status: result.status,
   }
 }
 
