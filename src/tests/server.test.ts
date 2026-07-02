@@ -199,8 +199,17 @@ test('GET /api/pipeline-templates returns reusable workflow templates', async ()
     const auth = await register(baseUrl, 'pipeline-templates@example.com')
     const response = await fetch(`${baseUrl}/api/pipeline-templates`, { headers: authHeaders(auth.token) })
     assert.equal(response.status, 200)
-    const payload = await response.json() as Array<{ id: string; steps: unknown[] }>
-    assert.deepEqual(payload, [])
+    const payload = await response.json() as Array<{ id: string; name: string; steps: unknown[] }>
+    // Built-in templates are shipped (content/creative/code/docs). Each has a
+    // unique id and at least one step.
+    assert.ok(payload.length >= 4, 'expected several built-in pipeline templates')
+    const ids = payload.map((template) => template.id)
+    for (const id of ids) {
+      assert.ok(id, 'template has an id')
+    }
+    for (const template of payload) {
+      assert.ok(template.steps.length >= 1, `${template.id} has steps`)
+    }
   })
 })
 
@@ -468,7 +477,8 @@ test('POST /mcp exposes tools and can create a task', async () => {
       body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
     })
     assert.equal(tools.status, 200)
-    const toolsPayload = await tools.json() as { result: { tools: Array<{ name: string }> } }
+    const toolsPayload = await tools.json() as { result: { resultType: string; tools: Array<{ name: string }> } }
+    assert.equal(toolsPayload.result.resultType, 'complete')
     assert.ok(toolsPayload.result.tools.some((tool) => tool.name === 'turing_create_task'))
 
     const created = await fetch(`${baseUrl}/mcp`, {
@@ -488,9 +498,12 @@ test('POST /mcp exposes tools and can create a task', async () => {
       }),
     })
     assert.equal(created.status, 200)
-    const createPayload = await created.json() as { result: { structuredContent: { task: { id: string; status: string } } } }
-    const taskId = createPayload.result.structuredContent.task.id
-    assert.equal(createPayload.result.structuredContent.task.status, 'queued')
+    const createPayload = await created.json() as { result: { resultType: string; content: Array<{ type: string; text: string }>; isError: boolean } }
+    assert.equal(createPayload.result.resultType, 'complete')
+    assert.equal(createPayload.result.isError, false)
+    const createdData = JSON.parse(createPayload.result.content[0]!.text) as { task: { id: string; status: string } }
+    const taskId = createdData.task.id
+    assert.equal(createdData.task.status, 'queued')
 
     await waitFor(async () => {
       const response = await fetch(`${baseUrl}/mcp`, {
@@ -503,8 +516,9 @@ test('POST /mcp exposes tools and can create a task', async () => {
           params: { name: 'turing_get_task', arguments: { id: taskId } },
         }),
       })
-      const payload = await response.json() as { result: { structuredContent: { task: { status: string; result?: string } } } }
-      return payload.result.structuredContent.task.status === 'done'
+      const payload = await response.json() as { result: { content: Array<{ text: string }> } }
+      const data = JSON.parse(payload.result.content[0]!.text) as { task: { status: string; result?: string } }
+      return data.task.status === 'done'
     })
   }, {
     allowRegistration: true,
@@ -514,6 +528,17 @@ test('POST /mcp exposes tools and can create a task', async () => {
         return '[RESULT]mcp ready[/RESULT]'
       }))
     },
+  })
+})
+
+test('MCP accepts token query authentication for custom app setup', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'mcp-query-token@example.com')
+    const response = await fetch(`${baseUrl}/mcp?token=${encodeURIComponent(auth.token)}`)
+    assert.equal(response.status, 200)
+    const payload = await response.json() as { endpoint: string; tools: string[] }
+    assert.equal(payload.endpoint, '/mcp')
+    assert.ok(payload.tools.includes('turing_create_task'))
   })
 })
 
