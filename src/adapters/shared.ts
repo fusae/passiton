@@ -106,7 +106,7 @@ export function runCommand({
       proc.kill('SIGTERM')
       settled = true
       signal?.removeEventListener('abort', abort)
-      reject(withLastOutput(new Error(`[${adapterName}] timed out after ${totalTimeout}ms`), lastOutput))
+      reject(withLastOutput(new Error(withHint(adapterName, command, null, '', `[${adapterName}] timed out after ${totalTimeout}ms`, totalTimeout)), lastOutput))
     }
     scheduleTimeout()
 
@@ -121,7 +121,7 @@ export function runCommand({
       if (code === 0) {
         resolve(stdout.trim())
       } else {
-        reject(withLastOutput(new Error(`[${adapterName}] exited with code ${code}: ${stderr.trim()}`), lastOutput))
+        reject(withLastOutput(new Error(withHint(adapterName, command, code, stderr, `[${adapterName}] exited with code ${code}: ${stderr.trim()}`, timeout + Math.max(0, getTimeoutExtensionMs?.() ?? 0))), lastOutput))
       }
     })
 
@@ -130,7 +130,7 @@ export function runCommand({
       settled = true
       if (timer) clearTimeout(timer)
       signal?.removeEventListener('abort', abort)
-      reject(withLastOutput(new Error(`[${adapterName}] spawn error: ${err.message}`), lastOutput))
+      reject(withLastOutput(new Error(withHint(adapterName, command, null, '', `[${adapterName}] spawn error: ${err.message}`, timeout)), lastOutput))
     })
   })
 }
@@ -194,4 +194,30 @@ function withLastOutput(error: Error, lastOutput: string): Error {
     Object.assign(error, { lastAgentOutput: lastOutput })
   }
   return error
+}
+
+/**
+ * Append a one-line, actionable hint to common adapter failures. The raw
+ * message is kept (so logs/classification still work); the hint is the part a
+ * user reads in the UI to know what to do next.
+ */
+export function withHint(adapterName: string, command: string, code: number | null, stderr: string, message: string, timeoutMs: number): string {
+  const lower = (stderr + ' ' + message).toLowerCase()
+  // 1. Binary not found / not executable.
+  if (message.includes('spawn error') && (lower.includes('enoent') || lower.includes('not found') || lower.includes('eacces'))) {
+    return `${message}\n提示：找不到或无法执行 \`${command}\`。请在 Settings 里确认该 Agent 的 command 路径正确，或将其加入 PATH。`
+  }
+  // 2. Auth / credentials / subscription. CLI agents (claude-code, codex, …)
+  //    commonly exit non-zero with empty or terse stderr when unauthenticated.
+  const authCues = ['unauthorized', 'unauthenticated', 'invalid api key', 'authentication', 'not logged in', 'login', 'no subscription', 'quota', 'rate limit', '401', '403', 'payment required']
+  const looksLikeAuth = (code !== null && code !== 0 && stderr.trim() === '') || authCues.some((cue) => lower.includes(cue))
+  if (looksLikeAuth) {
+    return `${message}\n提示：\`${adapterName}\` 启动失败（exit ${code ?? '?'}）。常见原因：未登录、凭证失效或订阅过期。请在该 Agent 的终端里手动跑一次（例如 \`${command} --version\` 后登录），或在 Settings 检查其 env / API Key。`
+  }
+  // 3. Timeout — point at the timeout knob.
+  if (lower.includes('timed out')) {
+    const seconds = Math.round(timeoutMs / 1000)
+    return `${message}\n提示：该 Agent 超过 ${seconds}s 仍未返回。可在配置里调大该 Agent 的 \`timeout\`，或检查网络/模型是否可用。`
+  }
+  return message
 }

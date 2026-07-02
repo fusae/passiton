@@ -238,9 +238,21 @@ export interface RoundMetadata {
   tokenEstimate?: number
 }
 
+/**
+ * Structured result returned by an adapter's send().
+ *
+ * `status` lets a capable adapter (API + claude-code) report a native signal
+ * the router can trust, instead of parsing the agent's text for markers.
+ *   - 'completed' — the model reached a natural stop (end_turn / stop).
+ *   - undefined   — unknown (e.g. plain CLI stdout). The router falls back to
+ *                   the [DONE] regex / maxRounds, as before.
+ */
+export type AdapterStatus = 'completed'
+
 export interface AdapterResponse {
   content: string
   metadata?: RoundMetadata
+  status?: AdapterStatus
 }
 
 export interface DiffSnapshot {
@@ -392,6 +404,9 @@ export interface PolicyConfig {
   messageRetentionMs: number // ms, default 30 days, 0 disables GC
   sessionTimeout: number   // ms, default 2 * 60 * 60 * 1000
   retries: number          // default 1
+  /** Max concurrently-running background tasks. 0 = unlimited. Prevents
+   *  spawning dozens of agent subprocesses at once when many tasks are queued. */
+  maxConcurrentTasks?: number // default 3
   allowedWorkspaces?: string[] // empty means unrestricted
 }
 
@@ -415,7 +430,7 @@ export interface ApiAgentInfo {
   baseUrl?: string
   hasKey: boolean
   keyMasked?: string
-  status: 'ready' | 'no_key' | 'invalid' | 'discovered'
+  status: 'ready' | 'no_key' | 'invalid' | 'discovered' | 'unverified'
   kind?: 'api' | 'local'
   source?: 'configured' | 'discovered'
   command?: string

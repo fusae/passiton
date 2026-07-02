@@ -7,6 +7,7 @@ import { AnthropicApiAdapter } from '../adapters/api/anthropic.js'
 import { OpenAIApiAdapter } from '../adapters/api/openai.js'
 import { ZhipuApiAdapter } from '../adapters/api/zhipu.js'
 import { createAdapter } from '../adapters/factory.js'
+import { withHint } from '../adapters/shared.js'
 import { Router } from '../router.js'
 import * as state from '../state.js'
 import type { Adapter, AdapterResponse, AdapterSendOpts, Session } from '../types.js'
@@ -247,6 +248,28 @@ test('factory creates Gemini CLI adapter', () => {
 
   assert.equal(adapter?.name, 'gemini-cli')
   assert.deepEqual(adapter?.config.args, ['-p', '{prompt}'])
+})
+
+test('withHint adds actionable hints to common adapter failures', () => {
+  // 1. Non-zero exit with empty stderr → looks like an auth/subscription issue.
+  const auth = withHint('claude-code', '/bin/claude', 1, '', '[claude-code] exited with code 1: ', 60_000)
+  assert.match(auth, /exited with code 1/)            // raw message preserved
+  assert.match(auth, /未登录|凭证失效|订阅过期/)        // actionable hint added
+
+  // 2. spawn ENOENT → binary not found.
+  const missing = withHint('codex', 'codex', null, '', '[codex] spawn error: ENOENT', 60_000)
+  assert.match(missing, /spawn error: ENOENT/)
+  assert.match(missing, /找不到或无法执行/)
+
+  // 3. Timeout → points at the timeout knob.
+  const timed = withHint('codex', 'codex', null, '', '[codex] timed out after 600000ms', 600_000)
+  assert.match(timed, /timed out after 600000ms/)
+  assert.match(timed, /超过 600s|600s 仍未返回/)
+  assert.match(timed, /`timeout`/)
+
+  // 4. Explicit auth cue in stderr.
+  const explicit = withHint('codex', 'codex', 1, 'Error: invalid api key', '[codex] exited with code 1: Error: invalid api key', 60_000)
+  assert.match(explicit, /未登录|凭证失效|订阅过期/)
 })
 
 function mockFetch(handler: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>): void {

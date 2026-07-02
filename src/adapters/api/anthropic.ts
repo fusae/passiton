@@ -12,6 +12,7 @@ interface AnthropicMessage {
 
 interface AnthropicResponse {
   content?: Array<{ type: string; text?: string }>
+  stop_reason?: string
   usage?: {
     input_tokens?: number
     output_tokens?: number
@@ -20,7 +21,8 @@ interface AnthropicResponse {
 
 interface AnthropicStreamEvent {
   type?: string
-  delta?: { text?: string }
+  delta?: { text?: string; stop_reason?: string }
+  message?: { stop_reason?: string }
   usage?: {
     input_tokens?: number
     output_tokens?: number
@@ -62,14 +64,18 @@ export class AnthropicApiAdapter extends ApiAdapter {
       let content = ''
       let inputTokens = 0
       let outputTokens = 0
+      let stopReason: string | undefined
       for (const event of data as AnthropicStreamEvent[]) {
         content += event.delta?.text ?? ''
         inputTokens = event.usage?.input_tokens ?? inputTokens
         outputTokens = event.usage?.output_tokens ?? outputTokens
+        // Streaming: the final stop_reason rides on a message_delta event.
+        if (event.delta?.stop_reason) stopReason = event.delta.stop_reason
       }
       return {
         content: content.trim(),
         tokenEstimate: inputTokens + outputTokens || undefined,
+        stopReason,
       }
     }
 
@@ -83,6 +89,7 @@ export class AnthropicApiAdapter extends ApiAdapter {
     return {
       content: content.trim(),
       tokenEstimate: inputTokens + outputTokens || undefined,
+      stopReason: response.stop_reason,
     }
   }
 }

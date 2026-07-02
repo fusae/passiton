@@ -12,7 +12,7 @@ interface ChatMessage {
 }
 
 interface OpenAIResponse {
-  choices?: Array<{ message?: { content?: string } }>
+  choices?: Array<{ message?: { content?: string }; finish_reason?: string }>
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number
@@ -21,7 +21,7 @@ interface OpenAIResponse {
 }
 
 interface OpenAIStreamEvent {
-  choices?: Array<{ delta?: { content?: string } }>
+  choices?: Array<{ delta?: { content?: string }; finish_reason?: string }>
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number
@@ -61,17 +61,21 @@ export class OpenAIApiAdapter extends ApiAdapter {
     if (Array.isArray(data)) {
       let content = ''
       let tokenEstimate: number | undefined
+      let stopReason: string | undefined
       for (const event of data as OpenAIStreamEvent[]) {
         content += event.choices?.[0]?.delta?.content ?? ''
         tokenEstimate = usageTotal(event.usage) ?? tokenEstimate
+        // Streaming: finish_reason arrives on the final chunk's choice.
+        if (event.choices?.[0]?.finish_reason) stopReason = event.choices[0].finish_reason
       }
-      return { content: content.trim(), tokenEstimate }
+      return { content: content.trim(), tokenEstimate, stopReason }
     }
 
     const response = data as OpenAIResponse
     return {
       content: (response.choices?.[0]?.message?.content ?? '').trim(),
       tokenEstimate: usageTotal(response.usage),
+      stopReason: response.choices?.[0]?.finish_reason,
     }
   }
 }

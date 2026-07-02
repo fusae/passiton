@@ -17,6 +17,13 @@ export interface ApiRequest {
 export interface ApiParsedResponse {
   content: string
   tokenEstimate?: number
+  /**
+   * Native stop reason from the provider, if available (e.g. Anthropic
+   * `stop_reason`, OpenAI `finish_reason`). The base class maps 'end_turn' /
+   * 'stop' to AdapterResponse.status = 'completed'. Subclasses that don't
+   * surface it leave it undefined.
+   */
+  stopReason?: string
 }
 
 export class ApiHttpError extends Error {
@@ -64,6 +71,9 @@ export abstract class ApiAdapter implements Adapter {
         duration: Date.now() - startedAt,
         tokenEstimate: parsed.tokenEstimate,
       },
+      // A natural model stop ('end_turn' / 'stop') is a native completion
+      // signal the router can trust without inspecting the agent's text.
+      status: isNaturalStop(parsed.stopReason) ? 'completed' : undefined,
     }
   }
 
@@ -231,4 +241,18 @@ export abstract class ApiAdapter implements Adapter {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Map a provider stop reason to "the model finished naturally".
+ *   - Anthropic: 'end_turn' / 'stop_sequence' / 'tool_use' (tool_use still ends
+ *     the assistant's turn, so it counts as completed)
+ *   - OpenAI: 'stop'
+ * Anything else (e.g. 'max_tokens', 'length', 'content_filter') means the model
+ * was cut off and did NOT finish — that should not signal completion.
+ */
+function isNaturalStop(stopReason: string | undefined): boolean {
+  if (!stopReason) return false
+  const r = stopReason.toLowerCase()
+  return r === 'end_turn' || r === 'stop' || r === 'stop_sequence' || r === 'tool_use'
 }
