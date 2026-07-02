@@ -165,6 +165,11 @@ function render() {
   }
 
   // Route matching
+  // Authenticated local users skip the marketing landing page and go straight
+  // to their sessions, where the onboarding panel guides first-time setup.
+  if ((path === '/' || path === '/landing') && getValidAuthToken()) {
+    return navigate('/sessions')
+  }
   if (path === '/' || path === '/landing') {
     renderLanding()
   } else if (path === '/login') {
@@ -1149,6 +1154,7 @@ async function loadSessionsData() {
     loadStats()
   ])
 
+  state.sessionsLoaded = true
   renderSessionStats()
   renderSessionCards()
 }
@@ -1170,12 +1176,128 @@ function renderSessionStats() {
   if (statAgents) statAgents.textContent = state.agents.length || 0
 }
 
+/**
+ * First-run onboarding. Shown in place of the empty sessions list. Adapts to the
+ * agent landscape so a new user always has an obvious next step:
+ *   - no agents at all       → "connect a model" (API key or CLI)
+ *   - agents but none ready  → "verify your agents" (run diagnostics)
+ *   - at least one ready     → "you're all set, start a session"
+ * No backend endpoint is needed — it derives state from the existing /api/agents
+ * status field (ready / unverified / discovered / invalid / no_key).
+ */
+function renderOnboardingPanel() {
+  const agents = state.agents || []
+  const ready = agents.filter((a) => a.status === 'ready')
+  const present = agents.filter((a) => a.status !== 'invalid')
+  const apiAgents = present.filter((a) => a.kind === 'api')
+  const cliAgents = present.filter((a) => a.kind === 'local')
+
+  if (ready.length > 0) {
+    return `
+      <div class="onboarding-panel">
+        <div class="onboarding-icon">✓</div>
+        <h3>一切就绪</h3>
+        <p>已有 <strong>${ready.length}</strong> 个可用的 Agent。开始你的第一个会话吧。</p>
+        <div class="onboarding-actions">
+          <button class="btn btn-primary" onclick="window.showTemplateGalleryModal()">新建会话</button>
+          <a class="btn btn-ghost" href="/settings">管理 Agent</a>
+        </div>
+      </div>
+    `
+  }
+
+  if (present.length === 0) {
+    return `
+      <div class="onboarding-panel">
+        <div class="onboarding-icon">→</div>
+        <h3>欢迎使用 Turing</h3>
+        <p>开始前需要先连接一个 AI 模型。下面两条路任选其一：</p>
+        <div class="onboarding-tiles">
+          <div class="onboarding-tile">
+            <div class="onboarding-tile-icon">🔑</div>
+            <h4>用 API 模型（最快）</h4>
+            <p>填一个 Provider Key 即可，无需安装任何东西。支持 Anthropic、OpenAI、智谱、DeepSeek、Qwen、Moonshot。</p>
+            <button class="btn btn-primary btn-sm" onclick="window.navigate('/settings')">添加 API Key</button>
+          </div>
+          <div class="onboarding-tile">
+            <div class="onboarding-tile-icon">⌨️</div>
+            <h4>用本地 CLI Agent</h4>
+            <p>已装好 Codex / Claude Code / Gemini CLI / OpenCode？确认它们在 PATH 里，系统会自动发现。</p>
+            <a class="btn btn-secondary btn-sm" href="/settings">查看已发现的 Agent</a>
+          </div>
+        </div>
+        <p class="onboarding-hint">在 Settings 页可以随时增删 Agent 和 Key。</p>
+      </div>
+    `
+  }
+
+  // Agents exist but none verified-ready.
+  const unverified = present.filter((a) => a.status === 'unverified' || a.status === 'discovered')
+  const unverifiedList = unverified.length
+    ? unverified.map((a) => `<li><span class="onboarding-agent-name">${escapeHtml(a.name)}</span><span class="onboarding-agent-status onboarding-agent-status--${a.status}">${statusLabel(a.status)}</span></li>`).join('')
+    : ''
+  return `
+    <div class="onboarding-panel">
+      <div class="onboarding-icon">!</div>
+      <h3>Agent 尚未验证可用</h3>
+      <p>检测到 <strong>${apiAgents.length}</strong> 个 API Agent、<strong>${cliAgents.length}</strong> 个 CLI Agent，但没有一个确认能调通模型。</p>
+      ${unverifiedList ? `<ul class="onboarding-agent-list">${unverifiedList}</ul>` : ''}
+      <p class="onboarding-hint">常见原因：未登录、凭证失效、订阅过期或二进制路径不对。重新检测或去 Settings 检查配置。</p>
+      <div class="onboarding-actions">
+        <button class="btn btn-primary" onclick="window.refreshAgentsAndRender()">重新检测</button>
+        <a class="btn btn-ghost" href="/settings">去 Settings 检查</a>
+      </div>
+    </div>
+  `
+}
+
+function statusLabel(status) {
+  switch (status) {
+    case 'ready': return '可用'
+    case 'unverified': return '未验证'
+    case 'discovered': return '已发现'
+    case 'no_key': return '缺 Key'
+    case 'invalid': return '不可用'
+    default: return status
+  }
+}
+
+/**
+ * Map an agent status to a badge color class. `unverified` (installed but not
+ * confirmed callable — e.g. a lapsed subscription) is a warning, NOT an error:
+ * the binary is there, it just hasn't passed a smoke test. Only `invalid`
+ * (broken / misconfigured) is red.
+ */
+function statusBadgeClass(status) {
+  switch (status) {
+    case 'ready': return 'active'
+    case 'unverified':
+    case 'discovered':
+    case 'no_key': return 'paused'
+    default: return 'error'
+  }
+}
+
+window.refreshAgentsAndRender = async function () {
+  try {
+    state.agents = await api('/api/agents?refresh=1')
+  } catch (err) {
+    console.error('refresh failed', err)
+  }
+  render()
+}
+
 function renderSessionCards() {
   const container = document.getElementById('session-cards')
   if (!container) return
 
   if (state.sessions.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No sessions yet. Create your first one!</p>'
+    // Distinguish "still loading" from "genuinely empty". Only show the
+    // onboarding panel once we've actually fetched the (empty) list — otherwise
+    // users with existing sessions see a flash of onboarding on every load.
+    container.innerHTML = state.sessionsLoaded
+      ? renderOnboardingPanel()
+      : '<p style="color: var(--text-muted); text-align: center; padding: 40px;">加载中…</p>'
     return
   }
 
@@ -2923,7 +3045,7 @@ function renderAgentsList() {
           <div class="agent-name">${escapeHtml(agent.name)}</div>
           <div class="agent-model">${escapeHtml(agent.provider)} · ${escapeHtml(agent.model || agent.adapter)}${agent.keyMasked ? ` · ${escapeHtml(agent.keyMasked)}` : ''}</div>
         </div>
-        <span class="badge badge-${agent.status === 'ready' ? 'active' : agent.status === 'no_key' ? 'paused' : 'error'}">${escapeHtml(agent.status)}</span>
+        <span class="badge badge-${statusBadgeClass(agent.status)}">${escapeHtml(statusLabel(agent.status))}</span>
         <div class="agent-actions">
           <button class="btn btn-ghost btn-sm" onclick='window.showAgentModal(${jsString(agent.name)})'>Edit</button>
           <button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteAgent(${jsString(agent.name)})'>Delete</button>
@@ -2969,7 +3091,7 @@ function renderLocalCliAgentsList() {
   container.innerHTML = agents.map(agent => {
     const canAdd = agent.source === 'discovered'
     const canDelete = agent.source === 'configured'
-    const badgeClass = agent.status === 'ready' ? 'active' : agent.status === 'discovered' ? 'paused' : 'error'
+    const badgeClass = statusBadgeClass(agent.status)
     return `
     <div class="agent-item">
       <div class="agent-icon">${escapeHtml(agent.name.charAt(0).toUpperCase())}</div>
@@ -2977,7 +3099,7 @@ function renderLocalCliAgentsList() {
         <div class="agent-name">${escapeHtml(agent.name)}</div>
         <div class="agent-model">${escapeHtml(agent.adapter)} · ${escapeHtml(agent.command || '')}${agent.version ? ` · ${escapeHtml(agent.version)}` : ''}</div>
       </div>
-      <span class="badge badge-${badgeClass}">${escapeHtml(agent.status)}</span>
+      <span class="badge badge-${badgeClass}">${escapeHtml(statusLabel(agent.status))}</span>
       <div class="agent-actions">
         ${canAdd ? `<button class="btn btn-primary btn-sm" onclick='window.addLocalCliAgent(${jsString(agent.name)})'>Add</button>` : ''}
         <button class="btn btn-ghost btn-sm" onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>Diagnose</button>

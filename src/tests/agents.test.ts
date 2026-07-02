@@ -118,7 +118,7 @@ echo TURING_READY
   }
 })
 
-test('configured local agents skip command probes unless refreshed', async () => {
+test('configured local agents reflect installed (version probe) health without refresh', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-no-probe-'))
   const command = join(dir, 'codex')
   writeExecutable(command, `
@@ -138,15 +138,18 @@ exit 2
     const agents = await catalog.listAgents()
     const codex = agents.find((agent) => agent.name === 'codex')
 
+    // --version exits 2 → version probe fails → not healthy (not installed),
+    // and without refresh there is no smoke run, so verified stays false.
     assert.equal(codex?.source, 'configured')
-    assert.equal(codex?.healthy, true)
+    assert.equal(codex?.healthy, false)
+    assert.equal(codex?.verified, false)
     assert.equal(codex?.version, undefined)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('configured local agents fail health when smoke run fails', async () => {
+test('configured local agents stay healthy-but-unverified when smoke run fails', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-smoke-fail-'))
   const command = join(dir, 'codex')
   writeExecutable(command, `
@@ -166,8 +169,12 @@ exit 2
     const agents = await catalog.listAgents({ refresh: true })
     const codex = agents.find((agent) => agent.name === 'codex')
 
+    // --version succeeds (binary is installed → healthy: true), but the smoke
+    // run exits 2 (model not actually callable → verified: false). This is the
+    // signature of a lapsed subscription / bad credentials.
     assert.equal(codex?.source, 'configured')
-    assert.equal(codex?.healthy, false)
+    assert.equal(codex?.healthy, true)
+    assert.equal(codex?.verified, false)
     assert.equal(codex?.version, 'codex-test')
   } finally {
     rmSync(dir, { recursive: true, force: true })

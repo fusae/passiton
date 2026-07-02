@@ -31,6 +31,14 @@ export interface AgentInfo {
   supported: boolean
   availableForSessions: boolean
   healthy: boolean
+  /**
+   * True only when the agent passed a real smoke test (a model round-trip).
+   * An agent can be `healthy: true` (binary installed) yet `verified: false`
+   * (we haven't confirmed it can actually call the model — e.g. credentials
+   * may be invalid or a subscription may have lapsed). Use `verified` to gate
+   * session creation, not `healthy`.
+   */
+  verified?: boolean
   version?: string
 }
 
@@ -46,7 +54,7 @@ interface AgentEntry {
 
 interface ProbeCacheEntry {
   expiresAt: number
-  value: { healthy: boolean; version?: string }
+  value: { healthy: boolean; version?: string; verified: boolean }
 }
 
 export interface AgentDiagnostic {
@@ -157,6 +165,7 @@ export class AgentCatalog {
       return {
         ...entry,
         healthy: probe.healthy,
+        verified: probe.verified,
         version: probe.version,
         args: entry.config?.args,
         timeout: entry.config?.timeout,
@@ -212,7 +221,7 @@ export class AgentCatalog {
     }
   }
 
-  private async probe(entry: AgentEntry, refresh: boolean): Promise<{ healthy: boolean; version?: string }> {
+  private async probe(entry: AgentEntry, refresh: boolean): Promise<{ healthy: boolean; version?: string; verified: boolean }> {
     const cacheKey = [
       entry.source,
       entry.name,
@@ -221,17 +230,25 @@ export class AgentCatalog {
       JSON.stringify(entry.config?.env ?? {}),
     ].join(':')
     const cached = this.probeCache.get(cacheKey)
-    if (!refresh) {
-      return cached?.value ?? { healthy: entry.source === 'discovered' || entry.availableForSessions }
+    if (cached && !refresh) {
+      return cached.value
     }
 
     const versionProbe = await probeCommand(entry.command!)
-    const smokeProbe = refresh && entry.source === 'configured' && entry.availableForSessions && entry.config
-      ? await smokeTestAgent(entry.name, entry.config)
-      : { healthy: true }
+    // Smoke test (a real model round-trip) is the only signal that proves an
+    // agent is actually callable — `--version` only proves the binary exists.
+    // It's expensive (up to 60s), so we run it only on explicit refresh and
+    // cache the result. `healthy` always reflects "installed" (version probe);
+    // `verified` reflects "actually reached the model" (smoke probe).
+    // Without `verified`, callers must not assume the agent can run a session.
+    const shouldSmoke = refresh && entry.source === 'configured' && entry.availableForSessions && entry.config
+    const smokeProbe = shouldSmoke
+      ? await smokeTestAgent(entry.name, entry.config!)
+      : undefined
     const value = {
-      healthy: versionProbe.healthy && smokeProbe.healthy,
+      healthy: versionProbe.healthy,
       version: versionProbe.version,
+      verified: Boolean(smokeProbe?.healthy),
     }
     this.probeCache.set(cacheKey, {
       expiresAt: Date.now() + HEALTH_CACHE_TTL_MS,

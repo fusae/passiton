@@ -25,7 +25,7 @@ import { activeAgents, getConfigPath, loadConfig, writeConfig } from './config.j
 import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, PipelineTemplateRecord, AgentRef, Session, SessionMode, SessionContext, SessionContextInput, TaskStatus, WsEvent, WorkflowNodeType } from './types.js'
+import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, PipelineTemplateRecord, AgentRef, Session, SessionMode, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType } from './types.js'
 import { pipelineTemplates, templates } from './templates.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -465,7 +465,7 @@ async function listAgentModels(
         model: agent.version,
         hasKey: true,
         status: agent.source === 'configured'
-          ? (agent.healthy && agent.availableForSessions ? 'ready' : 'invalid')
+          ? (agent.verified && agent.availableForSessions ? 'ready' : agent.healthy ? 'unverified' : 'invalid')
           : (agent.healthy ? 'discovered' : 'invalid'),
         kind: 'local',
         source: agent.source,
@@ -946,6 +946,24 @@ function mcpServerMetadata() {
   }
 }
 
+function logMcp(message: string): void {
+  const line = `${new Date().toISOString()} ${message}\n`
+  console.info(message)
+  try {
+    fs.appendFileSync('/tmp/turing-mcp-access.log', line)
+  } catch {
+    // best-effort debug log
+  }
+}
+
+function authenticateMcpRequest(req: http.IncomingMessage, url: URL): AuthUser {
+  const token = url.searchParams.get('token')
+  if (token && !req.headers.authorization) {
+    req.headers.authorization = `Bearer ${token}`
+  }
+  return authenticateRequest(req)
+}
+
 async function handleMcpRpc(body: unknown, ctx: McpContext): Promise<unknown> {
   if (Array.isArray(body)) {
     const responses = await Promise.all(body.map((item) => handleMcpSingleRpc(item, ctx)))
@@ -967,22 +985,24 @@ async function handleMcpSingleRpc(body: unknown, ctx: McpContext): Promise<unkno
         return mcpResult(id, {
           protocolVersion: '2025-06-18',
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'turing', version: '0.1.0' },
+          serverInfo: { name: 'turing', version: '0.1.1-mcp1' },
           instructions: 'Use Turing tools to create and monitor agent tasks, sessions, and workflows. Ask before destructive operations.',
         })
       case 'notifications/initialized':
       case 'ping':
         return id === undefined ? undefined : mcpResult(id, {})
       case 'tools/list':
-        return mcpResult(id, { tools: mcpTools() })
+        return mcpResult(id, { resultType: 'complete', tools: mcpTools() })
       case 'tools/call': {
         const params = requireRecord(request.params, 'params')
         const name = requireNonEmptyString(params.name, 'params.name')
         const args = params.arguments ?? {}
         const data = await callMcpTool(name, args, ctx)
         return mcpResult(id, {
+          resultType: 'complete',
           content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
           structuredContent: data,
+          isError: false,
         })
       }
       default:
@@ -1032,69 +1052,6 @@ function mcpTools(): McpTool[] {
       annotations: { readOnlyHint: true },
     },
     {
-      name: 'turing_create_session',
-      title: 'Create Turing session',
-      description: 'Create an agent-to-agent Turing session. Use this when planning and execution should be split between agents.',
-      inputSchema: objectSchema({
-        from: agentSchema('Planner or first speaker.'),
-        to: agentSchema('Executor or second speaker.'),
-        initialPrompt: { type: 'string' },
-        mode: { type: 'string', enum: ['collaborate', 'discuss', 'review', 'freeform'] },
-        maxRounds: { type: 'integer', minimum: 1 },
-        approveMode: { type: 'boolean' },
-        permissionMode: { type: 'string', enum: ['safe', 'trusted'] },
-        cwd: { type: 'string' },
-        systemPrompts: objectSchema({ from: { type: 'string' }, to: { type: 'string' } }, ['from', 'to']),
-        context: contextSchema(),
-      }, ['from', 'to', 'initialPrompt']),
-      annotations: { destructiveHint: false },
-    },
-    {
-      name: 'turing_get_session',
-      title: 'Get Turing session',
-      description: 'Read a session by id, including messages and current status.',
-      inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
-      annotations: { readOnlyHint: true },
-    },
-    {
-      name: 'turing_create_workflow',
-      title: 'Create Turing workflow',
-      description: 'Create a multi-step Turing workflow/pipeline.',
-      inputSchema: objectSchema({
-        name: { type: 'string' },
-        steps: {
-          type: 'array',
-          minItems: 1,
-          items: objectSchema({
-            title: { type: 'string' },
-            nodeType: { type: 'string' },
-            from: agentSchema('Step planner/source agent.'),
-            to: agentSchema('Step executor/target agent.'),
-            agent: agentSchema('Single agent shortcut for this step.'),
-            initialPrompt: { type: 'string' },
-            mode: { type: 'string', enum: ['collaborate', 'discuss', 'review', 'freeform'] },
-            maxRounds: { type: 'integer', minimum: 1 },
-            approveMode: { type: 'boolean' },
-            permissionMode: { type: 'string', enum: ['safe', 'trusted'] },
-            cwd: { type: 'string' },
-            outputDir: { type: 'string' },
-            dependsOn: { type: 'array', items: { type: 'integer', minimum: 0 } },
-            context: contextSchema(),
-          }, ['initialPrompt']),
-        },
-        startAtStep: { type: 'integer', minimum: 1 },
-        manualOutput: { type: 'string' },
-      }, ['name', 'steps']),
-      annotations: { destructiveHint: false },
-    },
-    {
-      name: 'turing_get_workflow',
-      title: 'Get Turing workflow',
-      description: 'Read a workflow by id, including step sessions and messages.',
-      inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
-      annotations: { readOnlyHint: true },
-    },
-    {
       name: 'turing_get_progress',
       title: 'Get Turing progress',
       description: 'Get progress for a task, session, workflow, or the current active runs.',
@@ -1102,48 +1059,6 @@ function mcpTools(): McpTool[] {
         kind: { type: 'string', enum: ['task', 'session', 'workflow'] },
         id: { type: 'string' },
       }),
-      annotations: { readOnlyHint: true },
-    },
-    {
-      name: 'turing_send_feedback',
-      title: 'Send Turing feedback',
-      description: 'Inject human feedback into a session or workflow step and resume it.',
-      inputSchema: objectSchema({
-        sessionId: { type: 'string' },
-        content: { type: 'string' },
-      }, ['sessionId', 'content']),
-    },
-    {
-      name: 'turing_approve_step',
-      title: 'Approve Turing step',
-      description: 'Approve a session or workflow step that is waiting for human confirmation.',
-      inputSchema: objectSchema({ sessionId: { type: 'string' } }, ['sessionId']),
-    },
-    {
-      name: 'turing_retry_step',
-      title: 'Retry Turing step',
-      description: 'Rerun one workflow step and reset its downstream steps.',
-      inputSchema: objectSchema({ sessionId: { type: 'string' } }, ['sessionId']),
-    },
-    {
-      name: 'turing_stop_run',
-      title: 'Stop Turing run',
-      description: 'Stop a task/session, or pause a workflow.',
-      inputSchema: objectSchema({
-        kind: { type: 'string', enum: ['task', 'session', 'workflow'] },
-        id: { type: 'string' },
-      }, ['kind', 'id']),
-      annotations: { destructiveHint: true },
-    },
-    {
-      name: 'turing_read_artifact',
-      title: 'Read Turing artifact',
-      description: 'Read a text artifact file from an allowed workspace.',
-      inputSchema: objectSchema({
-        path: { type: 'string' },
-        cwd: { type: 'string' },
-        maxChars: { type: 'integer', minimum: 1, maximum: 200000 },
-      }, ['path']),
       annotations: { readOnlyHint: true },
     },
   ]
@@ -1160,13 +1075,8 @@ function objectSchema(properties: Record<string, unknown>, required: string[] = 
 
 function agentSchema(description: string): Record<string, unknown> {
   return {
-    anyOf: [
-      { type: 'string', description },
-      objectSchema({
-        adapter: { type: 'string' },
-        label: { type: 'string' },
-      }, ['adapter']),
-    ],
+    type: 'string',
+    description,
   }
 }
 
@@ -1225,7 +1135,15 @@ async function mcpListAgents(args: unknown, ctx: McpContext): Promise<unknown> {
     model: agent.model,
     baseUrl: agent.baseUrl,
   }))
-  return { agents: [...assistantAgents, ...catalogAgents] }
+  return {
+    agents: [...assistantAgents, ...catalogAgents].map((agent) => ({
+      name: agent.name,
+      adapter: agent.adapter,
+      status: agent.healthy ? 'ready' : 'unavailable',
+      source: agent.source,
+      filesystem: !API_ADAPTERS.has(agent.adapter),
+    })),
+  }
 }
 
 function mcpCreateTask(args: unknown, ctx: McpContext): unknown {
@@ -1237,14 +1155,18 @@ function mcpCreateTask(args: unknown, ctx: McpContext): unknown {
     ...params,
     context: resolveSessionContext(params.context, params.cwd),
   })
-  return { task, url: `/tasks/${task.id}` }
+  return {
+    task: summarizeTask(task),
+    url: `/tasks/${task.id}`,
+    message: `Task ${task.id} created. Use turing_get_task with this id to check progress.`,
+  }
 }
 
 function mcpGetTask(args: unknown, ctx: McpContext): unknown {
   const data = requireRecord(args, 'arguments')
   const task = state.getTask(requireNonEmptyString(data.id, 'id'), ctx.authUser.userId)
   if (!task) throw new HttpError(404, 'Task not found')
-  return { task }
+  return { task: summarizeTask(task, true) }
 }
 
 function mcpCreateSession(args: unknown, ctx: McpContext): unknown {
@@ -1308,7 +1230,7 @@ function mcpGetProgress(args: unknown, ctx: McpContext): unknown {
   if (id && kind === 'workflow') return mcpGetWorkflow({ id }, ctx)
   if (id) {
     const task = state.getTask(id, ctx.authUser.userId)
-    if (task) return { kind: 'task', task }
+    if (task) return { kind: 'task', task: summarizeTask(task, true) }
     const session = state.getSession(id, ctx.authUser.userId)
     if (session) return { kind: 'session', session: sessionForClient(session), messages: state.getMessages(id) }
     const workflow = state.getPipelineWithSessions(id, ctx.authUser.userId)
@@ -1316,10 +1238,31 @@ function mcpGetProgress(args: unknown, ctx: McpContext): unknown {
     throw new HttpError(404, 'Run not found')
   }
   return {
-    tasks: state.listTasks({ userId: ctx.authUser.userId }).filter((task) => task.status === 'queued' || task.status === 'running'),
+    tasks: state.listTasks({ userId: ctx.authUser.userId })
+      .filter((task) => task.status === 'queued' || task.status === 'running')
+      .map((task) => summarizeTask(task)),
     sessions: state.listSessions({ userId: ctx.authUser.userId }).filter((session) => session.status === 'active' || session.status === 'paused'),
     workflows: state.listPipelines(ctx.authUser.userId).filter((workflow) => workflow.status === 'active' || workflow.status === 'paused'),
   }
+}
+
+function summarizeTask(task: Task, includeOutput = false): Record<string, unknown> {
+  return {
+    id: task.id,
+    status: task.status,
+    agent: agentLabel(task.agent),
+    cwd: task.cwd,
+    result: truncateText(task.result, 4000),
+    errorMessage: truncateText(task.errorMessage, 1000),
+    ...(includeOutput ? { output: truncateText(task.output, 8000) } : {}),
+    createdAt: task.createdAt,
+    updatedAt: task.updatedAt,
+  }
+}
+
+function truncateText(value: unknown, maxChars: number): string | undefined {
+  if (typeof value !== 'string' || value.length === 0) return undefined
+  return value.length > maxChars ? `${value.slice(0, maxChars)}\n...[truncated]` : value
 }
 
 async function mcpSendFeedback(args: unknown, ctx: McpContext): Promise<unknown> {
@@ -1678,13 +1621,38 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       }
 
       if ((pathname === '/mcp' || pathname === '/api/mcp') && method === 'GET') {
-        authenticateRequest(req)
+        logMcp(`[mcp] GET ${pathname} token=${url.searchParams.has('token') ? 'query' : 'none'} accept=${req.headers.accept ?? ''} ua=${req.headers['user-agent'] ?? ''}`)
+        const authUser = authenticateMcpRequest(req, url)
+        if (String(req.headers.accept ?? '').includes('text/event-stream')) {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-store',
+            'Connection': 'keep-alive',
+            'Mcp-Session-Id': authUser.userId,
+          })
+          res.write(': connected\n\n')
+          const heartbeat = setInterval(() => {
+            if (!res.destroyed) res.write(': ping\n\n')
+          }, 25_000)
+          req.on('close', () => clearInterval(heartbeat))
+          return
+        }
         return json(res, 200, mcpServerMetadata())
       }
 
       if ((pathname === '/mcp' || pathname === '/api/mcp') && method === 'POST') {
-        const authUser = authenticateRequest(req)
-        const result = await handleMcpRpc(await parseBody(req), { router, agentCatalog, authUser })
+        logMcp(`[mcp] POST ${pathname} token=${url.searchParams.has('token') ? 'query' : 'none'} accept=${req.headers.accept ?? ''} ua=${req.headers['user-agent'] ?? ''}`)
+        const authUser = authenticateMcpRequest(req, url)
+        const body = await parseBody(req)
+        if (typeof body === 'object' && body) {
+          const methodName = Array.isArray(body)
+            ? `batch:${body.length}`
+            : 'method' in body
+              ? String((body as { method?: unknown }).method)
+              : 'unknown'
+          logMcp(`[mcp] rpc ${methodName}`)
+        }
+        const result = await handleMcpRpc(body, { router, agentCatalog, authUser })
         if (result === undefined) {
           res.writeHead(202, { 'Cache-Control': 'no-store' })
           res.end()
