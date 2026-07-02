@@ -25,7 +25,7 @@ import { activeAgents, getConfigPath, loadConfig, writeConfig } from './config.j
 import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, PipelineTemplateRecord, AgentRef, Session, SessionMode, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType } from './types.js'
+import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, PipelineTemplateRecord, AgentRef, Message, Session, SessionMode, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType } from './types.js'
 import { pipelineTemplates, templates } from './templates.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -1052,6 +1052,42 @@ function mcpTools(): McpTool[] {
       annotations: { readOnlyHint: true },
     },
     {
+      name: 'turing_create_session',
+      title: 'Create Turing session',
+      description: 'Create an agent-to-agent session. Use this for multi-turn planning, implementation, review, or discussion between agents.',
+      inputSchema: objectSchema({
+        from: agentSchema('Planner or first speaker agent name.'),
+        to: agentSchema('Executor or second speaker agent name.'),
+        initialPrompt: { type: 'string' },
+        mode: { type: 'string', enum: ['collaborate', 'discuss', 'review', 'freeform'] },
+        maxRounds: { type: 'integer' },
+        approveMode: { type: 'boolean' },
+        permissionMode: { type: 'string', enum: ['safe', 'trusted'] },
+        cwd: { type: 'string' },
+        systemPromptFrom: { type: 'string' },
+        systemPromptTo: { type: 'string' },
+        context: contextSchema(),
+      }, ['from', 'to', 'initialPrompt']),
+      annotations: { destructiveHint: false },
+    },
+    {
+      name: 'turing_get_session',
+      title: 'Get Turing session',
+      description: 'Read a session by id, including status and recent messages.',
+      inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'turing_send_feedback',
+      title: 'Send feedback to Turing session',
+      description: 'Inject human feedback into a running or paused session and let the agents continue.',
+      inputSchema: objectSchema({
+        sessionId: { type: 'string' },
+        content: { type: 'string' },
+      }, ['sessionId', 'content']),
+      annotations: { destructiveHint: false },
+    },
+    {
       name: 'turing_get_progress',
       title: 'Get Turing progress',
       description: 'Get progress for a task, session, workflow, or the current active runs.',
@@ -1059,6 +1095,27 @@ function mcpTools(): McpTool[] {
         kind: { type: 'string', enum: ['task', 'session', 'workflow'] },
         id: { type: 'string' },
       }),
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: 'turing_stop_run',
+      title: 'Stop Turing run',
+      description: 'Stop a task/session, or pause a workflow.',
+      inputSchema: objectSchema({
+        kind: { type: 'string', enum: ['task', 'session', 'workflow'] },
+        id: { type: 'string' },
+      }, ['kind', 'id']),
+      annotations: { destructiveHint: true },
+    },
+    {
+      name: 'turing_read_artifact',
+      title: 'Read Turing artifact',
+      description: 'Read a text artifact file from an allowed workspace.',
+      inputSchema: objectSchema({
+        path: { type: 'string' },
+        cwd: { type: 'string' },
+        maxChars: { type: 'integer' },
+      }, ['path']),
       annotations: { readOnlyHint: true },
     },
   ]
@@ -1182,7 +1239,7 @@ function mcpCreateSession(args: unknown, ctx: McpContext): unknown {
     mode: params.mode ?? defaults.mode,
     maxRounds: params.maxRounds ?? defaults.maxRounds,
   })
-  return { session, url: `/sessions/${session.id}` }
+  return { session: summarizeSession(session), url: `/sessions/${session.id}` }
 }
 
 function mcpGetSession(args: unknown, ctx: McpContext): unknown {
@@ -1190,7 +1247,14 @@ function mcpGetSession(args: unknown, ctx: McpContext): unknown {
   const id = requireNonEmptyString(data.id, 'id')
   const session = state.getSession(id, ctx.authUser.userId)
   if (!session) throw new HttpError(404, 'Session not found')
-  return { session: sessionForClient(session), messages: state.getMessages(id), logs: state.getLogs(id) }
+  return {
+    session: summarizeSession(session),
+    messages: state.getMessages(id).slice(-12).map(summarizeMessage),
+    logs: state.getLogs(id).slice(-20).map((log) => ({
+      ...log,
+      message: truncateText(log.message, 1000),
+    })),
+  }
 }
 
 function mcpCreateWorkflow(args: unknown, ctx: McpContext): unknown {
@@ -1260,6 +1324,40 @@ function summarizeTask(task: Task, includeOutput = false): Record<string, unknow
   }
 }
 
+function summarizeSession(session: Session): Record<string, unknown> {
+  return {
+    id: session.id,
+    status: session.status,
+    mode: session.mode,
+    from: agentLabel(session.from),
+    to: agentLabel(session.to),
+    nextTurn: session.nextTurn,
+    currentRound: session.currentRound,
+    maxRounds: session.maxRounds,
+    approveMode: session.approveMode,
+    permissionMode: session.permissionMode,
+    cwd: session.cwd,
+    errorType: session.errorType,
+    errorMessage: truncateText(session.errorMessage, 1000),
+    lastAgentOutput: truncateText(session.lastAgentOutput, 2000),
+    artifacts: session.artifacts,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+  }
+}
+
+function summarizeMessage(message: Message): Record<string, unknown> {
+  return {
+    id: message.id,
+    sessionId: message.sessionId,
+    from: message.from,
+    round: message.round,
+    timestamp: message.timestamp,
+    content: truncateText(message.content, 4000),
+    metadata: message.metadata,
+  }
+}
+
 function truncateText(value: unknown, maxChars: number): string | undefined {
   if (typeof value !== 'string' || value.length === 0) return undefined
   return value.length > maxChars ? `${value.slice(0, maxChars)}\n...[truncated]` : value
@@ -1270,7 +1368,10 @@ async function mcpSendFeedback(args: unknown, ctx: McpContext): Promise<unknown>
   const sessionId = requireNonEmptyString(data.sessionId, 'sessionId')
   if (!state.getSession(sessionId, ctx.authUser.userId)) throw new HttpError(404, 'Session not found')
   const message = ctx.router.injectMessage(sessionId, requireNonEmptyString(data.content, 'content'))
-  return { message, session: state.getSession(sessionId, ctx.authUser.userId) }
+  return {
+    message: summarizeMessage(message),
+    session: summarizeSession(state.getSession(sessionId, ctx.authUser.userId)!),
+  }
 }
 
 async function mcpApproveStep(args: unknown, ctx: McpContext): Promise<unknown> {
