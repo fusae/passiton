@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { once } from 'node:events'
@@ -51,6 +51,7 @@ async function withServer(
   if (options.allowRegistration !== false) {
     process.env.TURING_ALLOW_REGISTRATION = '1'
   }
+  process.env.TURING_ALLOWED_WORKSPACES ??= tmpdir()
   state.initDb(join(dir, 'turing.db'))
   const router = new Router()
   options.configureRouter?.(router)
@@ -174,9 +175,9 @@ test('file resolver handles cwd, base file, unique basename, and missing paths',
       assert.equal(response.status, 200)
       const payload = await response.json() as Array<{ source: string; exists: boolean; path?: string }>
       assert.deepEqual(payload, [
-        { source: 'output/episode/reference.md', exists: true, path: referencePath },
-        { source: 'video.mp4', exists: true, path: videoPath },
-        { source: 'reference.md', exists: true, path: referencePath },
+        { source: 'output/episode/reference.md', exists: true, path: realpathSync.native(referencePath) },
+        { source: 'video.mp4', exists: true, path: realpathSync.native(videoPath) },
+        { source: 'reference.md', exists: true, path: realpathSync.native(referencePath) },
         { source: 'missing.mp4', exists: false },
       ])
     } finally {

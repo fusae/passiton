@@ -66,8 +66,13 @@ src/
 1. `npm run build` passes with no errors
 2. `npm test` passes (all 93+ tests green)
 3. No new runtime dependencies without justification
-4. If you add a feature, add or update tests
-5. If you change HTTP API behavior, update `docs/EXTERNAL_AGENT_USAGE.md`
+4. Do not commit `.env`, API keys, local certificates, logs, or SQLite databases
+5. If you add a feature, add or update tests
+6. If you change HTTP API behavior, update `docs/EXTERNAL_AGENT_USAGE.md`
+
+## Adding an Adapter
+
+Start in `src/adapters/types.ts`, add the implementation under `src/adapters/`, register it in `src/adapters/factory.ts`, then add focused tests under `src/tests/`.
 
 ## Experimental Features
 
@@ -80,4 +85,4 @@ The `gemini-image` adapter and Dreamina video pipeline are **experimental** and 
 
 ## License
 
-By contributing, you agree that your contributions are licensed under the [MIT License](./LICENSE).
+By contributing, you agree that your contributions are licensed under the [Apache-2.0 License](./LICENSE).

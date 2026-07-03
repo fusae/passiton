@@ -10,8 +10,7 @@ Turing is local-first software. Only the latest release receives security update
 
 Instead, please report suspected vulnerabilities privately:
 
-- Open a **private** GitHub Security Advisory (Repo → Security → Advisories → New advisory), or
-- Email the maintainer directly
+- Open a **private** GitHub Security Advisory (Repo → Security → Advisories → New advisory).
 
 Please include:
 - A description of the issue and its potential impact
@@ -27,6 +26,7 @@ Turing is designed to run locally on your machine. Its defaults assume a single 
 - **Local access is enabled by default** (`auth.localAccess: true`). The first local user is auto-logged-in without a password.
 - **Registration is disabled by default** (`auth.allowRegistration: false`).
 - **JWT secret is auto-generated** on first run and persisted to `~/.turing/config.json`. Set `TURING_JWT_SECRET` explicitly if you need a stable secret across reinstalls.
+- **CLI agents are high-privilege local processes**. A task with `cwd` can cause an agent to read, modify, or execute commands inside the permitted workspace.
 
 ## Exposure Warning
 
@@ -36,6 +36,8 @@ If you expose Turing beyond `localhost` (Tailscale, Cloudflare Tunnel, LAN, publ
 2. Set an explicit `TURING_JWT_SECRET`
 3. Restrict `policy.allowedWorkspaces` to specific directories
 4. Use the `trusted` permission mode only with narrowly scoped `cwd` values
+
+Startup fails fast for non-localhost binds unless authentication is explicit and workspaces are restricted.
 
 The `trusted` permission mode injects auto-approve flags into CLI agents. Never enable it for agents running against sensitive or shared directories.
 

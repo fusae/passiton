@@ -15,6 +15,7 @@ const DEFAULT_OPENCODE_COMMAND = process.env.TURING_OPENCODE_COMMAND ?? 'opencod
 export const DEFAULT_CONFIG: AppConfig = {
   server: {
     port: 4590,
+    host: '127.0.0.1',
   },
   auth: {
     allowRegistration: false,
@@ -97,6 +98,9 @@ function readConfig(): AppConfig {
 function validateConfig(config: AppConfig): AppConfig {
   config = normalizeConfig(config)
   assertPort(config.server.port, 'server.port')
+  if (config.server.host !== undefined) {
+    assertNonEmptyString(config.server.host, 'server.host')
+  }
   assertPositiveInt(config.defaults.maxRounds, 'defaults.maxRounds')
   assertSessionMode(config.defaults.mode, 'defaults.mode')
   assertPositiveInt(config.policy.maxRounds, 'policy.maxRounds')
@@ -178,6 +182,10 @@ function normalizeConfig(config: AppConfig): AppConfig {
 
   return {
     ...config,
+    server: {
+      ...config.server,
+      host: process.env.TURING_HOST ?? config.server?.host ?? DEFAULT_CONFIG.server.host,
+    },
     auth,
     defaults,
     features,
@@ -244,6 +252,20 @@ function assertSessionMode(value: unknown, field: string): asserts value is Sess
 
 export function activeAgents(config: AppConfig): AppConfig['agents'] {
   return config.agents
+}
+
+export function validateExposureConfig(config: AppConfig): void {
+  const host = config.server.host ?? '127.0.0.1'
+  if (host === '127.0.0.1' || host === 'localhost' || host === '::1') return
+  if (config.auth?.localAccess !== false) {
+    throw new Error('[security] Non-localhost bind requires TURING_LOCAL_ACCESS=false')
+  }
+  if (!process.env.TURING_JWT_SECRET && !config.auth?.jwtSecret) {
+    throw new Error('[security] Non-localhost bind requires TURING_JWT_SECRET or auth.jwtSecret')
+  }
+  if ((config.policy.allowedWorkspaces ?? []).length === 0) {
+    throw new Error('[security] Non-localhost bind requires policy.allowedWorkspaces')
+  }
 }
 
 function parseBooleanEnv(value: string | undefined): boolean | undefined {

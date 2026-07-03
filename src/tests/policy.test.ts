@@ -1,6 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { checkSessionTimeout } from '../policy.js'
+import { resolveWorkspacePath, WorkspaceAccessError } from '../workspace.js'
 import type { Session } from '../types.js'
 
 test('session timeout uses last update time so approval waits can resume', () => {
@@ -18,3 +22,89 @@ test('session timeout uses last update time so approval waits can resume', () =>
     retries: 0,
   }), { allowed: true })
 })
+
+test('workspace resolver allows normal child paths', () => {
+  withTempDirs((root) => {
+    const project = join(root, 'project')
+    mkdirSync(project)
+    const file = join(project, 'README.md')
+    writeFileSync(file, 'ok')
+
+    assert.equal(resolveWorkspacePath('README.md', {
+      baseDir: project,
+      allowedRoots: [root],
+      mustExist: true,
+      requireFile: true,
+    }), realpathSync.native(file))
+  })
+})
+
+test('workspace resolver blocks parent traversal and absolute escapes', () => {
+  withTempDirs((root, outside) => {
+    const project = join(root, 'project')
+    mkdirSync(project)
+    writeFileSync(join(outside, 'secret.txt'), 'secret')
+
+    assert.throws(() => resolveWorkspacePath('../outside/secret.txt', {
+      baseDir: project,
+      allowedRoots: [project],
+      mustExist: true,
+    }), WorkspaceAccessError)
+
+    assert.throws(() => resolveWorkspacePath(join(outside, 'secret.txt'), {
+      allowedRoots: [project],
+      mustExist: true,
+    }), WorkspaceAccessError)
+  })
+})
+
+test('workspace resolver blocks symlink escapes when platform supports symlinks', () => {
+  withTempDirs((root, outside) => {
+    const project = join(root, 'project')
+    mkdirSync(project)
+    const secret = join(outside, 'secret.txt')
+    writeFileSync(secret, 'secret')
+    try {
+      symlinkSync(secret, join(project, 'linked-secret.txt'))
+    } catch {
+      return
+    }
+
+    assert.throws(() => resolveWorkspacePath('linked-secret.txt', {
+      baseDir: project,
+      allowedRoots: [project],
+      mustExist: true,
+      requireFile: true,
+    }), WorkspaceAccessError)
+  })
+})
+
+test('workspace resolver defaults empty allowed roots to process cwd', () => {
+  const originalCwd = process.cwd()
+  withTempDirs((root, outside) => {
+    const file = join(root, 'ok.txt')
+    const secret = join(outside, 'secret.txt')
+    writeFileSync(file, 'ok')
+    writeFileSync(secret, 'secret')
+    process.chdir(root)
+    try {
+      assert.equal(resolveWorkspacePath('ok.txt', { allowedRoots: [], mustExist: true, requireFile: true }), realpathSync.native(file))
+      assert.throws(() => resolveWorkspacePath(secret, { allowedRoots: [], mustExist: true }), WorkspaceAccessError)
+    } finally {
+      process.chdir(originalCwd)
+    }
+  })
+})
+
+function withTempDirs(fn: (root: string, outside: string) => void): void {
+  const parent = mkdtempSync(join(tmpdir(), 'turing-workspace-test-'))
+  const root = join(parent, 'root')
+  const outside = join(parent, 'outside')
+  mkdirSync(root)
+  mkdirSync(outside)
+  try {
+    fn(root, outside)
+  } finally {
+    rmSync(parent, { recursive: true, force: true })
+  }
+}

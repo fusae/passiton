@@ -2,10 +2,14 @@ services:
   turing-cloud:
     build: .
     environment:
-      TURING_JWT_SECRET: ${TURING_JWT_SECRET:-change-me-to-random-string}
-      TURING_ENCRYPTION_KEY: ${TURING_ENCRYPTION_KEY:-change-me-to-random-string}
+      TURING_HOST: 0.0.0.0
+      TURING_LOCAL_ACCESS: "false"
+      TURING_JWT_SECRET: ${TURING_JWT_SECRET:?set a strong TURING_JWT_SECRET}
+      TURING_ENCRYPTION_KEY: ${TURING_ENCRYPTION_KEY:?set a strong TURING_ENCRYPTION_KEY}
+      TURING_ALLOWED_WORKSPACES: /app/workspaces
       PORT: 4590
     volumes:
       - ./data:/app/data
+      - ./workspaces:/app/workspaces
     ports:
-      - "${PORT:-4590}:4590"
+      - "127.0.0.1:${PORT:-4590}:4590"

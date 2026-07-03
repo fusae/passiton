@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Router, detectAgentAssistanceRequest, detectHumanInputWait, extractHumanInputRequest } from '../router.js'
+import { Router, detectAgentAssistanceRequest, detectHumanInputWait, extractExistingOutputFile, extractHumanInputRequest } from '../router.js'
 import { createDreaminaProvider } from '../examples/dreamina/provider.js'
 import * as state from '../state.js'
 import type { Adapter, AdapterCapabilities, AdapterResponse, AdapterSendOpts, Session } from '../types.js'
@@ -1496,4 +1496,29 @@ test('completed sessions store git artifacts and result summary', async () => {
       rmSync(dir, { recursive: true, force: true })
     }
   })
+})
+
+test('extractExistingOutputFile ignores absolute paths outside cwd', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'turing-output-boundary-'))
+  const cwd = join(parent, 'project')
+  const outside = join(parent, 'outside')
+  mkdirSync(cwd)
+  mkdirSync(outside)
+  try {
+    const insideFile = join(cwd, 'result.txt')
+    const outsideFile = join(outside, 'secret.txt')
+    writeFileSync(insideFile, 'ok')
+    writeFileSync(outsideFile, 'secret')
+
+    assert.equal(
+      extractExistingOutputFile(`done: \`${outsideFile}\``, 'secret.txt', cwd),
+      undefined
+    )
+    assert.equal(
+      extractExistingOutputFile('done: `result.txt`', 'result.txt', cwd),
+      realpathSync.native(insideFile)
+    )
+  } finally {
+    rmSync(parent, { recursive: true, force: true })
+  }
 })

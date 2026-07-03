@@ -72,6 +72,7 @@ export interface AgentDiagnostic {
   versionOk: boolean
   smokeOk?: boolean
   healthy: boolean
+  errorCode?: import('./types.js').AgentErrorCode
   error?: string
 }
 
@@ -201,6 +202,7 @@ export class AgentCatalog {
     const smokeProbe = refresh && entry.source === 'configured' && entry.availableForSessions && entry.config
       ? await smokeTestAgent(entry.name, entry.config)
       : undefined
+    const error = smokeProbe?.error ?? versionProbe.error
     const healthy = commandExecutable && versionProbe.healthy && (smokeProbe?.healthy ?? true) && entry.availableForSessions
     return {
       name: entry.name,
@@ -217,7 +219,8 @@ export class AgentCatalog {
       versionOk: versionProbe.healthy,
       smokeOk: smokeProbe?.healthy,
       healthy,
-      error: smokeProbe?.error ?? versionProbe.error,
+      errorCode: healthy ? undefined : classifyAgentError(error, commandExecutable),
+      error,
     }
   }
 
@@ -412,4 +415,14 @@ function parseVersion(output: string): string | undefined {
 
   if (!line) return undefined
   return line.length > 120 ? `${line.slice(0, 117)}...` : line
+}
+
+function classifyAgentError(error: string | undefined, commandExecutable: boolean): import('./types.js').AgentErrorCode {
+  const lower = (error ?? '').toLowerCase()
+  if (!commandExecutable || lower.includes('enoent') || lower.includes('not found')) return 'not_installed'
+  if (lower.includes('timed out') || lower.includes('timeout')) return 'timeout'
+  if (lower.includes('rate limit') || lower.includes('429') || lower.includes('quota')) return 'rate_limited'
+  if (lower.includes('api key') || lower.includes('apikey')) return 'api_key_missing'
+  if (lower.includes('unauthorized') || lower.includes('unauthenticated') || lower.includes('login') || lower.includes('subscription') || lower.includes('403') || lower.includes('401')) return 'auth_required'
+  return 'unavailable'
 }

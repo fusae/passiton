@@ -27,6 +27,7 @@ import type { Router } from './router.js'
 import * as state from './state.js'
 import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, PipelineTemplateRecord, AgentRef, Message, Session, SessionMode, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType } from './types.js'
 import { pipelineTemplates, templates } from './templates.js'
+import { resolveWorkspacePath, WorkspaceAccessError } from './workspace.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(__dirname, 'web')
@@ -703,10 +704,10 @@ function resolveSessionContext(context: SessionContextInput | undefined, cwd?: s
   }
 
   if (context.files && context.files.length > 0) {
-    const baseDir = cwd ? path.resolve(cwd) : process.cwd()
+    const baseDir = resolveWorkspaceDirectory(cwd ?? process.cwd(), 'cwd')
     result.files = context.files.map((filePath) => {
-      const resolvedPath = path.resolve(baseDir, filePath)
       try {
+        const resolvedPath = resolveWorkspaceFile(filePath, 'context.files', baseDir)
         return {
           path: filePath,
           content: fs.readFileSync(resolvedPath, 'utf-8'),
@@ -824,17 +825,17 @@ function previewMimeType(filePath: string): string {
 }
 
 function resolvePreviewFile(filePath: string, cwd?: string): string {
-  assertAllowedWorkspace(cwd, 'cwd')
-  const baseDir = cwd ? path.resolve(cwd) : process.cwd()
-  const resolved = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath)
-  assertAllowedWorkspace(resolved, 'path')
-  if (!fs.existsSync(resolved)) throw new HttpError(404, 'File not found')
-  if (!fs.statSync(resolved).isFile()) throw new HttpError(400, '"path" must be a file')
-  return resolved
+  const baseDir = cwd ? resolveWorkspaceDirectory(cwd, 'cwd') : undefined
+  try {
+    return resolveWorkspaceFile(filePath, 'path', baseDir)
+  } catch (err) {
+    if (err instanceof WorkspaceAccessError && /does not exist/.test(err.message)) throw new HttpError(404, 'File not found')
+    throw err
+  }
 }
 
 function resolveWorkflowFile(filePath: string, cwd?: string, baseFile?: string): string | undefined {
-  const baseDir = cwd ? path.resolve(cwd) : process.cwd()
+  const baseDir = resolveWorkspaceDirectory(cwd ?? process.cwd(), 'cwd')
   const candidates = new Set<string>()
   if (path.isAbsolute(filePath)) {
     candidates.add(path.resolve(filePath))
@@ -850,8 +851,7 @@ function resolveWorkflowFile(filePath: string, cwd?: string, baseFile?: string):
 
   for (const candidate of candidates) {
     try {
-      assertAllowedWorkspace(candidate, 'path')
-      if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate
+      return resolveWorkspaceFile(candidate, 'path')
     } catch {
       // Try the remaining candidates.
     }
@@ -917,16 +917,26 @@ function optionalStringArray(value: unknown, field: string): string[] | undefine
 
 function assertAllowedWorkspace(cwd: string | undefined, field = 'cwd'): void {
   if (!cwd) return
-  const allowed = loadConfig().policy.allowedWorkspaces ?? []
-  if (allowed.length === 0) return
-  const target = path.resolve(cwd)
-  const matched = allowed.some((root) => {
-    const resolvedRoot = path.resolve(root)
-    return target === resolvedRoot || target.startsWith(`${resolvedRoot}${path.sep}`)
+  resolveWorkspaceDirectory(cwd, field)
+}
+
+function resolveWorkspaceDirectory(dir: string, field = 'cwd'): string {
+  return resolveWorkspacePath(dir, {
+    field,
+    allowedRoots: loadConfig().policy.allowedWorkspaces ?? [],
+    mustExist: true,
+    requireDirectory: true,
   })
-  if (!matched) {
-    throw new HttpError(403, `"${field}" is outside allowed workspaces`)
-  }
+}
+
+function resolveWorkspaceFile(filePath: string, field = 'path', baseDir?: string): string {
+  return resolveWorkspacePath(filePath, {
+    field,
+    ...(baseDir ? { baseDir } : {}),
+    allowedRoots: loadConfig().policy.allowedWorkspaces ?? [],
+    mustExist: true,
+    requireFile: true,
+  })
 }
 
 function assertPermissionModeAllowed(permissionMode: 'safe' | 'trusted' | undefined, cwd: string | undefined, field = 'permissionMode'): void {
@@ -1045,9 +1055,9 @@ function mcpTools(): McpTool[] {
       annotations: { destructiveHint: false },
     },
     {
-      name: 'turing_get_task',
-      title: 'Get Turing task',
-      description: 'Read a task by id, including status, output, result, and errors.',
+      name: 'turing_get_task_result',
+      title: 'Get Turing task result',
+      description: 'Read a compact task status/result by id. Prefer this over turing_get_task when ChatGPT only needs to know whether a task finished.',
       inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
       annotations: { readOnlyHint: true },
     },
@@ -1071,13 +1081,6 @@ function mcpTools(): McpTool[] {
       annotations: { destructiveHint: false },
     },
     {
-      name: 'turing_get_session',
-      title: 'Get Turing session',
-      description: 'Read a session by id, including status and recent messages.',
-      inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
-      annotations: { readOnlyHint: true },
-    },
-    {
       name: 'turing_send_feedback',
       title: 'Send feedback to Turing session',
       description: 'Inject human feedback into a running or paused session and let the agents continue.',
@@ -1095,27 +1098,6 @@ function mcpTools(): McpTool[] {
         kind: { type: 'string', enum: ['task', 'session', 'workflow'] },
         id: { type: 'string' },
       }),
-      annotations: { readOnlyHint: true },
-    },
-    {
-      name: 'turing_stop_run',
-      title: 'Stop Turing run',
-      description: 'Stop a task/session, or pause a workflow.',
-      inputSchema: objectSchema({
-        kind: { type: 'string', enum: ['task', 'session', 'workflow'] },
-        id: { type: 'string' },
-      }, ['kind', 'id']),
-      annotations: { destructiveHint: true },
-    },
-    {
-      name: 'turing_read_artifact',
-      title: 'Read Turing artifact',
-      description: 'Read a text artifact file from an allowed workspace.',
-      inputSchema: objectSchema({
-        path: { type: 'string' },
-        cwd: { type: 'string' },
-        maxChars: { type: 'integer' },
-      }, ['path']),
       annotations: { readOnlyHint: true },
     },
   ]
@@ -1153,6 +1135,8 @@ async function callMcpTool(name: string, args: unknown, ctx: McpContext): Promis
       return mcpCreateTask(args, ctx)
     case 'turing_get_task':
       return mcpGetTask(args, ctx)
+    case 'turing_get_task_result':
+      return mcpGetTaskResult(args, ctx)
     case 'turing_create_session':
       return mcpCreateSession(args, ctx)
     case 'turing_get_session':
@@ -1224,6 +1208,25 @@ function mcpGetTask(args: unknown, ctx: McpContext): unknown {
   const task = state.getTask(requireNonEmptyString(data.id, 'id'), ctx.authUser.userId)
   if (!task) throw new HttpError(404, 'Task not found')
   return { task: summarizeTask(task, true) }
+}
+
+function mcpGetTaskResult(args: unknown, ctx: McpContext): unknown {
+  const data = requireRecord(args, 'arguments')
+  const task = state.getTask(requireNonEmptyString(data.id, 'id'), ctx.authUser.userId)
+  if (!task) throw new HttpError(404, 'Task not found')
+  return {
+    task: {
+      id: task.id,
+      status: task.status,
+      agent: agentLabel(task.agent),
+      cwd: task.cwd,
+      summary: compactTaskSummary(task),
+      errorMessage: truncateText(task.errorMessage, 500),
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      finishedAt: task.finishedAt,
+    },
+  }
 }
 
 function mcpCreateSession(args: unknown, ctx: McpContext): unknown {
@@ -1322,6 +1325,18 @@ function summarizeTask(task: Task, includeOutput = false): Record<string, unknow
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
   }
+}
+
+function compactTaskSummary(task: Task): string | undefined {
+  const source = task.result || task.output || task.lastAgentOutput
+  if (!source) return undefined
+  const firstLine = source
+    .replace(/\[[A-Z]+\]/g, '')
+    .replace(/\[\/[A-Z]+\]/g, '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean)
+  return truncateText(firstLine, 300)
 }
 
 function summarizeSession(session: Session): Record<string, unknown> {
@@ -1680,7 +1695,7 @@ function parseNudgeBody(body: unknown): { content: string } {
   }
 }
 
-export function createServer(router: Router, port: number, agentCatalog: AgentCatalog): http.Server {
+export function createServer(router: Router, port: number, agentCatalog: AgentCatalog, host?: string): http.Server {
   const clients = new Map<WebSocket, string>()
 
   // Forward router events only to the owner. Some events only carry a sessionId,
@@ -2364,6 +2379,9 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       json(res, 404, { error: 'Not found' })
     } catch (err) {
+      if (err instanceof WorkspaceAccessError) {
+        return json(res, 403, { error: err.message })
+      }
       if (err instanceof HttpError || err instanceof AuthError || err instanceof KeyVaultError) {
         return json(res, err.status, { error: err.message })
       }
@@ -2422,9 +2440,12 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
     wss.close()
   })
 
-  server.listen(port, () => {
-    console.log(`[server] Turing running at http://localhost:${port}`)
-  })
+  const onListening = () => {
+    const displayHost = host === '0.0.0.0' ? '127.0.0.1' : host
+    console.log(`[server] Turing running at http://${displayHost ?? 'localhost'}:${port}`)
+  }
+  if (host) server.listen(port, host, onListening)
+  else server.listen(port, onListening)
 
   return server
 }

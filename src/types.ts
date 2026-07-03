@@ -231,6 +231,14 @@ export type SessionErrorType =
   | 'policy_stop'
   | 'unknown'
 
+export type AgentErrorCode =
+  | 'not_installed'
+  | 'auth_required'
+  | 'api_key_missing'
+  | 'rate_limited'
+  | 'timeout'
+  | 'unavailable'
+
 export interface RoundMetadata {
   filesModified?: string[]
   commandsRun?: string[]
@@ -455,6 +463,7 @@ export interface FeatureConfig {
 export interface AppConfig {
   server: {
     port: number
+    host?: string
   }
   auth?: {
     jwtSecret?: string

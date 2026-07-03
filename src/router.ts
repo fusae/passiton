@@ -15,6 +15,7 @@ import {
   DEFAULT_POLICY,
 } from './policy.js'
 import { generateSystemPrompts, generateTaskSystemPrompt } from './prompts.js'
+import { resolveWorkspacePath, WorkspaceAccessError } from './workspace.js'
 
 const MAX_HISTORY_MESSAGES = 20
 const DISCUSS_MIN_ROUNDS = 3
@@ -1868,7 +1869,11 @@ function extractReferencedTextFiles(content: string, cwd: string): string[] {
     for (const match of content.matchAll(pattern)) {
       const candidate = (match[2] ?? match[1] ?? '').trim()
       if (!candidate || /^https?:\/\//i.test(candidate)) continue
-      matches.add(path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(cwd, candidate))
+      try {
+        matches.add(resolveExistingWorkspaceFile(candidate, cwd))
+      } catch {
+        // Ignore references outside the session workspace.
+      }
     }
   }
   return [...matches]
@@ -2208,9 +2213,8 @@ export function extractExistingOutputFile(content: string, fileName: string, cwd
   for (const match of content.matchAll(pattern)) {
     const candidate = (match[1] ?? match[2] ?? '').trim()
     if (!candidate) continue
-    const resolved = path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(cwd ?? process.cwd(), candidate)
     try {
-      if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) return resolved
+      return resolveExistingWorkspaceFile(candidate, cwd)
     } catch {
       // Ignore invalid candidates.
     }
@@ -2241,7 +2245,18 @@ export function extractExistingOutputFile(content: string, fileName: string, cwd
       }
     }
   }
-  visit(path.resolve(cwd), 0)
+  let root: string
+  try {
+    root = resolveWorkspacePath('.', {
+      baseDir: cwd,
+      allowedRoots: [cwd],
+      mustExist: true,
+      requireDirectory: true,
+    })
+  } catch {
+    return undefined
+  }
+  visit(root, 0)
   matches.sort((a, b) => b.mtimeMs - a.mtimeMs)
   return matches[0]?.filePath
 }
@@ -2336,8 +2351,7 @@ function collectSessionGeneratedFiles(session: Session): string[] {
   const add = (filePath?: string) => {
     if (!filePath) return
     try {
-      const resolved = path.resolve(filePath)
-      if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) generated.add(resolved)
+      generated.add(resolveExistingWorkspaceFile(filePath, session.cwd))
     } catch {
       // Ignore paths that are not readable at completion time.
     }
@@ -2349,7 +2363,7 @@ function collectSessionGeneratedFiles(session: Session): string[] {
   for (const message of messages) {
     if (message.from === 'human') continue
     for (const filePath of message.metadata?.filesModified ?? []) {
-      add(path.isAbsolute(filePath) ? filePath : path.resolve(session.cwd ?? process.cwd(), filePath))
+      add(filePath)
     }
   }
 
@@ -2390,24 +2404,31 @@ function extractArtifactFileRefs(content: string): string[] {
 }
 
 function resolveArtifactFileRef(filePath: string, cwd?: string): string | undefined {
-  const baseDir = cwd ? path.resolve(cwd) : process.cwd()
-  const candidate = path.isAbsolute(filePath) ? path.resolve(filePath) : path.resolve(baseDir, filePath)
   try {
-    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate
+    return resolveExistingWorkspaceFile(filePath, cwd)
   } catch {
     return undefined
   }
-  return undefined
 }
 
 function resolveManualArtifactPath(filePath: string, cwd?: string): string {
   const trimmed = filePath.trim()
   if (!trimmed) throw new Error('Artifact path is empty')
-  const baseDir = cwd ? path.resolve(cwd) : process.cwd()
-  const resolved = path.isAbsolute(trimmed) ? path.resolve(trimmed) : path.resolve(baseDir, trimmed)
-  if (!fs.existsSync(resolved)) throw new Error(`Artifact not found: ${resolved}`)
-  if (!fs.statSync(resolved).isFile()) throw new Error(`Artifact is not a file: ${resolved}`)
-  return resolved
+  try {
+    return resolveExistingWorkspaceFile(trimmed, cwd)
+  } catch (err) {
+    if (err instanceof WorkspaceAccessError) throw new Error(err.message)
+    throw err
+  }
+}
+
+function resolveExistingWorkspaceFile(filePath: string, cwd?: string): string {
+  return resolveWorkspacePath(filePath, {
+    baseDir: cwd ?? process.cwd(),
+    allowedRoots: cwd ? [cwd] : [],
+    mustExist: true,
+    requireFile: true,
+  })
 }
 
 function extractSessionSummary(sessionId: string): string {

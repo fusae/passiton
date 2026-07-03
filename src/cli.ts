@@ -6,7 +6,7 @@ import http from 'http'
 import https from 'https'
 import { createInterface } from 'readline'
 import { AgentCatalog } from './agents.js'
-import { loadConfig } from './config.js'
+import { loadConfig, validateExposureConfig } from './config.js'
 
 // ── Config / base URL ─────────────────────────────────────────────────────────
 
@@ -249,6 +249,7 @@ async function serverStart() {
   const { createServer, registerPersistedUserAgents } = await import('./server.js')
   const { installGracefulShutdown } = await import('./shutdown.js')
 
+  validateExposureConfig(config)
   initDb(undefined, { messageRetentionMs: config.policy.messageRetentionMs })
   const router = new Router(config.policy)
   const agentCatalog = new AgentCatalog(config.agents, true)
@@ -258,7 +259,7 @@ async function serverStart() {
   registerPersistedUserAgents(router)
   router.recoverTasks()
 
-  const server = createServer(router, config.server.port, agentCatalog)
+  const server = createServer(router, config.server.port, agentCatalog, config.server.host)
   installGracefulShutdown(server)
   // foreground — never exit
 }

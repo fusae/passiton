@@ -1,6 +1,6 @@
 // Turing — entry point
 
-import { activeAgents, loadConfig } from './config.js'
+import { activeAgents, loadConfig, validateExposureConfig } from './config.js'
 import { AgentCatalog } from './agents.js'
 import { initDb } from './state.js'
 import { Router } from './router.js'
@@ -11,6 +11,7 @@ import { registerDreamina } from './examples/dreamina/index.js'
 
 async function main(): Promise<void> {
   const config = loadConfig()
+  validateExposureConfig(config)
 
   // Init persistence
   initDb(undefined, { messageRetentionMs: config.policy.messageRetentionMs })
@@ -34,7 +35,7 @@ async function main(): Promise<void> {
   router.recoverExternalJobs()
 
   // Start HTTP + WebSocket server
-  const server = createServer(router, config.server.port, agentCatalog)
+  const server = createServer(router, config.server.port, agentCatalog, config.server.host)
   installGracefulShutdown(server)
 }
 
