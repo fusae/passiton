@@ -895,21 +895,23 @@ export function resetSessionForPipelineRerun(id: string): Session {
   return getSession(id)!
 }
 
-export function listSessions(filter?: { status?: SessionStatus; userId?: string }): Session[] {
+export function listSessions(filter?: { status?: SessionStatus; userId?: string; limit?: number }): Session[] {
+  const limit = filter?.limit && Number.isInteger(filter.limit) && filter.limit > 0 ? filter.limit : undefined
+  const applyLimit = (rows: Record<string, unknown>[]) => limit ? rows.slice(0, limit) : rows
   if (filter?.status && filter.userId) {
     const rows = db.prepare('SELECT * FROM sessions WHERE status = ? AND user_id = ? ORDER BY created_at DESC').all(filter.status, filter.userId) as Record<string, unknown>[]
-    return rows.map(rowToSession)
+    return applyLimit(rows).map(rowToSession)
   }
   if (filter?.status) {
     const rows = db.prepare('SELECT * FROM sessions WHERE status = ? ORDER BY created_at DESC').all(filter.status) as Record<string, unknown>[]
-    return rows.map(rowToSession)
+    return applyLimit(rows).map(rowToSession)
   }
   if (filter?.userId) {
     const rows = db.prepare('SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC').all(filter.userId) as Record<string, unknown>[]
-    return rows.map(rowToSession)
+    return applyLimit(rows).map(rowToSession)
   }
   const rows = db.prepare('SELECT * FROM sessions ORDER BY created_at DESC').all() as Record<string, unknown>[]
-  return rows.map(rowToSession)
+  return applyLimit(rows).map(rowToSession)
 }
 
 export function deleteSession(id: string, userId?: string): void {
@@ -1367,6 +1369,10 @@ export function getStats(userId?: string): TuringStats {
     error: 0,
     stopped: 0,
   }
+  const todayStart = new Date()
+  todayStart.setHours(0, 0, 0, 0)
+  const todayStartMs = todayStart.getTime()
+  let completedToday = 0
   let totalRounds = 0
   let totalDuration = 0
   let tokenEstimate = 0
@@ -1374,6 +1380,7 @@ export function getStats(userId?: string): TuringStats {
 
   for (const session of sessions) {
     counts[session.status] += 1
+    if (session.status === 'done' && session.updatedAt >= todayStartMs) completedToday += 1
     totalRounds += session.currentRound
     totalDuration += Math.max(0, session.updatedAt - session.createdAt)
 
@@ -1412,6 +1419,7 @@ export function getStats(userId?: string): TuringStats {
       active: counts.active,
       paused: counts.paused,
       done: counts.done,
+      completedToday,
       error: counts.error,
       stopped: counts.stopped,
       successRate: sessions.length > 0 ? counts.done / sessions.length : 0,

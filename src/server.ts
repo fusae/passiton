@@ -662,6 +662,17 @@ function parseSessionStatus(value: string | null): 'active' | 'paused' | 'done' 
   throw new HttpError(400, '"status" must be one of active, paused, done, error, stopped')
 }
 
+function parsePositiveInt(value: string | null): number | undefined {
+  if (value === null) {
+    return undefined
+  }
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new HttpError(400, '"limit" must be a positive integer')
+  }
+  return parsed
+}
+
 function parseTaskStatus(value: string | null): TaskStatus | null {
   if (value === null) {
     return null
@@ -2318,7 +2329,8 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // GET /api/sessions
       if (pathname === '/api/sessions' && method === 'GET') {
         const statusFilter = parseSessionStatus(url.searchParams.get('status'))
-        const sessions = state.listSessions({ ...(statusFilter ? { status: statusFilter } : {}), userId: authUser!.userId })
+        const limit = parsePositiveInt(url.searchParams.get('limit'))
+        const sessions = state.listSessions({ ...(statusFilter ? { status: statusFilter } : {}), userId: authUser!.userId, ...(limit ? { limit } : {}) })
         return json(res, 200, sessions.map(sessionForClient))
       }
 

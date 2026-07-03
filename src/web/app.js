@@ -660,7 +660,7 @@ function findCurrentWorkflowSessionDetail(sessionId) {
 // ── Data Loading ──────────────────────────────────────────────────────────────
 async function loadSessions() {
   try {
-    state.sessions = await api('/api/sessions')
+    state.sessions = await api('/api/sessions?limit=60')
   } catch (err) {
     console.error('Failed to load sessions:', err)
   }
@@ -1164,16 +1164,16 @@ function renderSessionStats() {
   const statDone = document.getElementById('stat-done')
   const statRounds = document.getElementById('stat-rounds')
   const statAgents = document.getElementById('stat-agents')
-  const active = state.sessions.filter(session => session.status === 'active').length
-  const done = state.sessions.filter(session => session.status === 'done').length
-  const avgRounds = state.sessions.length
-    ? state.sessions.reduce((sum, session) => sum + (Number(session.currentRound) || 0), 0) / state.sessions.length
-    : 0
+  const sessionStats = state.stats?.sessions || {}
+  const active = Number(sessionStats.active) || 0
+  const doneToday = Number(sessionStats.completedToday) || 0
+  const avgRounds = Number(sessionStats.avgRounds) || 0
+  const readyAgents = (state.agents || []).filter(agent => agent.status === 'ready').length
 
   if (statActive) statActive.textContent = active
-  if (statDone) statDone.textContent = done
+  if (statDone) statDone.textContent = doneToday
   if (statRounds) statRounds.textContent = formatStatNumber(avgRounds)
-  if (statAgents) statAgents.textContent = state.agents.length || 0
+  if (statAgents) statAgents.textContent = readyAgents
 }
 
 /**

@@ -193,6 +193,7 @@ export interface SessionStats {
   active: number
   paused: number
   done: number
+  completedToday: number
   error: number
   stopped: number
   successRate: number
