@@ -47,6 +47,12 @@ async function withServer(
   options: { allowRegistration?: boolean; configureRouter?: (router: Router) => void } = { allowRegistration: true }
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'turing-server-'))
+  const originalEnv = {
+    TURING_JWT_SECRET: process.env.TURING_JWT_SECRET,
+    TURING_ALLOW_REGISTRATION: process.env.TURING_ALLOW_REGISTRATION,
+    TURING_ALLOWED_WORKSPACES: process.env.TURING_ALLOWED_WORKSPACES,
+    TURING_ALLOWED_ORIGINS: process.env.TURING_ALLOWED_ORIGINS,
+  }
   process.env.TURING_JWT_SECRET = 'server-test-jwt-secret'
   if (options.allowRegistration !== false) {
     process.env.TURING_ALLOW_REGISTRATION = '1'
@@ -68,9 +74,17 @@ async function withServer(
     await new Promise<void>((resolve) => server.close(() => resolve()))
     state.closeDb()
     rmSync(dir, { recursive: true, force: true })
-    delete process.env.TURING_JWT_SECRET
-    delete process.env.TURING_ALLOW_REGISTRATION
-    delete process.env.TURING_ALLOWED_WORKSPACES
+    restoreEnv(originalEnv)
+  }
+}
+
+function restoreEnv(values: Record<string, string | undefined>): void {
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) {
+      delete process.env[key]
+    } else {
+      process.env[key] = value
+    }
   }
 }
 
@@ -117,6 +131,76 @@ test('GET /health returns unauthenticated liveness payload', async () => {
     const response = await fetch(`${baseUrl}/health`)
     assert.equal(response.status, 200)
     assert.deepEqual(await response.json(), { ok: true })
+  })
+})
+
+test('CORS allows local origins and requests without an Origin header', async () => {
+  await withServer(async (baseUrl) => {
+    const local = await fetch(`${baseUrl}/health`, { headers: { origin: 'http://localhost:5173' } })
+    assert.equal(local.status, 200)
+    assert.equal(local.headers.get('access-control-allow-origin'), 'http://localhost:5173')
+    assert.equal(local.headers.get('access-control-allow-credentials'), null)
+
+    const noOrigin = await fetch(`${baseUrl}/health`)
+    assert.equal(noOrigin.status, 200)
+    assert.equal(noOrigin.headers.get('access-control-allow-origin'), null)
+  })
+})
+
+test('CORS rejects unknown origins and supports configured origins', async () => {
+  await withServer(async (baseUrl) => {
+    const rejected = await fetch(`${baseUrl}/health`, {
+      method: 'OPTIONS',
+      headers: {
+        origin: 'https://evil.example',
+        'access-control-request-method': 'POST',
+      },
+    })
+    assert.equal(rejected.status, 403)
+    assert.equal(rejected.headers.get('access-control-allow-origin'), null)
+  })
+
+  const previousOrigins = process.env.TURING_ALLOWED_ORIGINS
+  try {
+    process.env.TURING_ALLOWED_ORIGINS = 'https://app.example'
+    await withServer(async (baseUrl) => {
+      const allowed = await fetch(`${baseUrl}/health`, {
+        method: 'OPTIONS',
+        headers: {
+          origin: 'https://app.example',
+          'access-control-request-method': 'POST',
+        },
+      })
+      assert.equal(allowed.status, 204)
+      assert.equal(allowed.headers.get('access-control-allow-origin'), 'https://app.example')
+    })
+  } finally {
+    if (previousOrigins === undefined) {
+      delete process.env.TURING_ALLOWED_ORIGINS
+    } else {
+      process.env.TURING_ALLOWED_ORIGINS = previousOrigins
+    }
+  }
+})
+
+test('auth cookies are Secure when request is HTTPS behind a proxy', async () => {
+  await withServer(async (baseUrl) => {
+    const local = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'cookie-local@example.com', password: 'password123' }),
+    })
+    assert.equal(local.status, 201)
+    assert.match(local.headers.get('set-cookie') ?? '', /HttpOnly/)
+    assert.doesNotMatch(local.headers.get('set-cookie') ?? '', /;\s*Secure\b/)
+
+    const proxied = await fetch(`${baseUrl}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-proto': 'https' },
+      body: JSON.stringify({ email: 'cookie-https@example.com', password: 'password123' }),
+    })
+    assert.equal(proxied.status, 201)
+    assert.match(proxied.headers.get('set-cookie') ?? '', /;\s*Secure\b/)
   })
 })
 
@@ -514,7 +598,7 @@ test('POST /mcp exposes tools and can create a task', async () => {
           jsonrpc: '2.0',
           id: 4,
           method: 'tools/call',
-          params: { name: 'turing_get_task', arguments: { id: taskId } },
+          params: { name: 'turing_get_task_result', arguments: { id: taskId } },
         }),
       })
       const payload = await response.json() as { result: { content: Array<{ text: string }> } }

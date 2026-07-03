@@ -25,7 +25,7 @@ import { activeAgents, getConfigPath, loadConfig, writeConfig } from './config.j
 import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, PipelineTemplateRecord, AgentRef, Message, Session, SessionMode, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType } from './types.js'
+import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, Pipeline, PipelineTemplateRecord, PipelineWithSessions, AgentRef, Message, Session, SessionMode, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType } from './types.js'
 import { pipelineTemplates, templates } from './templates.js'
 import { resolveWorkspacePath, WorkspaceAccessError } from './workspace.js'
 
@@ -54,6 +54,9 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
   'qwen-api': 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
   'moonshot-api': 'https://api.moonshot.cn/v1/chat/completions',
 }
+const CORS_ALLOWED_METHODS = 'GET,POST,PUT,DELETE,OPTIONS'
+const CORS_ALLOWED_HEADERS = 'Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version'
+const CORS_EXPOSE_HEADERS = 'Mcp-Session-Id'
 
 type ProviderKeyInfo = {
   id: string
@@ -111,6 +114,46 @@ function json(res: http.ServerResponse, status: number, data: unknown): void {
     'Cache-Control': 'no-store',
   })
   res.end(body)
+}
+
+function configureCors(req: http.IncomingMessage, res: http.ServerResponse): boolean {
+  const origin = req.headers.origin
+  if (typeof origin !== 'string') return true
+  if (!isAllowedCorsOrigin(origin)) return false
+  res.setHeader('Access-Control-Allow-Origin', origin)
+  res.setHeader('Vary', 'Origin')
+  res.setHeader('Access-Control-Allow-Methods', CORS_ALLOWED_METHODS)
+  res.setHeader('Access-Control-Allow-Headers', CORS_ALLOWED_HEADERS)
+  res.setHeader('Access-Control-Expose-Headers', CORS_EXPOSE_HEADERS)
+  return true
+}
+
+function isAllowedCorsOrigin(origin: string): boolean {
+  const configured = parseAllowedCorsOrigins(process.env.TURING_ALLOWED_ORIGINS)
+  if (configured.has(origin)) return true
+  try {
+    const url = new URL(origin)
+    return (url.protocol === 'http:' || url.protocol === 'https:') &&
+      (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]')
+  } catch {
+    return false
+  }
+}
+
+function parseAllowedCorsOrigins(value: string | undefined): Set<string> {
+  return new Set((value ?? '').split(',').map((item) => item.trim()).filter(Boolean))
+}
+
+function isHttpsRequest(req: http.IncomingMessage): boolean {
+  const forwardedProto = req.headers['x-forwarded-proto']
+  if (typeof forwardedProto === 'string') {
+    return forwardedProto.split(',')[0]?.trim().toLowerCase() === 'https'
+  }
+  return Boolean((req.socket as { encrypted?: boolean }).encrypted)
+}
+
+function setAuthCookie(req: http.IncomingMessage, res: http.ServerResponse, token: string): void {
+  res.setHeader('Set-Cookie', authCookie(token, { secure: isHttpsRequest(req) }))
 }
 
 function parseBody(req: http.IncomingMessage): Promise<unknown> {
@@ -1010,8 +1053,8 @@ async function handleMcpSingleRpc(body: unknown, ctx: McpContext): Promise<unkno
         const data = await callMcpTool(name, args, ctx)
         return mcpResult(id, {
           resultType: 'complete',
-          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
-          structuredContent: data,
+          content: [{ type: 'text', text: JSON.stringify(data) }],
+          structuredContent: compactMcpStructuredContent(data),
           isError: false,
         })
       }
@@ -1030,6 +1073,20 @@ function mcpResult(id: JsonRpcId | undefined, result: unknown): unknown {
 
 function mcpError(id: JsonRpcId | undefined, code: number, message: string): unknown {
   return { jsonrpc: '2.0', id: id ?? null, error: { code, message } }
+}
+
+function compactMcpStructuredContent(data: unknown): unknown {
+  if (!isRecord(data)) return data
+  if (isRecord(data.task) && typeof data.task.result === 'string') {
+    return {
+      ...data,
+      task: {
+        ...data.task,
+        result: undefined,
+      },
+    }
+  }
+  return data
 }
 
 function mcpTools(): McpTool[] {
@@ -1057,7 +1114,7 @@ function mcpTools(): McpTool[] {
     {
       name: 'turing_get_task_result',
       title: 'Get Turing task result',
-      description: 'Read a compact task status/result by id. Prefer this over turing_get_task when ChatGPT only needs to know whether a task finished.',
+      description: 'Read a compact task status/result by id.',
       inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
       annotations: { readOnlyHint: true },
     },
@@ -1164,7 +1221,7 @@ async function callMcpTool(name: string, args: unknown, ctx: McpContext): Promis
 
 async function mcpListAgents(args: unknown, ctx: McpContext): Promise<unknown> {
   const data = requireRecord(args, 'arguments')
-  const refresh = optionalBoolean(data.refresh, 'refresh') ?? false
+  const refresh = optionalBoolean(data.refresh, 'refresh') ?? true
   const catalogAgents = await ctx.agentCatalog.listAgents({ refresh })
   const assistantAgents = state.listUserAgents(ctx.authUser.userId).map((agent) => ({
     name: agent.name,
@@ -1180,17 +1237,42 @@ async function mcpListAgents(args: unknown, ctx: McpContext): Promise<unknown> {
     agents: [...assistantAgents, ...catalogAgents].map((agent) => ({
       name: agent.name,
       adapter: agent.adapter,
-      status: agent.healthy ? 'ready' : 'unavailable',
+      status: mcpAgentStatus(agent),
+      usable: mcpAgentUsable(agent),
       source: agent.source,
       filesystem: !API_ADAPTERS.has(agent.adapter),
     })),
   }
 }
 
-function mcpCreateTask(args: unknown, ctx: McpContext): unknown {
+function mcpAgentUsable(agent: {
+  adapter: string
+  source: string
+  availableForSessions?: boolean
+  healthy?: boolean
+  verified?: boolean
+}): boolean {
+  if (API_ADAPTERS.has(agent.adapter)) return agent.healthy !== false
+  return agent.source === 'configured' && agent.availableForSessions === true && agent.verified === true
+}
+
+function mcpAgentStatus(agent: {
+  adapter: string
+  source: string
+  availableForSessions?: boolean
+  healthy?: boolean
+  verified?: boolean
+}): string {
+  if (mcpAgentUsable(agent)) return 'ready'
+  if (!API_ADAPTERS.has(agent.adapter) && agent.source === 'configured' && agent.healthy) return 'unverified'
+  return 'unavailable'
+}
+
+async function mcpCreateTask(args: unknown, ctx: McpContext): Promise<unknown> {
   const params = parseTaskBody(normalizeTaskArgs(args))
   assertAllowedWorkspace(params.cwd)
   assertTaskFilesystemCapability(ctx.authUser.userId, params.agent, params.cwd)
+  await assertMcpAgentUsable(ctx, params.agent, 'agent')
   const task = ctx.router.startTask({
     userId: ctx.authUser.userId,
     ...params,
@@ -1199,7 +1281,7 @@ function mcpCreateTask(args: unknown, ctx: McpContext): unknown {
   return {
     task: summarizeTask(task),
     url: `/tasks/${task.id}`,
-    message: `Task ${task.id} created. Use turing_get_task with this id to check progress.`,
+    message: `Task ${task.id} created. Use turing_get_task_result with this id to check progress.`,
   }
 }
 
@@ -1221,6 +1303,7 @@ function mcpGetTaskResult(args: unknown, ctx: McpContext): unknown {
       agent: agentLabel(task.agent),
       cwd: task.cwd,
       summary: compactTaskSummary(task),
+      result: truncateText(task.result, 16_000),
       errorMessage: truncateText(task.errorMessage, 500),
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,
@@ -1229,12 +1312,14 @@ function mcpGetTaskResult(args: unknown, ctx: McpContext): unknown {
   }
 }
 
-function mcpCreateSession(args: unknown, ctx: McpContext): unknown {
+async function mcpCreateSession(args: unknown, ctx: McpContext): Promise<unknown> {
   const defaults = loadConfig().defaults
   const params = parseSessionBody(normalizeSessionArgs(args))
   assertAllowedWorkspace(params.cwd)
   assertPermissionModeAllowed(params.permissionMode, params.cwd)
   assertSessionFilesystemCapability(ctx.authUser.userId, params.to, params.cwd)
+  await assertMcpAgentUsable(ctx, params.from, 'from')
+  await assertMcpAgentUsable(ctx, params.to, 'to')
   const session = ctx.router.startSession({
     userId: ctx.authUser.userId,
     ...params,
@@ -1243,6 +1328,17 @@ function mcpCreateSession(args: unknown, ctx: McpContext): unknown {
     maxRounds: params.maxRounds ?? defaults.maxRounds,
   })
   return { session: summarizeSession(session), url: `/sessions/${session.id}` }
+}
+
+async function assertMcpAgentUsable(ctx: McpContext, agent: AgentRef, field: string): Promise<void> {
+  if (API_ADAPTERS.has(agent.adapter)) return
+  const names = Array.from(new Set([agent.label, agent.adapter].filter(Boolean))) as string[]
+  for (const name of names) {
+    const diagnostic = await ctx.agentCatalog.diagnoseAgent(name, true)
+    if (!diagnostic) continue
+    if (diagnostic.healthy) return
+    throw new HttpError(400, `${field} agent "${agentLabel(agent)}" is not usable: ${diagnostic.error ?? diagnostic.errorCode ?? 'not verified'}`)
+  }
 }
 
 function mcpGetSession(args: unknown, ctx: McpContext): unknown {
@@ -1285,31 +1381,56 @@ function mcpGetWorkflow(args: unknown, ctx: McpContext): unknown {
   const data = requireRecord(args, 'arguments')
   const workflow = state.getPipelineWithSessions(requireNonEmptyString(data.id, 'id'), ctx.authUser.userId)
   if (!workflow) throw new HttpError(404, 'Workflow not found')
-  return { workflow }
+  return { workflow: summarizeWorkflow(workflow) }
 }
 
 function mcpGetProgress(args: unknown, ctx: McpContext): unknown {
   const data = requireRecord(args, 'arguments')
   const id = optionalString(data.id, 'id')
   const kind = optionalString(data.kind, 'kind')
-  if (id && kind === 'task') return mcpGetTask({ id }, ctx)
+  if (id && kind === 'task') return mcpGetTaskResult({ id }, ctx)
   if (id && kind === 'session') return mcpGetSession({ id }, ctx)
   if (id && kind === 'workflow') return mcpGetWorkflow({ id }, ctx)
   if (id) {
     const task = state.getTask(id, ctx.authUser.userId)
-    if (task) return { kind: 'task', task: summarizeTask(task, true) }
+    if (task) {
+      return {
+        kind: 'task',
+        task: {
+          id: task.id,
+          status: task.status,
+          agent: agentLabel(task.agent),
+          cwd: task.cwd,
+          summary: compactTaskSummary(task),
+          errorMessage: truncateText(task.errorMessage, 500),
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt,
+          finishedAt: task.finishedAt,
+        },
+      }
+    }
     const session = state.getSession(id, ctx.authUser.userId)
-    if (session) return { kind: 'session', session: sessionForClient(session), messages: state.getMessages(id) }
+    if (session) return { kind: 'session', session: summarizeSession(session), messages: state.getMessages(id).slice(-6).map(summarizeMessage) }
     const workflow = state.getPipelineWithSessions(id, ctx.authUser.userId)
-    if (workflow) return { kind: 'workflow', workflow }
+    if (workflow) return { kind: 'workflow', workflow: summarizeWorkflow(workflow) }
     throw new HttpError(404, 'Run not found')
   }
   return {
-    tasks: state.listTasks({ userId: ctx.authUser.userId })
-      .filter((task) => task.status === 'queued' || task.status === 'running')
-      .map((task) => summarizeTask(task)),
-    sessions: state.listSessions({ userId: ctx.authUser.userId }).filter((session) => session.status === 'active' || session.status === 'paused'),
-    workflows: state.listPipelines(ctx.authUser.userId).filter((workflow) => workflow.status === 'active' || workflow.status === 'paused'),
+    tasks: compactRecent(
+      state.listTasks({ userId: ctx.authUser.userId })
+        .filter((task) => task.status === 'queued' || task.status === 'running'),
+      summarizeTask,
+    ),
+    sessions: compactRecent(
+      state.listSessions({ userId: ctx.authUser.userId })
+        .filter((session) => session.status === 'active' || session.status === 'paused'),
+      summarizeSession,
+    ),
+    workflows: compactRecent(
+      state.listPipelines(ctx.authUser.userId)
+        .filter((workflow) => workflow.status === 'active' || workflow.status === 'paused'),
+      summarizeWorkflow,
+    ),
   }
 }
 
@@ -1324,6 +1445,14 @@ function summarizeTask(task: Task, includeOutput = false): Record<string, unknow
     ...(includeOutput ? { output: truncateText(task.output, 8000) } : {}),
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
+  }
+}
+
+function compactRecent<T extends { updatedAt: number }>(items: T[], mapItem: (item: T) => Record<string, unknown>, limit = 5): Record<string, unknown> {
+  const sorted = [...items].sort((a, b) => b.updatedAt - a.updatedAt)
+  return {
+    total: sorted.length,
+    items: sorted.slice(0, limit).map(mapItem),
   }
 }
 
@@ -1358,6 +1487,23 @@ function summarizeSession(session: Session): Record<string, unknown> {
     artifacts: session.artifacts,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
+  }
+}
+
+function summarizeWorkflow(workflow: Pipeline | PipelineWithSessions): Record<string, unknown> {
+  return {
+    id: workflow.id,
+    name: workflow.name,
+    status: workflow.status,
+    steps: workflow.sessions.map((step) => ({
+      sessionId: step.sessionId,
+      title: step.title,
+      nodeType: step.nodeType,
+      status: step.status,
+      dependsOn: step.dependsOn,
+    })),
+    createdAt: workflow.createdAt,
+    updatedAt: workflow.updatedAt,
   }
 }
 
@@ -1716,11 +1862,11 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
     const pathname = url.pathname
     const method = req.method ?? 'GET'
 
-    // CORS for local dev
-    res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version')
-    res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id')
+    if (!configureCors(req, res)) {
+      res.writeHead(403)
+      res.end('CORS origin not allowed')
+      return
+    }
     if (method === 'OPTIONS') { res.writeHead(204); res.end(); return }
 
     try {
@@ -1782,7 +1928,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       if (pathname === '/api/auth/login' && method === 'POST') {
         const { email, password } = parseAuthBody(await parseBody(req))
         const result = loginUser(email, password)
-        res.setHeader('Set-Cookie', authCookie(result.token))
+        setAuthCookie(req, res, result.token)
         return json(res, 200, { token: result.token, user: result.user })
       }
 
@@ -1793,7 +1939,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           throw new HttpError(403, 'Local access is disabled')
         }
         const result = loginLocalUser(config.auth.localUserEmail)
-        res.setHeader('Set-Cookie', authCookie(result.token))
+        setAuthCookie(req, res, result.token)
         return json(res, 200, { token: result.token, user: result.user })
       }
 
@@ -1804,7 +1950,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         }
         const { email, password } = parseAuthBody(await parseBody(req))
         const result = registerUser(email, password)
-        res.setHeader('Set-Cookie', authCookie(result.token))
+        setAuthCookie(req, res, result.token)
         return json(res, 201, { token: result.token, user: result.user })
       }
 

@@ -7,7 +7,11 @@ primary_region = "sin"
 [env]
   NODE_ENV = "production"
   PORT = "4590"
+  TURING_HOST = "0.0.0.0"
   TURING_LOCAL_CLI_AGENTS = "false"
+  TURING_LOCAL_ACCESS = "false"
+  TURING_ALLOWED_WORKSPACES = "/app/data"
+  # Set TURING_JWT_SECRET with `fly secrets set`; do not store it here.
 
 [http_service]
   internal_port = 4590

@@ -205,8 +205,9 @@ export function authenticateRequest(req: http.IncomingMessage): AuthUser {
   throw new AuthError('Invalid token')
 }
 
-export function authCookie(token: string): string {
-  return `turing_token=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${TOKEN_TTL_SECONDS}`
+export function authCookie(token: string, options: { secure?: boolean } = {}): string {
+  const secure = options.secure ? '; Secure' : ''
+  return `turing_token=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${TOKEN_TTL_SECONDS}${secure}`
 }
 
 function readCookie(req: http.IncomingMessage, name: string): string | undefined {

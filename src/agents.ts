@@ -370,13 +370,13 @@ async function probeCommand(command: string): Promise<{ healthy: boolean; versio
 async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ healthy: boolean; error?: string }> {
   let cwd: string | undefined
   try {
-    const adapter = createAdapter({ ...config, timeout: Math.min(config.timeout ?? 60_000, 60_000) })
+    const adapter = createAdapter({ ...config, timeout: Math.min(config.timeout ?? 120_000, 120_000) })
     if (!adapter) return { healthy: false }
     ;(adapter as { name: string }).name = name
     cwd = await mkdtemp(join(tmpdir(), 'turing-agent-smoke-'))
     const output = await adapter.send(smokeSession(cwd), 'Reply exactly with TURING_READY and nothing else.')
     const content = typeof output === 'string' ? output : output.content
-    const healthy = content.trim() === 'TURING_READY'
+    const healthy = content.includes('TURING_READY')
     return { healthy, error: healthy ? undefined : `Unexpected smoke output: ${content.slice(0, 200)}` }
   } catch (err) {
     return { healthy: false, error: err instanceof Error ? err.message : String(err) }

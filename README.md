@@ -273,7 +273,7 @@ router.registerExternalTaskProvider(myProvider)
 以下 Provider 需要外部二进制或凭证，默认惰性（未配置时不报错、不参与检测）：
 
 - **Dreamina 视频生成**（`src/examples/dreamina/`）：`video_generate` 工作流步骤需要即梦 CLI。设置 `TURING_DREAMINA_COMMAND` 启用。`src/index.ts` 默认注册它，便于本机直接使用；开源用户如需纯净内核可去掉这行调用。
-- **Gemini Image 分镜生成**：`image_generate` 步骤的 Gemini Web 执行器。设置 `TURING_GEMINI_SKILL_SCRIPT` 启用。
+- **Gemini Image 分镜生成**：`image_generate` 步骤的 Gemini Web 执行器。设置 `TURING_GEMINI_SKILL_SCRIPT` 和 `GEMINI_WEB_COOKIE_PATH` 启用。
 
 未配置时，相关 workflow 步骤会返回明确的配置错误，服务本身正常启动。
 
@@ -348,6 +348,7 @@ Authorization: Bearer <turing token>
 - `turing_read_artifact`
 
 公网接入 ChatGPT 时，必须使用 HTTPS，并配置稳定的 `TURING_JWT_SECRET` 和 `policy.allowedWorkspaces`。
+跨域访问默认只允许 `localhost` / `127.0.0.1` / `::1` 开发 Origin；生产前端请用 `TURING_ALLOWED_ORIGINS=https://your-app.example` 显式配置白名单，多个 Origin 用逗号分隔。
 
 ## 数据保留
 
@@ -369,4 +370,4 @@ Authorization: Bearer <turing token>
 
 ## 许可证
 
-[MIT](./LICENSE)
+[Apache-2.0](./LICENSE)

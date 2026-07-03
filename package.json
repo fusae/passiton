@@ -4,6 +4,9 @@
   "description": "Agent-to-agent communication proxy",
   "type": "module",
   "main": "electron/main.cjs",
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "turing": "dist/cli.js"
   },

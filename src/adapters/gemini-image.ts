@@ -1,13 +1,11 @@
 import { access, mkdir, writeFile } from 'fs/promises'
-import os from 'os'
 import path from 'path'
 import type { Adapter, AdapterResponse, AdapterSendOpts, Session } from '../types.js'
 import { buildPrompt, runCommand } from './shared.js'
 
 const SKILL_SCRIPT = process.env.TURING_GEMINI_SKILL_SCRIPT ?? ''
 const NPX_COMMAND = process.env.TURING_NPX_COMMAND ?? 'npx'
-const COOKIE_PATH = process.env.GEMINI_WEB_COOKIE_PATH ??
-  path.join(os.homedir(), 'Library', 'Application Support', 'baoyu-skills', 'gemini-web', 'cookies.json')
+const COOKIE_PATH = process.env.GEMINI_WEB_COOKIE_PATH ?? ''
 
 export class GeminiImageAdapter implements Adapter {
   name = 'gemini-image'
@@ -23,10 +21,13 @@ export class GeminiImageAdapter implements Adapter {
   }
 
   async send(session: Session, message: string, opts?: AdapterSendOpts): Promise<AdapterResponse> {
+    if (!SKILL_SCRIPT || !COOKIE_PATH) {
+      throw new Error('Gemini Image requires TURING_GEMINI_SKILL_SCRIPT and GEMINI_WEB_COOKIE_PATH')
+    }
     try {
       await access(COOKIE_PATH)
     } catch {
-      throw new Error('Gemini Image 未登录，请先执行 Gemini Web 登录后重跑本步骤')
+      throw new Error('Gemini Image cookie file not found; set GEMINI_WEB_COOKIE_PATH to an existing cookies.json')
     }
 
     const cwd = session.cwd ?? process.cwd()
@@ -70,6 +71,7 @@ export class GeminiImageAdapter implements Adapter {
   }
 
   async healthCheck(): Promise<boolean> {
+    if (!SKILL_SCRIPT || !COOKIE_PATH) return false
     try {
       await access(COOKIE_PATH)
       return true

@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `LICENSE` (MIT), `CONTRIBUTING.md`, `SECURITY.md`, this `CHANGELOG.md`.
+- `LICENSE` (Apache-2.0), `CONTRIBUTING.md`, `SECURITY.md`, this `CHANGELOG.md`.
 - Environment variable `TURING_GEMINI_SKILL_SCRIPT` for the experimental Gemini Image adapter.
 
 ## [0.1.0] - 2026-06-21
@@ -34,5 +34,5 @@ Initial public baseline. Local-first agent-to-agent orchestration:
 - **Web UI**, HTTP API, WebSocket events, and `turing` CLI.
 - **Auth**: JWT with auto-generated secret on first run, encrypted provider key vault, local-access auto-login.
 
-[Unreleased]: https://github.com/jamesyu/turing/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/jamesyu/turing/releases/tag/v0.1.0
+[Unreleased]: https://github.com/<owner>/<repo>/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/<owner>/<repo>/releases/tag/v0.1.0
