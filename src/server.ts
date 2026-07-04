@@ -4,6 +4,8 @@ import http from 'http'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
+import zlib from 'zlib'
+import { promisify } from 'util'
 import { fileURLToPath } from 'url'
 import { WebSocketServer } from 'ws'
 import type { WebSocket } from 'ws'
@@ -36,6 +38,15 @@ const MAX_FILE_PREVIEW_SIZE = 1024 * 1024
 const MAX_IMAGE_FILE_PREVIEW_SIZE = 10 * 1024 * 1024
 const WS_HEARTBEAT_MS = 30_000
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+// Responses smaller than this are not compressed (overhead outweighs savings).
+const COMPRESS_MIN_BYTES = 1024
+// Responses larger than this are served uncompressed to avoid memory spikes
+// from holding both the original and compressed buffer simultaneously.
+const COMPRESS_MAX_BYTES = 4 * 1024 * 1024
+// Static text extensions eligible for gzip/deflate compression.
+const COMPRESSIBLE_EXT = new Set(['.html', '.js', '.css', '.json', '.svg', '.txt', '.md'])
+// Maximum number of entries retained in the static-asset cache.
+const STATIC_CACHE_MAX = 64
 const API_ADAPTERS = new Set(['anthropic-api', 'openai-api', 'zhipu-api', 'deepseek-api', 'qwen-api', 'moonshot-api', 'custom-api'])
 const PROVIDER_BY_ADAPTER: Record<string, string> = {
   'anthropic-api': 'Anthropic',
@@ -107,6 +118,25 @@ class HttpError extends Error {
   }
 }
 
+// Pick the best supported compression encoding for a request. Returns
+// 'gzip' | 'deflate' | undefined (none / not acceptable).
+function pickEncoding(req: http.IncomingMessage): 'gzip' | 'deflate' | undefined {
+  const accept = String(req.headers['accept-encoding'] ?? '')
+  if (!accept) return undefined
+  // gzip is universally supported and slightly better than deflate; prefer it.
+  if (/\bgzip\b/i.test(accept)) return 'gzip'
+  if (/\bdeflate\b/i.test(accept)) return 'deflate'
+  return undefined
+}
+
+// Async compression helpers — never block the event loop.
+const gzipAsync = promisify(zlib.gzip)
+const deflateAsync = promisify(zlib.deflate)
+
+async function compressBuffer(buf: Buffer, encoding: 'gzip' | 'deflate'): Promise<Buffer> {
+  return encoding === 'gzip' ? gzipAsync(buf) : deflateAsync(buf)
+}
+
 function json(res: http.ServerResponse, status: number, data: unknown): void {
   const body = JSON.stringify(data)
   res.writeHead(status, {
@@ -114,6 +144,34 @@ function json(res: http.ServerResponse, status: number, data: unknown): void {
     'Cache-Control': 'no-store',
   })
   res.end(body)
+}
+
+// JSON response with optional gzip/deflate compression for large payloads.
+// Used by endpoints that can return sizable JSON (session/pipeline detail,
+// list endpoints). Falls back to an uncompressed response when the payload is
+// small, too large, or the client does not advertise a supported encoding.
+async function sendJson(req: http.IncomingMessage, res: http.ServerResponse, status: number, data: unknown): Promise<void> {
+  const buf = Buffer.from(JSON.stringify(data), 'utf-8')
+  const headers: Record<string, string | number> = {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+    Vary: 'Accept-Encoding',
+  }
+  const encoding =
+    buf.length >= COMPRESS_MIN_BYTES && buf.length <= COMPRESS_MAX_BYTES
+      ? pickEncoding(req)
+      : undefined
+  if (encoding) {
+    const compressed = await compressBuffer(buf, encoding)
+    headers['Content-Encoding'] = encoding
+    headers['Content-Length'] = compressed.length
+    res.writeHead(status, headers)
+    res.end(compressed)
+  } else {
+    headers['Content-Length'] = buf.length
+    res.writeHead(status, headers)
+    res.end(buf)
+  }
 }
 
 function configureCors(req: http.IncomingMessage, res: http.ServerResponse): boolean {
@@ -207,7 +265,51 @@ function parseApiKeyBody(body: unknown): { provider: string; key: string; name?:
   }
 }
 
-function serveStatic(res: http.ServerResponse, filePath: string): void {
+// In-memory cache for static files. Keyed by resolved path; entries are
+// invalidated automatically when mtime changes, so rebuilds between deploys
+// always serve fresh content while repeated requests skip disk entirely.
+// Bounded to STATIC_CACHE_MAX entries via simple LRU reinsertion.
+interface StaticCacheEntry {
+  mtimeMs: number
+  size: number
+  content: Buffer
+  etag: string
+}
+const staticCache = new Map<string, StaticCacheEntry>()
+
+function readStaticCached(resolvedPath: string): StaticCacheEntry | undefined {
+  const cached = staticCache.get(resolvedPath)
+  let stat: fs.Stats
+  try {
+    stat = fs.statSync(resolvedPath)
+  } catch {
+    if (cached) staticCache.delete(resolvedPath)
+    return undefined
+  }
+  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+    // Promote to most-recently-used.
+    staticCache.delete(resolvedPath)
+    staticCache.set(resolvedPath, cached)
+    return cached
+  }
+  const content = fs.readFileSync(resolvedPath)
+  const entry: StaticCacheEntry = {
+    mtimeMs: stat.mtimeMs,
+    size: stat.size,
+    content,
+    etag: `"${stat.size.toString(16)}-${stat.mtimeMs.toString(16)}"`,
+  }
+  staticCache.set(resolvedPath, entry)
+  // Evict oldest entries when the cache exceeds its bound.
+  while (staticCache.size > STATIC_CACHE_MAX) {
+    const oldest = staticCache.keys().next().value
+    if (oldest === undefined) break
+    staticCache.delete(oldest)
+  }
+  return entry
+}
+
+async function serveStatic(req: http.IncomingMessage, res: http.ServerResponse, filePath: string): Promise<void> {
   const resolvedPath = path.resolve(filePath)
   if (resolvedPath !== WEB_DIR && !resolvedPath.startsWith(`${WEB_DIR}${path.sep}`)) {
     res.writeHead(403)
@@ -217,17 +319,58 @@ function serveStatic(res: http.ServerResponse, filePath: string): void {
 
   const ext = path.extname(filePath)
   const mime = MIME[ext] ?? 'application/octet-stream'
-  try {
-    const content = fs.readFileSync(resolvedPath)
-    res.writeHead(200, {
-      'Content-Type': mime,
-      'Cache-Control': 'no-store',
-    })
-    res.end(content)
-  } catch {
+  const entry = readStaticCached(resolvedPath)
+  if (!entry) {
     res.writeHead(404)
     res.end('Not found')
+    return
   }
+
+  // Conditional GET: serve 304 when the client's cached copy is fresh.
+  // `must-revalidate` keeps correctness across rebuilds (ETag changes when
+  // the file changes) while eliminating the body transfer on repeat hits.
+  if (req.headers['if-none-match'] === entry.etag) {
+    res.writeHead(304, { ETag: entry.etag, 'Cache-Control': 'public, max-age=0, must-revalidate' })
+    res.end()
+    return
+  }
+
+  const headers: Record<string, string | number> = {
+    'Content-Type': mime,
+    'Cache-Control': 'public, max-age=0, must-revalidate',
+    ETag: entry.etag,
+    Vary: 'Accept-Encoding',
+  }
+
+  // Check compression eligibility (type + size thresholds).
+  const shouldCompress =
+    COMPRESSIBLE_EXT.has(ext) &&
+    entry.content.length >= COMPRESS_MIN_BYTES &&
+    entry.content.length <= COMPRESS_MAX_BYTES
+  const encoding = shouldCompress ? pickEncoding(req) : undefined
+
+  if (encoding) {
+    const compressed = await compressBuffer(entry.content, encoding)
+    headers['Content-Encoding'] = encoding
+    headers['Content-Length'] = compressed.length
+    res.writeHead(200, headers)
+    // HEAD requests receive headers but no body.
+    if (req.method === 'HEAD') {
+      res.end()
+      return
+    }
+    res.end(compressed)
+    return
+  }
+
+  headers['Content-Length'] = entry.content.length
+  res.writeHead(200, headers)
+  // HEAD requests receive headers but no body.
+  if (req.method === 'HEAD') {
+    res.end()
+    return
+  }
+  res.end(entry.content)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -416,6 +559,21 @@ function sessionDisplayTitle(session: Session): string {
   return `${agentLabel(session.from)} → ${agentLabel(session.to)}`
 }
 
+function sessionDisplayTitleBatch(session: Session, stepTitles: Map<string, string>, firstMessages: Map<string, string>): string {
+  const stepTitle = stepTitles.get(session.id)?.trim()
+  if (stepTitle) return stepTitle
+
+  const initial = firstMessages.get(session.id) ?? ''
+  const firstLine = initial
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean)
+  if (firstLine) {
+    return compactSessionTitle(firstLine)
+  }
+  return `${agentLabel(session.from)} → ${agentLabel(session.to)}`
+}
+
 function agentLabel(ref: AgentRef): string {
   return ref.label ?? ref.adapter
 }
@@ -433,6 +591,16 @@ function sessionForClient(session: Session): Session & { displayTitle: string } 
     ...session,
     displayTitle: sessionDisplayTitle(session),
   }
+}
+
+function sessionsForClient(sessions: Session[]): (Session & { displayTitle: string })[] {
+  const ids = sessions.map((s) => s.id)
+  const stepTitles = state.getPipelineStepTitles(ids)
+  const firstMessages = state.getFirstHumanMessages(ids)
+  return sessions.map((session) => ({
+    ...session,
+    displayTitle: sessionDisplayTitleBatch(session, stepTitles, firstMessages),
+  }))
 }
 
 async function reloadAgents(router: Router, agentCatalog: AgentCatalog, config: AppConfig): Promise<void> {
@@ -1890,7 +2058,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // GET /api/docs — public machine-readable HTTP API reference.
       if (pathname === '/api/docs' && method === 'GET') {
-        return json(res, 200, sessionApiDocs())
+        return await sendJson(req, res, 200, sessionApiDocs())
       }
 
       if ((pathname === '/mcp' || pathname === '/api/mcp') && method === 'GET') {
@@ -2269,7 +2437,12 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // GET /api/pipelines
       if (pathname === '/api/pipelines' && method === 'GET') {
-        return json(res, 200, state.listPipelines(authUser!.userId))
+        const limit = parsePositiveInt(url.searchParams.get('limit'))
+        const offset = parsePositiveInt(url.searchParams.get('offset'))
+        return json(res, 200, state.listPipelines(
+          authUser!.userId,
+          { ...(limit ? { limit } : {}), ...(offset ? { offset } : {}) }
+        ))
       }
 
       // POST /api/pipelines
@@ -2331,13 +2504,15 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const statusFilter = parseSessionStatus(url.searchParams.get('status'))
         const limit = parsePositiveInt(url.searchParams.get('limit'))
         const sessions = state.listSessions({ ...(statusFilter ? { status: statusFilter } : {}), userId: authUser!.userId, ...(limit ? { limit } : {}) })
-        return json(res, 200, sessions.map(sessionForClient))
+        return json(res, 200, sessionsForClient(sessions))
       }
 
       // GET /api/tasks
       if (pathname === '/api/tasks' && method === 'GET') {
         const statusFilter = parseTaskStatus(url.searchParams.get('status'))
-        const tasks = state.listTasks({ ...(statusFilter ? { status: statusFilter } : {}), userId: authUser!.userId })
+        const limit = parsePositiveInt(url.searchParams.get('limit'))
+        const offset = parsePositiveInt(url.searchParams.get('offset'))
+        const tasks = state.listTasks({ ...(statusFilter ? { status: statusFilter } : {}), userId: authUser!.userId, ...(limit ? { limit } : {}), ...(offset ? { offset } : {}) })
         return json(res, 200, tasks)
       }
 
@@ -2523,16 +2698,20 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // ── Static files ────────────────────────────────────────────────────────
 
-      if (method === 'GET') {
+      if (method === 'GET' || method === 'HEAD') {
         if (pathname === '/' || pathname === '/index.html') {
-          return serveStatic(res, path.join(WEB_DIR, 'index.html'))
+          return await serveStatic(req, res, path.join(WEB_DIR, 'index.html'))
         }
         const staticPath = path.resolve(WEB_DIR, pathname.replace(/^\//, ''))
-        if (fs.existsSync(staticPath) && fs.statSync(staticPath).isFile()) {
-          return serveStatic(res, staticPath)
+        try {
+          if (fs.statSync(staticPath).isFile()) {
+            return await serveStatic(req, res, staticPath)
+          }
+        } catch {
+          // not a real file — fall through to SPA fallback below
         }
         // SPA fallback
-        return serveStatic(res, path.join(WEB_DIR, 'index.html'))
+        return await serveStatic(req, res, path.join(WEB_DIR, 'index.html'))
       }
 
       json(res, 404, { error: 'Not found' })
@@ -2586,7 +2765,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
     ws.on('close', () => clients.delete(ws))
     ws.on('error', () => clients.delete(ws))
     // Send current sessions on connect
-    ws.send(JSON.stringify({ type: 'init', payload: state.listSessions({ userId: authUser.userId }).map(sessionForClient) }))
+    ws.send(JSON.stringify({ type: 'init', payload: sessionsForClient(state.listSessions({ userId: authUser.userId })) }))
   })
 
   server.on('close', () => {

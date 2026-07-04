@@ -96,6 +96,14 @@ const state = {
   sessions: [],
   tasks: [],
   pipelines: [],
+  pipelinePageLimit: 20,
+  pipelineListOffset: 0,
+  pipelineListHasMore: false,
+  pipelineListLoadingMore: false,
+  taskPageLimit: 60,
+  taskListOffset: 0,
+  taskListHasMore: false,
+  taskListLoadingMore: false,
   agents: [],
   templates: [],
   pipelineTemplates: [],
@@ -136,6 +144,14 @@ const state = {
   artifactFullDiffVisible: false,
   rawOutputVisible: false,
   streamFrame: null,
+  viewToken: 0,
+  sessionDetailController: null,
+  taskDetailController: null,
+  sessionsListController: null,
+  tasksListController: null,
+  pipelineDetailController: null,
+  pipelinesListController: null,
+  settingsController: null,
 }
 
 // ── Router ────────────────────────────────────────────────────────────────────
@@ -157,7 +173,19 @@ function navigate(path) {
 }
 
 function render() {
+  nextViewToken()
   const path = location.pathname
+
+  // Abort in-flight detail/list fetches from the previous view so stale
+  // responses can't render. The view-token guard is the primary defence;
+  // aborting frees the network connection sooner.
+  if (!path.startsWith('/session/')) { if (state.sessionDetailController) state.sessionDetailController.abort() }
+  if (!path.startsWith('/task/')) { if (state.taskDetailController) state.taskDetailController.abort() }
+  if (path !== '/sessions') { if (state.sessionsListController) state.sessionsListController.abort() }
+  if (path !== '/tasks') { if (state.tasksListController) state.tasksListController.abort() }
+  if (!path.startsWith('/workflow/') && !path.startsWith('/workflows/')) { if (state.pipelineDetailController) state.pipelineDetailController.abort() }
+  if (path !== '/workflows') { if (state.pipelinesListController) state.pipelinesListController.abort() }
+  if (path !== '/settings') { if (state.settingsController) state.settingsController.abort() }
 
   // Auth check
   if (path !== '/' && path !== '/login' && !getValidAuthToken()) {
@@ -253,17 +281,18 @@ function clearAuthToken() {
   }
 }
 
-async function api(path, method = 'GET', body) {
+async function api(path, method = 'GET', body, options = {}) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } }
   const token = getValidAuthToken()
   if (token) opts.headers.Authorization = `Bearer ${token}`
   if (body !== undefined) opts.body = JSON.stringify(body)
+  if (options.signal) opts.signal = options.signal
 
   let r
   try {
     r = await fetch(API + path, opts)
-  } catch {
-    throw new Error('Cannot reach Turing server')
+  } catch (err) {
+    throw new Error(options.signal?.aborted ? 'aborted' : 'Cannot reach Turing server')
   }
 
   const text = await r.text()
@@ -285,6 +314,125 @@ async function api(path, method = 'GET', body) {
   }
 
   return data
+}
+
+// ── Performance: view tokens, dedup, coalesced renders ────────────────────────
+// Bumped on every render() so async loads can detect they're stale (user navigated
+// away mid-fetch) and bail before mutating the DOM with old data.
+function nextViewToken() {
+  state.viewToken = (state.viewToken || 0) + 1
+  return state.viewToken
+}
+
+// Coalesce a burst of render requests tagged `tag` into a single execution within
+// one animation frame. Late callers overwrite the pending fn (latest-wins). Used
+// for WebSocket-driven list re-renders so N session:updated events in one frame
+// produce exactly one DOM update instead of N synchronous innerHTML rebuilds.
+const coalescedRenders = new Map()
+function scheduleCoalescedRender(tag, fn) {
+  const existing = coalescedRenders.get(tag)
+  if (existing) { existing.fn = fn; return }
+  const entry = { fn }
+  coalescedRenders.set(tag, entry)
+  const run = () => {
+    if (coalescedRenders.get(tag) !== entry) return
+    coalescedRenders.delete(tag)
+    try { entry.fn() } catch (err) { console.error('[render-coalesce]', err) }
+  }
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run)
+  else setTimeout(run, 16)
+}
+
+// In-flight dedup for detail GETs: rapid navigation/clicks that request the same
+// resource reuse one promise. The promise is removed on settle so a later request
+// (after completion) fires a fresh fetch.
+const inflightDetails = new Map()
+function dedupeDetail(key, factory) {
+  const existing = inflightDetails.get(key)
+  if (existing) return existing
+  const p = factory().finally(() => inflightDetails.delete(key))
+  inflightDetails.set(key, p)
+  return p
+}
+
+function isAbortedErr(err) {
+  return err?.message === 'aborted' || err?.name === 'AbortError'
+}
+
+// Route-gated, coalesced list re-renders for WebSocket bursts. State is mutated
+// immediately (so data stays correct); only the DOM work is debounced to one
+// frame, and skipped entirely when the user isn't viewing that list.
+function scheduleSessionListRender() {
+  if (location.pathname !== '/sessions') return
+  scheduleCoalescedRender('session-list', () => {
+    renderSessionStats()
+    renderSessionCards()
+  })
+}
+
+function scheduleTaskListRender() {
+  if (location.pathname !== '/tasks') return
+  scheduleCoalescedRender('task-list', () => {
+    renderTaskStats()
+    renderTaskCards()
+  })
+}
+
+// Coalesced detail-panel renders for WebSocket bursts on the active detail view.
+// State is already updated before these fire; we only debounce the DOM work so
+// N events in one frame produce one header+panel (or header+content) rebuild.
+function scheduleSessionDetailRender() {
+  if (!state.currentSessionId || !location.pathname.startsWith('/session/')) return
+  scheduleCoalescedRender('session-detail', () => {
+    if (state.currentSessionId && location.pathname.startsWith('/session/')) {
+      renderSessionHeader(state.currentSession)
+      renderSessionPanel(state.currentSession)
+    }
+  })
+}
+
+function scheduleTaskDetailRender(forceContent) {
+  if (!state.currentTaskId || !location.pathname.startsWith('/task/')) return
+  scheduleCoalescedRender('task-detail', () => {
+    if (state.currentTaskId && location.pathname.startsWith('/task/')) {
+      renderTaskHeader(state.currentTask)
+      if (forceContent) renderTaskContent(state.currentTask)
+    }
+  })
+}
+
+// Coalesced pipeline (workflow) list re-renders for WebSocket bursts. Mirrors
+// scheduleSessionListRender/scheduleTaskListRender but for /workflows.
+function scheduleWorkflowListRender() {
+  if (location.pathname !== '/workflows') return
+  scheduleCoalescedRender('workflow-list', () => {
+    if (location.pathname === '/workflows') renderPipelineCards()
+  })
+}
+
+// Coalesced workflow-detail renders for WebSocket bursts. State is already
+// updated before this fires; we only debounce the DOM work so N events in one
+// frame produce one header+steps+timeline rebuild.
+function scheduleWorkflowDetailRender(forceHydrate) {
+  if (!state.currentPipelineId) return
+  const onDetail = location.pathname.startsWith('/workflow/') || location.pathname.startsWith('/workflows/')
+  if (!onDetail) return
+  scheduleCoalescedRender('workflow-detail', () => {
+    if (!state.currentPipelineId || !(location.pathname.startsWith('/workflow/') || location.pathname.startsWith('/workflows/'))) return
+    renderWorkflowHeader(state.currentPipeline)
+    renderWorkflowSteps(state.currentPipeline)
+    renderWorkflowTimeline(state.currentPipeline)
+    if (forceHydrate) hydrateWorkflowFileReferences(state.currentPipeline)
+  })
+}
+
+// Coalesce rapid renderSessionMessages calls (e.g. a burst of message:step
+// WebSocket events) into one innerHTML rebuild per animation frame.
+function scheduleSessionMessagesRender() {
+  if (!state.currentSessionId) return
+  scheduleCoalescedRender('session-messages', () => {
+    if (state.currentSessionId) renderSessionMessages()
+  })
 }
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
@@ -391,8 +539,7 @@ function handleWsEvent(event) {
   switch (event.type) {
     case 'init':
       state.sessions = event.payload || []
-      renderSessionStats()
-      renderSessionCards()
+      scheduleSessionListRender()
       break
     case 'session:created':
     case 'session:updated':
@@ -434,7 +581,7 @@ function handleWsEvent(event) {
         setStreamStatus(event.payload.sessionId, '已完成本轮输出')
         upsertCurrentMessage(event.payload)
         renderSessionMessages()
-        renderSessionPanel(state.currentSession)
+        scheduleSessionDetailRender()
       }
       {
         const workflowDetail = findCurrentWorkflowSessionDetail(event.payload.sessionId)
@@ -446,8 +593,8 @@ function handleWsEvent(event) {
           } else {
             workflowDetail.messages.push(event.payload)
           }
-          renderWorkflowSteps(state.currentPipeline)
-          renderWorkflowTimeline(state.currentPipeline)
+          invalidateWorkflowStepCache()
+          scheduleWorkflowDetailRender()
         }
       }
       break
@@ -469,18 +616,17 @@ function applySessionUpdate(session) {
 
   if (state.currentSessionId === session.id) {
     state.currentSession = { ...(state.currentSession || {}), ...session }
-    renderSessionHeader(state.currentSession)
-    renderSessionPanel(state.currentSession)
+    scheduleSessionDetailRender()
   }
 
   const workflowDetail = findCurrentWorkflowSessionDetail(session.id)
   if (workflowDetail) {
     Object.assign(workflowDetail, session)
-    renderWorkflowSteps(state.currentPipeline)
+    invalidateWorkflowStepCache()
+    scheduleWorkflowDetailRender()
   }
 
-  renderSessionStats()
-  renderSessionCards()
+  scheduleSessionListRender()
 }
 
 function applyPipelineUpdate(pipeline) {
@@ -494,16 +640,11 @@ function applyPipelineUpdate(pipeline) {
 
   if (state.currentPipelineId === pipeline.id) {
     state.currentPipeline = { ...(state.currentPipeline || {}), ...pipeline }
-    state.workflowFileAliases = new Map()
-    state.workflowNestedFiles = new Map()
-    state.workflowFileResolution = new Map()
-    renderWorkflowHeader(state.currentPipeline)
-    renderWorkflowSteps(state.currentPipeline)
-    renderWorkflowTimeline(state.currentPipeline)
-    hydrateWorkflowFileReferences(state.currentPipeline)
+    invalidateWorkflowStepCache()
+    scheduleWorkflowDetailRender(true)
   }
 
-  renderPipelineCards()
+  scheduleWorkflowListRender()
 }
 
 function applyTaskUpdate(task) {
@@ -516,20 +657,27 @@ function applyTaskUpdate(task) {
   }
 
   if (state.currentTaskId === task.id) {
-    state.currentTask = { ...(state.currentTask || {}), ...task }
-    renderTaskHeader(state.currentTask)
-    renderTaskContent(state.currentTask)
+    const prev = state.currentTask || {}
+    state.currentTask = { ...prev, ...task }
+    // Re-render the heavy markdown content only when one of the markdown-bearing
+    // fields actually changed. Status-only updates (queued→running→done) just
+    // need the header badge, not a full prompt/result/output re-parse.
+    const contentChanged =
+      task.prompt !== undefined && task.prompt !== prev.prompt ||
+      task.result !== undefined && task.result !== prev.result ||
+      task.output !== undefined && task.output !== prev.output ||
+      task.errorMessage !== undefined && task.errorMessage !== prev.errorMessage ||
+      task.lastAgentOutput !== undefined && task.lastAgentOutput !== prev.lastAgentOutput
+    scheduleTaskDetailRender(contentChanged)
   }
 
-  renderTaskStats()
-  renderTaskCards()
+  scheduleTaskListRender()
 }
 
 function removeSessionFromList(id) {
   if (!id) return
   state.sessions = state.sessions.filter(session => session.id !== id)
-  renderSessionStats()
-  renderSessionCards()
+  scheduleSessionListRender()
 }
 
 function handleMessageDelta(payload) {
@@ -550,7 +698,8 @@ function handleMessageDelta(payload) {
     if (state.liveReviewStep === payload.sessionId) {
       updateWorkflowLiveReviewStream(payload.sessionId)
     } else {
-      renderWorkflowSteps(state.currentPipeline)
+      invalidateWorkflowStepCache(payload.sessionId)
+      scheduleWorkflowDetailRender()
     }
   }
 }
@@ -568,12 +717,13 @@ function handleMessageStep(payload) {
   steps.push(step)
   state.streamSteps.set(payload.sessionId, steps)
   setStreamStatus(payload.sessionId, step.summary)
-  if (state.currentSessionId === payload.sessionId) renderSessionMessages()
+  if (state.currentSessionId === payload.sessionId) scheduleSessionMessagesRender()
   if (isCurrentWorkflowSession(payload.sessionId)) {
     if (state.liveReviewStep === payload.sessionId) {
       updateWorkflowLiveReviewStream(payload.sessionId)
     } else {
-      renderWorkflowSteps(state.currentPipeline)
+      invalidateWorkflowStepCache(payload.sessionId)
+      scheduleWorkflowDetailRender()
     }
   }
 }
@@ -658,36 +808,68 @@ function findCurrentWorkflowSessionDetail(sessionId) {
 }
 
 // ── Data Loading ──────────────────────────────────────────────────────────────
-async function loadSessions() {
+async function loadSessions(signal) {
   try {
-    state.sessions = await api('/api/sessions?limit=60')
+    state.sessions = await api('/api/sessions?limit=60', 'GET', undefined, signal ? { signal } : undefined)
   } catch (err) {
+    if (isAbortedErr(err)) throw err
     console.error('Failed to load sessions:', err)
   }
 }
 
-async function loadTasks() {
+async function loadTasks(signal, options = {}) {
+  const pageLimit = options.limit ?? state.taskPageLimit
   try {
-    state.tasks = await api('/api/tasks')
+    const params = new URLSearchParams()
+    params.set('limit', String(pageLimit))
+    if (options.offset != null) params.set('offset', String(options.offset))
+    const result = await api(`/api/tasks?${params.toString()}`, 'GET', undefined, signal ? { signal } : undefined)
+    if (options.append && Array.isArray(state.tasks)) {
+      const existing = new Set(state.tasks.map((t) => t.id))
+      const fresh = result.filter((t) => !existing.has(t.id))
+      state.tasks = state.tasks.concat(fresh)
+      state.taskListOffset += result.length
+    } else {
+      state.tasks = result
+      state.taskListOffset = result.length
+    }
+    state.taskListHasMore = result.length >= pageLimit
   } catch (err) {
+    if (isAbortedErr(err)) throw err
     console.error('Failed to load tasks:', err)
-    state.tasks = []
+    if (!options.append) state.tasks = []
   }
 }
 
-async function loadPipelines() {
+async function loadPipelines(signal, options = {}) {
+  const pageLimit = options.limit ?? state.pipelinePageLimit
   try {
-    state.pipelines = await api('/api/pipelines')
+    const params = new URLSearchParams()
+    params.set('limit', String(pageLimit))
+    if (options.offset != null) params.set('offset', String(options.offset))
+    const result = await api(`/api/pipelines?${params.toString()}`, 'GET', undefined, signal ? { signal } : undefined)
+    if (options.append && Array.isArray(state.pipelines)) {
+      const existing = new Set(state.pipelines.map((p) => p.id))
+      const fresh = result.filter((p) => !existing.has(p.id))
+      state.pipelines = state.pipelines.concat(fresh)
+      state.pipelineListOffset += result.length
+    } else {
+      state.pipelines = result
+      state.pipelineListOffset = result.length
+    }
+    state.pipelineListHasMore = result.length >= pageLimit
   } catch (err) {
+    if (isAbortedErr(err)) throw err
     console.error('Failed to load pipelines:', err)
-    state.pipelines = []
+    if (!options.append) state.pipelines = []
   }
 }
 
-async function loadAgents() {
+async function loadAgents(signal) {
   try {
-    state.agents = await api('/api/agents')
+    state.agents = await api('/api/agents', 'GET', undefined, signal ? { signal } : undefined)
   } catch (err) {
+    if (isAbortedErr(err)) throw err
     console.error('Failed to load agents:', err)
   }
 }
@@ -710,10 +892,11 @@ async function loadPipelineTemplates() {
   }
 }
 
-async function loadApiKeys() {
+async function loadApiKeys(signal) {
   try {
-    state.apiKeys = await api('/api/keys')
+    state.apiKeys = await api('/api/keys', 'GET', undefined, signal ? { signal } : undefined)
   } catch (err) {
+    if (isAbortedErr(err)) throw err
     console.error('Failed to load API keys:', err)
     state.apiKeys = []
   }
@@ -727,35 +910,41 @@ async function loadStats() {
   }
 }
 
-async function loadConfig() {
+async function loadConfig(signal) {
   try {
-    state.config = await api('/api/config')
+    state.config = await api('/api/config', 'GET', undefined, signal ? { signal } : undefined)
   } catch (err) {
+    if (isAbortedErr(err)) throw err
     console.error('Failed to load config:', err)
   }
 }
 
-async function loadApiDocs() {
+async function loadApiDocs(signal) {
   try {
-    state.apiDocs = await api('/api/docs')
+    state.apiDocs = await api('/api/docs', 'GET', undefined, signal ? { signal } : undefined)
   } catch (err) {
+    if (isAbortedErr(err)) throw err
     console.error('Failed to load API docs:', err)
     state.apiDocs = null
   }
 }
 
-async function loadDeployCheck() {
+async function loadDeployCheck(signal) {
   try {
-    state.deployCheck = await api('/api/deploy/check')
+    state.deployCheck = await api('/api/deploy/check', 'GET', undefined, signal ? { signal } : undefined)
   } catch (err) {
+    if (isAbortedErr(err)) throw err
     console.error('Failed to load deploy check:', err)
     state.deployCheck = null
   }
 }
 
 async function loadSessionDetail(id) {
+  if (state.currentSessionId !== id) return
   try {
-    const session = await api(`/api/sessions/${id}`)
+    const controller = state.sessionDetailController
+    const session = await dedupeDetail(`session:${id}`, () => api(`/api/sessions/${id}`, 'GET', undefined, controller ? { signal: controller.signal } : undefined))
+    if (state.currentSessionId !== id) return
     state.currentSession = session
     state.currentMessages = session.messages || []
     resetSessionStream(id)
@@ -763,6 +952,7 @@ async function loadSessionDetail(id) {
     renderSessionPanel(session)
     renderSessionHeader(session)
   } catch (err) {
+    if (isAbortedErr(err)) return
     console.error('Failed to load session detail:', err)
   }
 }
@@ -1105,10 +1295,27 @@ function renderTasks() {
 }
 
 async function loadTasksData() {
-  await Promise.all([
-    loadTasks(),
-    loadAgents(),
-  ])
+  // Reset pagination state for a fresh list-page entry.
+  state.taskListOffset = 0
+  state.taskListHasMore = false
+  state.taskListLoadingMore = false
+
+  // Abort any previous in-flight list load and start a fresh one.
+  if (state.tasksListController) state.tasksListController.abort()
+  state.tasksListController = new AbortController()
+  const myToken = state.viewToken
+  const signal = state.tasksListController.signal
+
+  try {
+    await Promise.all([
+      loadTasks(signal),
+      loadAgents(),
+    ])
+  } catch (err) {
+    if (isAbortedErr(err)) return
+  }
+  // Stale guard: user navigated away while the list was loading.
+  if (state.viewToken !== myToken || location.pathname !== '/tasks') return
   renderTaskStats()
   renderTaskCards()
 }
@@ -1131,7 +1338,7 @@ function renderTaskCards() {
     container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No tasks yet. Create your first one!</p>'
     return
   }
-  container.innerHTML = state.tasks.map(task => `
+  const cards = state.tasks.map(task => `
     <a href="/task/${task.id}" class="card session-card task-card">
       <div class="session-card-header">
         <span class="session-card-title">${escapeHtml(taskTitle(task))}</span>
@@ -1145,14 +1352,61 @@ function renderTaskCards() {
       </div>
     </a>
   `).join('')
+
+  container.innerHTML = state.taskListHasMore
+    ? `${cards}<div id="task-load-more" style="grid-column: 1 / -1;">${tasksLoadMoreButtonHtml()}</div>`
+    : cards
+}
+
+function tasksLoadMoreButtonHtml() {
+  const loading = state.taskListLoadingMore
+  return `<button class="btn btn-ghost btn-sm" style="width: 100%; justify-content: center;" onclick="window.loadMoreTasks()" ${loading ? 'disabled' : ''}>${loading ? 'Loading…' : 'Load more tasks'}</button>`
+}
+
+function renderTasksLoadMoreButton() {
+  const el = document.getElementById('task-load-more')
+  if (el) el.innerHTML = tasksLoadMoreButtonHtml()
+}
+
+// "Load more" handler for the tasks list page. Guarded against rapid
+// double-clicks and aborted when the user navigates away. Older items are
+// appended with id-based dedup so live (prepended) updates never produce
+// duplicates.
+async function loadMoreTasks() {
+  if (state.taskListLoadingMore || !state.taskListHasMore) return
+  if (location.pathname !== '/tasks') return
+  state.taskListLoadingMore = true
+  renderTasksLoadMoreButton()
+  const myToken = state.viewToken
+  try {
+    await loadTasks(undefined, { offset: state.taskListOffset, append: true })
+  } catch (err) {
+    if (isAbortedErr(err)) return
+  } finally {
+    state.taskListLoadingMore = false
+  }
+  if (state.viewToken !== myToken || location.pathname !== '/tasks') return
+  renderTaskCards()
 }
 
 async function loadSessionsData() {
-  await Promise.all([
-    loadSessions(),
-    loadAgents(),
-    loadStats()
-  ])
+  // Abort any previous in-flight list load and start a fresh one.
+  if (state.sessionsListController) state.sessionsListController.abort()
+  state.sessionsListController = new AbortController()
+  const myToken = state.viewToken
+  const signal = state.sessionsListController.signal
+
+  try {
+    await Promise.all([
+      loadSessions(signal),
+      loadAgents(),
+      loadStats()
+    ])
+  } catch (err) {
+    if (isAbortedErr(err)) return
+  }
+  // Stale guard: user navigated away while the list was loading.
+  if (state.viewToken !== myToken || location.pathname !== '/sessions') return
 
   state.sessionsLoaded = true
   renderSessionStats()
@@ -1363,13 +1617,23 @@ async function renderTask(id) {
   state.currentPipelineId = null
   state.currentPipeline = null
 
+  // Abort any previous in-flight detail load and start a fresh one.
+  if (state.taskDetailController) state.taskDetailController.abort()
+  state.taskDetailController = new AbortController()
+  const myToken = state.viewToken
+  const signal = state.taskDetailController.signal
+
   let task = null
   try {
-    task = await api(`/api/tasks/${id}`)
-  } catch {
+    task = await dedupeDetail(`task:${id}`, () => api(`/api/tasks/${id}`, 'GET', undefined, { signal }))
+  } catch (err) {
+    if (isAbortedErr(err)) return
+    if (state.viewToken !== myToken || state.currentTaskId !== id) return
     document.body.innerHTML = '<div>Task not found</div>'
     return
   }
+  // Stale guard: user navigated away before the fetch resolved.
+  if (state.viewToken !== myToken || state.currentTaskId !== id) return
   state.currentTask = task
 
   document.body.innerHTML = `
@@ -1430,18 +1694,18 @@ function renderTaskContent(task) {
     <div class="task-main">
       <section class="card task-section">
         <div class="label mb-8">Prompt</div>
-        <div class="task-copy">${renderMarkdown(task.prompt || '')}</div>
+        <div class="task-copy">${renderMarkdownCached(task.prompt || '')}</div>
       </section>
       ${task.result ? `
         <section class="card task-section">
           <div class="label mb-8">Result</div>
-          <div class="task-copy">${renderMarkdown(task.result)}</div>
+          <div class="task-copy">${renderMarkdownCached(task.result)}</div>
         </section>
       ` : ''}
       ${task.output ? `
         <section class="card task-section">
           <div class="label mb-8">Full Output</div>
-          <div class="task-copy">${renderMarkdown(task.output)}</div>
+          <div class="task-copy">${renderMarkdownCached(task.output)}</div>
         </section>
       ` : ''}
       ${task.errorMessage ? `
@@ -1477,7 +1741,45 @@ function renderTaskContent(task) {
 }
 
 async function loadWorkflowsData() {
-  await loadPipelines()
+  // Reset pagination state for a fresh list-page entry.
+  state.pipelineListOffset = 0
+  state.pipelineListHasMore = false
+  state.pipelineListLoadingMore = false
+
+  // Abort any previous in-flight list load and start a fresh one.
+  if (state.pipelinesListController) state.pipelinesListController.abort()
+  state.pipelinesListController = new AbortController()
+  const myToken = state.viewToken
+  const signal = state.pipelinesListController.signal
+
+  try {
+    await loadPipelines(signal)
+  } catch (err) {
+    if (isAbortedErr(err)) return
+  }
+  // Stale guard: user navigated away while the list was loading.
+  if (state.viewToken !== myToken || location.pathname !== '/workflows') return
+  renderPipelineCards()
+}
+
+// "Load more" handler for the workflows list page. Guarded against rapid
+// double-clicks and aborted when the user navigates away. Older items are
+// appended with id-based dedup so live (prepended) updates never produce
+// duplicates.
+async function loadMorePipelines() {
+  if (state.pipelineListLoadingMore || !state.pipelineListHasMore) return
+  if (location.pathname !== '/workflows') return
+  state.pipelineListLoadingMore = true
+  renderLoadMoreButton()
+  const myToken = state.viewToken
+  try {
+    await loadPipelines(undefined, { offset: state.pipelineListOffset, append: true })
+  } catch (err) {
+    if (isAbortedErr(err)) return
+  } finally {
+    state.pipelineListLoadingMore = false
+  }
+  if (state.viewToken !== myToken || location.pathname !== '/workflows') return
   renderPipelineCards()
 }
 
@@ -1490,7 +1792,7 @@ function renderPipelineCards() {
     return
   }
 
-  container.innerHTML = state.pipelines.map(pipeline => `
+  const cards = state.pipelines.map(pipeline => `
     <a href="/workflow/${pipeline.id}" class="card session-card workflow-card">
       <div class="session-card-header">
         <span class="session-card-title">${escapeHtml(pipeline.name || 'Untitled workflow')}</span>
@@ -1503,6 +1805,20 @@ function renderPipelineCards() {
       </div>
     </a>
   `).join('')
+
+  container.innerHTML = state.pipelineListHasMore
+    ? `${cards}<div id="pipeline-load-more" style="grid-column: 1 / -1;">${loadMoreButtonHtml()}</div>`
+    : cards
+}
+
+function loadMoreButtonHtml() {
+  const loading = state.pipelineListLoadingMore
+  return `<button class="btn btn-ghost btn-sm" style="width: 100%; justify-content: center;" onclick="window.loadMorePipelines()" ${loading ? 'disabled' : ''}>${loading ? 'Loading…' : 'Load more workflows'}</button>`
+}
+
+function renderLoadMoreButton() {
+  const el = document.getElementById('pipeline-load-more')
+  if (el) el.innerHTML = loadMoreButtonHtml()
 }
 
 async function renderWorkflow(id) {
@@ -1515,17 +1831,29 @@ async function renderWorkflow(id) {
   state.currentPipelineId = id
   state.expandedWorkflowStep = state.expandedWorkflowStep || null
 
+  // Abort any previous in-flight detail load and start a fresh one.
+  if (state.pipelineDetailController) state.pipelineDetailController.abort()
+  state.pipelineDetailController = new AbortController()
+  const myToken = state.viewToken
+  const signal = state.pipelineDetailController.signal
+
   let pipeline = null
   try {
-    pipeline = await api(`/api/pipelines/${id}`)
+    pipeline = await dedupeDetail(`pipeline:${id}`, () => api(`/api/pipelines/${id}`, 'GET', undefined, { signal }))
   } catch (err) {
+    if (isAbortedErr(err)) return
+    if (state.viewToken !== myToken || state.currentPipelineId !== id) return
     document.body.innerHTML = '<div>Workflow not found</div>'
     return
   }
+  // Stale guard: user navigated away before the fetch resolved.
+  if (state.viewToken !== myToken || state.currentPipelineId !== id) return
+
   state.currentPipeline = pipeline
   state.workflowFileAliases = new Map()
   state.workflowNestedFiles = new Map()
   state.workflowFileResolution = new Map()
+  invalidateWorkflowStepCache()
 
   document.body.innerHTML = `
     <div class="app-layout">
@@ -1588,6 +1916,87 @@ function renderWorkflowHeader(pipeline) {
   }
 }
 
+// ── Workflow detail: bounded memoization of per-step render ───────────────────
+// renderWorkflowTimelineStep is the hot path on the /workflow/:id view: it runs
+// artifact-file extraction, file-resolution lookups and markdown parsing for
+// every step. On a WebSocket burst only the changed step's inputs differ, so we
+// memoize each step's HTML string keyed by sessionId and reuse the cached value
+// when a signature of its inputs is unchanged. The cache is bounded (LRU) and
+// invalidated whenever workflow step/session data or file-resolution state
+// changes (see invalidateWorkflowStepCache call sites).
+const WORKFLOW_STEP_CACHE_MAX = 64
+const workflowStepCache = new Map()
+
+// Build a stable, cheap fingerprint of every input that affects a step's render.
+// A missed dependency here would serve stale HTML, so this captures all state
+// read by renderWorkflowTimelineStep / renderWorkflowLiveReview (status, rounds,
+// messages, expanded/live-review flags, stream + heartbeat status, file
+// resolution via hydrate-driven invalidation, and markdown-lib availability).
+function workflowStepRenderSignature(step, session, index, totalSteps) {
+  const sessionId = step?.sessionId || ''
+  const messages = session?.messages || []
+  const live = state.liveReviewStep === sessionId
+  const lastAgent = [...messages].reverse().find(message => message.from !== 'human')
+  const artifact = state.liveReviewArtifacts.get(sessionId)
+  const messagesDigest = messages
+    .map(message => `${message.id || ''}:${message.from || ''}:${message.round ?? ''}:${(message.content || '').length}`)
+    .join('|')
+  return [
+    sessionId,
+    step?.status || '', step?.title || '', step?.nodeType || '', step?.errorMessage || '',
+    JSON.stringify(step?.contract || null),
+    (step?.dependsOn || []).map(stepIndexBySessionId).join(','),
+    session?.status || '', session?.currentRound ?? '', session?.maxRounds ?? '',
+    session?.permissionMode || '', session?.errorType || '', session?.errorMessage || '',
+    session?.lastAgentOutput || '', session?.cwd || '',
+    (session?.versions || []).length,
+    JSON.stringify(session?.artifacts || null),
+    messages.length, messagesDigest,
+    lastAgent?.id || '', lastAgent?.content || '',
+    index, totalSteps,
+    state.expandedWorkflowStep === sessionId ? '1' : '0',
+    live ? '1' : '0',
+    artifact ? `${artifact.path || ''}:${(artifact.content || '').length}` : '',
+    live ? (state.liveReviewDrafts.get(sessionId) || '') : '',
+    live ? (state.liveReviewPending.has(sessionId) ? '1' : '0') : '',
+    live ? (state.streamDeltas.get(sessionId)?.content || '') : '',
+    state.streamStatus.get(sessionId) || '',
+    state.heartbeats.get(sessionId)?.lastOutput || '',
+    typeof marked === 'undefined' ? '0' : '1',
+  ].join('\u0001')
+}
+
+// Memoized wrapper around renderWorkflowTimelineStep. Unchanged steps reuse the
+// cached HTML string; changed (or newly invalidated) steps recompute and refill
+// the LRU slot. Keeping this wrapper next to the cache makes the contract local.
+function renderWorkflowTimelineStepMemo(step, session, index, totalSteps) {
+  const key = step?.sessionId || `idx-${index}`
+  const sig = workflowStepRenderSignature(step, session, index, totalSteps)
+  const cached = workflowStepCache.get(key)
+  if (cached && cached.sig === sig) {
+    workflowStepCache.delete(key)
+    workflowStepCache.set(key, cached)
+    return cached.html
+  }
+  const html = renderWorkflowTimelineStep(step, session, index, totalSteps)
+  if (workflowStepCache.size >= WORKFLOW_STEP_CACHE_MAX) {
+    const oldest = workflowStepCache.keys().next().value
+    workflowStepCache.delete(oldest)
+  }
+  workflowStepCache.set(key, { sig, html })
+  return html
+}
+
+// Invalidate cached step HTML. Called with a sessionId to drop a single step
+// (e.g. a message:delta for that session) or with no argument to clear every
+// step (broad changes: new pipeline load, pipeline/session update, message:new).
+// File-resolution mutations (hydrateWorkflowFileReferences) also clear all,
+// because resolution state affects every step's file rendering.
+function invalidateWorkflowStepCache(sessionId) {
+  if (sessionId != null) workflowStepCache.delete(sessionId)
+  else workflowStepCache.clear()
+}
+
 function renderWorkflowSteps(pipeline) {
   const container = document.getElementById('workflow-steps')
   if (!container || !pipeline) return
@@ -1596,7 +2005,7 @@ function renderWorkflowSteps(pipeline) {
   const detailsById = new Map(details.map(session => [session.id, session]))
   container.innerHTML = `
     <div class="workflow-timeline-view">
-      ${steps.map((step, index) => renderWorkflowTimelineStep(step, detailsById.get(step.sessionId), index, steps.length)).join('')}
+      ${steps.map((step, index) => renderWorkflowTimelineStepMemo(step, detailsById.get(step.sessionId), index, steps.length)).join('')}
     </div>
   `
 }
@@ -2097,6 +2506,9 @@ async function hydrateWorkflowFileReferences(pipeline) {
     } catch {}
   }))
   if (changed && state.currentPipelineId === pipeline.id) {
+    // File-resolution/alias/nested maps changed: every step's file rendering
+    // may differ, so drop all cached step HTML before rebuilding.
+    invalidateWorkflowStepCache()
     renderWorkflowSteps(state.currentPipeline)
     const openStep = pipeline.sessions?.find(step => step.sessionId === state.liveReviewStep)
     const openSession = pipeline.sessionDetails?.find(session => session.id === state.liveReviewStep)
@@ -2341,17 +2753,29 @@ async function renderSession(id) {
   state.currentPipelineId = null
   state.currentPipeline = null
 
+  // Abort any previous in-flight detail load and start a fresh one.
+  if (state.sessionDetailController) state.sessionDetailController.abort()
+  state.sessionDetailController = new AbortController()
+  const myToken = state.viewToken
+  const signal = state.sessionDetailController.signal
+
   // Load session data
   let session = null
   try {
-    session = await api(`/api/sessions/${id}`)
+    session = await dedupeDetail(`session:${id}`, () => api(`/api/sessions/${id}`, 'GET', undefined, { signal }))
   } catch (err) {
+    if (isAbortedErr(err)) return
+    if (state.viewToken !== myToken || state.currentSessionId !== id) return
     document.body.innerHTML = '<div>Session not found</div>'
     return
   }
+  // Stale guard: user navigated away before the fetch resolved.
+  if (state.viewToken !== myToken || state.currentSessionId !== id) return
+
   state.currentSession = session
   resetSessionStream(id)
   state.autoFollowMessages = true
+  invalidateSessionMarkdownCache()
 
   document.body.innerHTML = `
     <div class="app-layout">
@@ -2540,7 +2964,7 @@ function renderSessionMessages(options = {}) {
       <div class="chat-msg ${isFrom ? 'from' : 'to'}" id="message-${escapeAttr(msg.id)}" data-round="${escapeAttr(String(msg.round))}">
         <div class="chat-avatar">${avatar}</div>
         <div class="chat-content">
-          <div class="chat-bubble">${renderMarkdown(msg.content)}</div>
+          <div class="chat-bubble">${renderMarkdownCached(msg.content)}</div>
           <div class="chat-meta">
             <span>${escapeHtml(msg.from)} · Turn ${msg.round} · ${new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
           <button class="msg-copy-btn" onclick='window.copyMessage(${jsString(msg.id)})' title="Copy">Copy</button>
@@ -2627,6 +3051,7 @@ function renderHighlightedDiff(diff) {
       return escapeHtml(diff)
     }
   }
+  ensureMarkdownLibs().then((ok) => { if (ok) rerenderCurrentMarkdown() })
   return escapeHtml(diff)
 }
 
@@ -2900,11 +3325,26 @@ window.exportCurrentSession = function() {
 }
 
 async function renderSettings() {
-  await loadConfig()
-  await loadAgents()
-  await loadApiKeys()
-  await loadApiDocs()
-  await loadDeployCheck()
+  // Abort any previous in-flight settings load (rapid re-navigation dedup).
+  if (state.settingsController) state.settingsController.abort()
+  state.settingsController = new AbortController()
+  const myToken = state.viewToken
+  const signal = state.settingsController.signal
+
+  try {
+    await Promise.all([
+      loadConfig(signal),
+      loadAgents(signal),
+      loadApiKeys(signal),
+      loadApiDocs(signal),
+      loadDeployCheck(signal),
+    ])
+  } catch (err) {
+    if (isAbortedErr(err)) return
+  }
+  // Stale guard: user navigated away while settings data was loading.
+  if (state.viewToken !== myToken || location.pathname !== '/settings') return
+
   const localCliTab = '<button class="tab-btn" data-tab="local-cli" onclick="window.switchSettingsTab(\'local-cli\')">Local CLI Agents</button>'
   const localCliPanel = `
             <div id="tab-local-cli" class="tab-panel" data-tab="local-cli">
@@ -3688,6 +4128,9 @@ window.stopCurrentTask = async function() {
     showToast(err.message)
   }
 }
+
+window.loadMorePipelines = loadMorePipelines
+window.loadMoreTasks = loadMoreTasks
 
 window.showNewWorkflowModal = async function() {
   if (!state.config) await loadConfig()
@@ -4773,8 +5216,96 @@ function renderContextFile(file) {
   `
 }
 
+// ── Lazy-load markdown/highlight libraries (only when a detail page needs them) ─
+// A single shared promise prevents concurrent calls from injecting duplicate
+// scripts or triggering duplicate rerenders. On failure we mark `failed` so
+// subsequent calls fall back to plain text without retrying indefinitely.
+const MD_LIBS = {
+  loading: null,   // shared promise while loading
+  loaded: false,   // set true on success
+  failed: false,   // set true on failure — no retry
+}
+
+// Returns a Promise<boolean>: true if libs are (or became) available.
+function ensureMarkdownLibs() {
+  if (MD_LIBS.loaded) return Promise.resolve(true)
+  if (MD_LIBS.failed) return Promise.resolve(false)
+  if (MD_LIBS.loading) return MD_LIBS.loading
+  MD_LIBS.loading = (async () => {
+    const cssLink = document.createElement('link')
+    cssLink.rel = 'stylesheet'
+    cssLink.href = 'https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github-dark.min.css'
+    document.head.appendChild(cssLink)
+    await Promise.all([
+      loadScript('https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js'),
+      loadScript('https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js'),
+    ])
+    MD_LIBS.loaded = true
+    return true
+  })().catch((err) => {
+    console.error('[md-libs] failed to load:', err)
+    MD_LIBS.loading = null
+    MD_LIBS.failed = true
+    return false
+  })
+  return MD_LIBS.loading
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script')
+    s.src = src
+    s.onload = resolve
+    s.onerror = () => reject(new Error(`Failed to load ${src}`))
+    document.head.appendChild(s)
+  })
+}
+
+function rerenderCurrentMarkdown() {
+  // Markdown libs just became available — clear the cache so cached fallback
+  // HTML (plain <pre>) is replaced with properly rendered markdown.
+  markdownCache.clear()
+  const path = location.pathname
+  if (path.startsWith('/session/') && state.currentSessionId) {
+    renderSessionMessages()
+  } else if (path.startsWith('/task/') && state.currentTask) {
+    renderTaskContent(state.currentTask)
+  } else if ((path.startsWith('/workflow/') || path.startsWith('/workflows/')) && state.currentPipeline) {
+    renderWorkflowSteps(state.currentPipeline)
+  }
+}
+
+// Bounded LRU cache for markdown→HTML conversion. Session messages and task
+// content are re-parsed on every view refresh; caching avoids re-running marked
+// + sanitize for unchanged text. Keyed by content string.
+const MARKDOWN_CACHE_MAX = 300
+const markdownCache = new Map()
+function renderMarkdownCached(content) {
+  if (content == null) content = ''
+  const cached = markdownCache.get(content)
+  if (cached !== undefined) {
+    // Move to end (most-recently-used) for simple LRU eviction.
+    markdownCache.delete(content)
+    markdownCache.set(content, cached)
+    return cached
+  }
+  const html = renderMarkdown(content)
+  if (markdownCache.size >= MARKDOWN_CACHE_MAX) {
+    // Evict oldest entry (first key in insertion-order Map).
+    const oldest = markdownCache.keys().next().value
+    markdownCache.delete(oldest)
+  }
+  markdownCache.set(content, html)
+  return html
+}
+
+function invalidateSessionMarkdownCache() {
+  markdownCache.clear()
+}
+
 function renderMarkdown(content) {
   if (typeof marked === 'undefined') {
+    ensureMarkdownLibs().then((ok) => { if (ok) rerenderCurrentMarkdown() })
     return `<pre>${escapeHtml(content)}</pre>`
   }
   try {

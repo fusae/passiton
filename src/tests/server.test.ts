@@ -844,3 +844,118 @@ test('WebSocket accepts browser token query authentication', async () => {
     assert.deepEqual(message.payload.map((session) => session.id), ['ws-query-session'])
   })
 })
+
+test('GET /api/pipelines supports limit and offset pagination', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'pipelines-pagination@example.com')
+    // Create 5 pipelines; insertion order means the last-created sorts first
+    // (ORDER BY created_at DESC).
+    for (let i = 0; i < 5; i++) {
+      state.createPipeline({
+        id: `page-pipeline-${i}`,
+        userId: auth.userId,
+        name: `Page Pipeline ${i}`,
+        sessions: [],
+      })
+    }
+
+    // No limit → all returned (backward-compatible default).
+    const all = await fetch(`${baseUrl}/api/pipelines`, { headers: authHeaders(auth.token) })
+    assert.equal(all.status, 200)
+    const allPayload = await all.json() as Array<{ id: string }>
+    assert.equal(allPayload.length, 5)
+
+    // limit=2 → only the two newest.
+    const limited = await fetch(`${baseUrl}/api/pipelines?limit=2`, { headers: authHeaders(auth.token) })
+    const limitedPayload = await limited.json() as Array<{ id: string }>
+    assert.equal(limitedPayload.length, 2)
+    assert.deepEqual(limitedPayload.map((p) => p.id), ['page-pipeline-4', 'page-pipeline-3'])
+
+    // offset=2 skips the two newest, returns the next two.
+    const offset = await fetch(`${baseUrl}/api/pipelines?limit=2&offset=2`, { headers: authHeaders(auth.token) })
+    const offsetPayload = await offset.json() as Array<{ id: string }>
+    assert.equal(offsetPayload.length, 2)
+    assert.deepEqual(offsetPayload.map((p) => p.id), ['page-pipeline-2', 'page-pipeline-1'])
+
+    // offset beyond the set returns an empty array (not an error).
+    const over = await fetch(`${baseUrl}/api/pipelines?limit=2&offset=10`, { headers: authHeaders(auth.token) })
+    const overPayload = await over.json() as Array<{ id: string }>
+    assert.equal(overPayload.length, 0)
+  })
+})
+
+test('GET /api/pipelines limit only returns the requesting user pipelines', async () => {
+  await withServer(async (baseUrl) => {
+    const owner = await register(baseUrl, 'pipelines-owner@example.com')
+    const other = await register(baseUrl, 'pipelines-other@example.com')
+    for (let i = 0; i < 3; i++) {
+      state.createPipeline({ id: `owner-pipe-${i}`, userId: owner.userId, name: `Owner ${i}`, sessions: [] })
+    }
+    state.createPipeline({ id: `other-pipe-0`, userId: other.userId, name: 'Other', sessions: [] })
+
+    const res = await fetch(`${baseUrl}/api/pipelines?limit=2`, { headers: authHeaders(owner.token) })
+    const payload = await res.json() as Array<{ id: string }>
+    assert.equal(payload.length, 2)
+    assert.ok(payload.every((p) => p.id.startsWith('owner-pipe-')), 'no cross-user leakage')
+  })
+})
+
+test('GET /api/tasks supports limit and offset pagination', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'tasks-pagination@example.com')
+    // Create 5 tasks; insertion order means the last-created sorts first
+    // (ORDER BY created_at DESC).
+    for (let i = 0; i < 5; i++) {
+      state.createTask({
+        id: `page-task-${i}`,
+        userId: auth.userId,
+        agent: { adapter: 'stub' },
+        prompt: `Page Task ${i}`,
+        cwd: '/tmp',
+      })
+    }
+
+    // No limit → all returned (backward-compatible default).
+    const all = await fetch(`${baseUrl}/api/tasks`, { headers: authHeaders(auth.token) })
+    assert.equal(all.status, 200)
+    const allPayload = await all.json() as Array<{ id: string }>
+    assert.equal(allPayload.length, 5)
+
+    // limit=2 → only the two newest.
+    const limited = await fetch(`${baseUrl}/api/tasks?limit=2`, { headers: authHeaders(auth.token) })
+    const limitedPayload = await limited.json() as Array<{ id: string }>
+    assert.equal(limitedPayload.length, 2)
+    assert.deepEqual(limitedPayload.map((t) => t.id), ['page-task-4', 'page-task-3'])
+
+    // offset=2 skips the two newest, returns the next two.
+    const offset = await fetch(`${baseUrl}/api/tasks?limit=2&offset=2`, { headers: authHeaders(auth.token) })
+    const offsetPayload = await offset.json() as Array<{ id: string }>
+    assert.equal(offsetPayload.length, 2)
+    assert.deepEqual(offsetPayload.map((t) => t.id), ['page-task-2', 'page-task-1'])
+
+    // No overlap between the first page and the second page.
+    const firstPage = new Set(limitedPayload.map((t) => t.id))
+    assert.ok(offsetPayload.every((t) => !firstPage.has(t.id)), 'no overlap between pages')
+
+    // offset beyond the set returns an empty array (not an error).
+    const over = await fetch(`${baseUrl}/api/tasks?limit=2&offset=10`, { headers: authHeaders(auth.token) })
+    const overPayload = await over.json() as Array<{ id: string }>
+    assert.equal(overPayload.length, 0)
+  })
+})
+
+test('GET /api/tasks limit+offset only returns the requesting user tasks', async () => {
+  await withServer(async (baseUrl) => {
+    const owner = await register(baseUrl, 'tasks-owner@example.com')
+    const other = await register(baseUrl, 'tasks-other@example.com')
+    for (let i = 0; i < 3; i++) {
+      state.createTask({ id: `owner-task-${i}`, userId: owner.userId, agent: { adapter: 'stub' }, prompt: `Owner ${i}`, cwd: '/tmp' })
+    }
+    state.createTask({ id: `other-task-0`, userId: other.userId, agent: { adapter: 'stub' }, prompt: 'Other', cwd: '/tmp' })
+
+    const res = await fetch(`${baseUrl}/api/tasks?limit=2`, { headers: authHeaders(owner.token) })
+    const payload = await res.json() as Array<{ id: string }>
+    assert.equal(payload.length, 2)
+    assert.ok(payload.every((t) => t.id.startsWith('owner-task-')), 'no cross-user leakage')
+  })
+})

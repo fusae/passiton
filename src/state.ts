@@ -658,20 +658,33 @@ export function getTask(id: string, userId?: string): Task | undefined {
   return row ? rowToTask(row) : undefined
 }
 
-export function listTasks(filter?: { status?: TaskStatus; userId?: string }): Task[] {
-  if (filter?.status && filter.userId) {
-    const rows = db.prepare('SELECT * FROM tasks WHERE status = ? AND user_id = ? ORDER BY created_at DESC').all(filter.status, filter.userId) as Record<string, unknown>[]
-    return rows.map(rowToTask)
-  }
+export function listTasks(filter?: { status?: TaskStatus; userId?: string; limit?: number; offset?: number }): Task[] {
+  const limit = filter?.limit
+  const offset = filter?.offset
+  const useLimit = limit != null && Number.isInteger(limit) && limit > 0
+  const useOffset = offset != null && Number.isInteger(offset) && offset >= 0
+  const conditions: string[] = []
+  const params: (string | number)[] = []
   if (filter?.status) {
-    const rows = db.prepare('SELECT * FROM tasks WHERE status = ? ORDER BY created_at DESC').all(filter.status) as Record<string, unknown>[]
-    return rows.map(rowToTask)
+    conditions.push('status = ?')
+    params.push(filter.status)
   }
   if (filter?.userId) {
-    const rows = db.prepare('SELECT * FROM tasks WHERE user_id = ? ORDER BY created_at DESC').all(filter.userId) as Record<string, unknown>[]
-    return rows.map(rowToTask)
+    conditions.push('user_id = ?')
+    params.push(filter.userId)
   }
-  const rows = db.prepare('SELECT * FROM tasks ORDER BY created_at DESC').all() as Record<string, unknown>[]
+  let sql = 'SELECT * FROM tasks'
+  if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ')
+  sql += ' ORDER BY created_at DESC'
+  if (useLimit) {
+    sql += ' LIMIT ?'
+    params.push(limit as number)
+  }
+  if (useOffset) {
+    sql += ' OFFSET ?'
+    params.push(offset as number)
+  }
+  const rows = db.prepare(sql).all(...params) as Record<string, unknown>[]
   return rows.map(rowToTask)
 }
 
@@ -1006,10 +1019,24 @@ export function getPipeline(id: string, userId?: string): Pipeline | undefined {
   return row ? rowToPipeline(row) : undefined
 }
 
-export function listPipelines(userId?: string): Pipeline[] {
-  const rows = userId
-    ? db.prepare('SELECT * FROM pipelines WHERE user_id = ? ORDER BY created_at DESC').all(userId) as Record<string, unknown>[]
-    : db.prepare('SELECT * FROM pipelines ORDER BY created_at DESC').all() as Record<string, unknown>[]
+export function listPipelines(userId?: string, options?: { limit?: number; offset?: number }): Pipeline[] {
+  const limit = options?.limit
+  const offset = options?.offset
+  const useLimit = limit != null && Number.isInteger(limit) && limit > 0
+  const useOffset = offset != null && Number.isInteger(offset) && offset >= 0
+  let sql = userId
+    ? 'SELECT * FROM pipelines WHERE user_id = ? ORDER BY created_at DESC'
+    : 'SELECT * FROM pipelines ORDER BY created_at DESC'
+  const params: (string | number)[] = userId ? [userId] : []
+  if (useLimit) {
+    sql += ' LIMIT ?'
+    params.push(limit as number)
+  }
+  if (useOffset) {
+    sql += ' OFFSET ?'
+    params.push(offset as number)
+  }
+  const rows = db.prepare(sql).all(...params) as Record<string, unknown>[]
   return rows.map(rowToPipeline)
 }
 
@@ -1129,6 +1156,86 @@ export function getPipelineBySession(sessionId: string, userId?: string): Pipeli
     LIMIT 1
   `).get(sessionId) as Record<string, unknown> | undefined
   return row ? rowToPipeline(row) : undefined
+}
+
+// Maximum number of IDs per IN-clause to avoid SQLite variable limits and
+// oversized query plans.
+const IN_CHUNK_SIZE = 500
+
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size))
+  }
+  return chunks
+}
+
+export function getPipelineStepTitles(sessionIds: string[]): Map<string, string> {
+  const result = new Map<string, string>()
+  if (sessionIds.length === 0) return result
+  for (const chunk of chunkArray(sessionIds, IN_CHUNK_SIZE)) {
+    const placeholders = chunk.map(() => '?').join(',')
+    const rows = db.prepare(
+      `SELECT session_id, title FROM pipeline_steps WHERE session_id IN (${placeholders}) AND title IS NOT NULL AND title != ''`
+    ).all(...chunk) as Record<string, unknown>[]
+    for (const row of rows) {
+      result.set(row.session_id as string, row.title as string)
+    }
+  }
+  return result
+}
+
+export function getFirstHumanMessages(sessionIds: string[]): Map<string, string> {
+  const result = new Map<string, string>()
+  if (sessionIds.length === 0) return result
+  for (const chunk of chunkArray(sessionIds, IN_CHUNK_SIZE)) {
+    const placeholders = chunk.map(() => '?').join(',')
+    const rows = db.prepare(
+      `SELECT session_id, content FROM messages WHERE from_agent = 'human' AND round = 0 AND session_id IN (${placeholders}) ORDER BY session_id, timestamp ASC`
+    ).all(...chunk) as Record<string, unknown>[]
+    for (const row of rows) {
+      const sid = row.session_id as string
+      if (!result.has(sid)) result.set(sid, row.content as string)
+    }
+  }
+  return result
+}
+
+export function getTotalTokenEstimate(sessionIds: string[]): number {
+  if (sessionIds.length === 0) return 0
+  let total = 0
+  for (const chunk of chunkArray(sessionIds, IN_CHUNK_SIZE)) {
+    const placeholders = chunk.map(() => '?').join(',')
+    const row = db.prepare(
+      `SELECT COALESCE(SUM(CASE WHEN json_valid(metadata) THEN COALESCE(json_extract(metadata, '$.tokenEstimate'), 0) ELSE 0 END), 0) AS subtotal FROM messages WHERE session_id IN (${placeholders})`
+    ).get(...chunk) as Record<string, unknown>
+    total += Number(row.subtotal) || 0
+  }
+  return total
+}
+
+export function countPipelinesByStatus(userId?: string): { total: number; active: number; paused: number; done: number; error: number } {
+  if (userId) {
+    const rows = db.prepare(
+      `SELECT status, COUNT(*) AS cnt FROM pipelines WHERE user_id = ? GROUP BY status`
+    ).all(userId) as Record<string, unknown>[]
+    return tallyPipelineStatuses(rows)
+  }
+  const rows = db.prepare(
+    `SELECT status, COUNT(*) AS cnt FROM pipelines GROUP BY status`
+  ).all() as Record<string, unknown>[]
+  return tallyPipelineStatuses(rows)
+}
+
+function tallyPipelineStatuses(rows: Record<string, unknown>[]): { total: number; active: number; paused: number; done: number; error: number } {
+  const result = { total: 0, active: 0, paused: 0, done: 0, error: 0 }
+  for (const row of rows) {
+    const status = row.status as Pipeline['status']
+    const count = Number(row.cnt) || 0
+    result.total += count
+    if (status in result) result[status] += count
+  }
+  return result
 }
 
 // ── Messages ──────────────────────────────────────────────────────────────────
@@ -1361,7 +1468,7 @@ function rowToExternalJob(row: Record<string, unknown>): ExternalJob {
 
 export function getStats(userId?: string): TuringStats {
   const sessions = listSessions(userId ? { userId } : undefined)
-  const pipelines = listPipelines(userId)
+  const pipelineCounts = countPipelinesByStatus(userId)
   const counts = {
     active: 0,
     paused: 0,
@@ -1375,7 +1482,6 @@ export function getStats(userId?: string): TuringStats {
   let completedToday = 0
   let totalRounds = 0
   let totalDuration = 0
-  let tokenEstimate = 0
   const agentUsage = new Map<string, AgentUsageStats>()
 
   for (const session of sessions) {
@@ -1383,10 +1489,6 @@ export function getStats(userId?: string): TuringStats {
     if (session.status === 'done' && session.updatedAt >= todayStartMs) completedToday += 1
     totalRounds += session.currentRound
     totalDuration += Math.max(0, session.updatedAt - session.createdAt)
-
-    for (const message of getMessages(session.id)) {
-      tokenEstimate += message.metadata?.tokenEstimate ?? 0
-    }
 
     for (const agentName of [session.from.adapter, session.to.adapter]) {
       const current = agentUsage.get(agentName) ?? {
@@ -1405,6 +1507,8 @@ export function getStats(userId?: string): TuringStats {
       agentUsage.set(agentName, current)
     }
   }
+
+  const tokenEstimate = getTotalTokenEstimate(sessions.map((s) => s.id))
 
   const agentRows = Array.from(agentUsage.values())
     .map((entry) => ({
@@ -1428,11 +1532,11 @@ export function getStats(userId?: string): TuringStats {
       tokenEstimate,
     },
     pipelines: {
-      total: pipelines.length,
-      active: pipelines.filter((item) => item.status === 'active').length,
-      paused: pipelines.filter((item) => item.status === 'paused').length,
-      done: pipelines.filter((item) => item.status === 'done').length,
-      error: pipelines.filter((item) => item.status === 'error').length,
+      total: pipelineCounts.total,
+      active: pipelineCounts.active,
+      paused: pipelineCounts.paused,
+      done: pipelineCounts.done,
+      error: pipelineCounts.error,
     },
     agents: agentRows,
   }

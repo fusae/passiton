@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=1440">
   <title>Turing Cloud — Agent Sessions Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <script>
+  (function() {
+    var saved = localStorage.getItem('turing-theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', saved);
+  })();
+  </script>
   <link rel="stylesheet" href="/style.css">
   <style>
     /* Floating particles background */
@@ -39,6 +47,14 @@
     .arch-section .section-sub { text-align: center; color: var(--text-secondary); font-size: 1rem; margin-top: 10px; }
     .features-section h2 { text-align: center; }
     .features-section .section-sub { text-align: center; color: var(--text-secondary); font-size: 1rem; margin-top: 10px; }
+
+    /* Skip rendering off-screen below-the-fold sections until needed */
+    .arch-section,
+    .features-section,
+    .cta-section {
+      content-visibility: auto;
+      contain-intrinsic-size: 800px;
+    }
   </style>
 </head>
 <body>
@@ -212,14 +228,11 @@ function toggleTheme() {
   btn.textContent = isDark ? '☀️' : '🌙';
   localStorage.setItem('turing-theme', isDark ? 'light' : 'dark');
 }
-(function() {
-  const saved = localStorage.getItem('turing-theme') || 'dark';
-  document.documentElement.setAttribute('data-theme', saved);
-  document.addEventListener('DOMContentLoaded', function() {
-    const btn = document.querySelector('.theme-toggle');
-    if (btn) btn.textContent = saved === 'light' ? '☀️' : '🌙';
-  });
-})();
+document.addEventListener('DOMContentLoaded', function() {
+  const saved = document.documentElement.getAttribute('data-theme') || 'dark';
+  const btn = document.querySelector('.theme-toggle');
+  if (btn) btn.textContent = saved === 'light' ? '☀️' : '🌙';
+});
 </script>
 </body>
 </html>
