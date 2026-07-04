@@ -475,7 +475,7 @@ export class Router extends EventEmitter {
     return session
   }
 
-  async resumeSession(id: string, extraRounds?: number): Promise<Session> {
+  async resumeSession(id: string, opts: { extraRounds?: number; agentOverride?: AgentRef; permissionMode?: Session['permissionMode'] } = {}): Promise<Session> {
     const session = state.getSession(id)
     if (!session) throw new Error(`Session ${id} not found`)
     if (session.status !== 'paused' && session.status !== 'stopped') throw new Error(`Session ${id} is not paused or stopped`)
@@ -501,10 +501,16 @@ export class Router extends EventEmitter {
       throw new Error(`Session ${id} is waiting for human input; insert a reply instead of resuming`)
     }
 
-    const effectiveExtraRounds = extraRounds ?? (session.currentRound >= session.maxRounds ? 1 : undefined)
+    const effectiveExtraRounds = opts.extraRounds ?? (session.currentRound >= session.maxRounds ? 1 : undefined)
+    if (session.errorType || session.errorMessage || session.lastAgentOutput) {
+      state.clearSessionError(id)
+    }
     const updated = state.updateSession(id, {
       status: 'active',
       ...(effectiveExtraRounds !== undefined ? { maxRounds: session.maxRounds + effectiveExtraRounds } : {}),
+      ...(opts.agentOverride && session.nextTurn === 'from' ? { from: opts.agentOverride } : {}),
+      ...(opts.agentOverride && session.nextTurn === 'to' ? { to: opts.agentOverride } : {}),
+      ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
       resumeCount: session.resumeCount + 1,
     })
 
@@ -517,7 +523,7 @@ export class Router extends EventEmitter {
     return updated
   }
 
-  async resumeErrorSession(id: string): Promise<Session> {
+  async resumeErrorSession(id: string, opts: { extraRounds?: number; agentOverride?: AgentRef; permissionMode?: Session['permissionMode'] } = {}): Promise<Session> {
     const session = state.getSession(id)
     if (!session) throw new Error(`Session ${id} not found`)
     if (session.status !== 'error') throw new Error(`Session ${id} is not error`)
@@ -535,6 +541,10 @@ export class Router extends EventEmitter {
       status: 'active',
       currentRound: failedRound,
       nextTurn: session.nextTurn,
+      ...(opts.extraRounds !== undefined ? { maxRounds: session.maxRounds + opts.extraRounds } : {}),
+      ...(opts.agentOverride && session.nextTurn === 'from' ? { from: opts.agentOverride } : {}),
+      ...(opts.agentOverride && session.nextTurn === 'to' ? { to: opts.agentOverride } : {}),
+      ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
       resumeCount: session.resumeCount + 1,
     })
 
@@ -1156,15 +1166,18 @@ export class Router extends EventEmitter {
     try {
       const session = state.getSession(sessionId)
       const message = errorMessage(err)
+      const type = errorType ?? classifyError(message)
+      const recoverable = isRecoverableError(type)
       const updated = state.updateSession(sessionId, {
-        status: 'error',
-        errorType: errorType ?? classifyError(message),
+        status: recoverable ? 'paused' : 'error',
+        errorType: type,
         errorRound: errorRound ?? errorRoundFromError(err) ?? (session ? this.inferFailedRound(session) : undefined),
         errorMessage: message,
         lastAgentOutput: lastAgentOutputFromError(err),
       })
-      this.emit('event', { type: 'session:error', payload: updated } satisfies WsEvent)
-      this.handlePipelineSessionFinished(sessionId, 'error')
+      this.emit('event', { type: recoverable ? 'session:paused' : 'session:error', payload: updated } satisfies WsEvent)
+      this.emitLog(recoverable ? 'warn' : 'error', `${recoverable ? 'Recoverable' : 'Fatal'} session error [${sessionId.slice(0, 8)}]: ${type}`, sessionId)
+      if (!recoverable) this.handlePipelineSessionFinished(sessionId, 'error')
     } catch (_) { /* best-effort */ }
   }
 
@@ -2077,11 +2090,42 @@ function extractStreamCommand(text: string): string | undefined {
 
 function classifyError(message: string): SessionErrorType {
   const normalized = message.toLowerCase()
+  if (
+    normalized.includes('quota') ||
+    normalized.includes('insufficient quota') ||
+    normalized.includes('usage limit') ||
+    normalized.includes('credit balance') ||
+    normalized.includes('billing') ||
+    normalized.includes('余额不足') ||
+    normalized.includes('无可用资源包')
+  ) {
+    return 'quota_exceeded'
+  }
+  if (
+    normalized.includes('auth') ||
+    normalized.includes('unauthorized') ||
+    normalized.includes('forbidden') ||
+    normalized.includes('invalid api key') ||
+    normalized.includes('api key') ||
+    normalized.includes('no active subscription') ||
+    normalized.includes('failed to authenticate')
+  ) {
+    return 'auth_failed'
+  }
+  if (
+    normalized.includes('rate limit') ||
+    normalized.includes('rate_limited') ||
+    normalized.includes('too many requests') ||
+    normalized.includes('status 429') ||
+    normalized.includes(' 429')
+  ) {
+    return 'rate_limited'
+  }
   if (normalized.includes('policy')) {
     return 'policy_stop'
   }
   if (normalized.includes('timed out') || normalized.includes('timeout')) {
-    return 'adapter_timeout'
+    return 'timeout'
   }
   if (
     normalized.includes('econnrefused') ||
@@ -2096,6 +2140,15 @@ function classifyError(message: string): SessionErrorType {
     return 'adapter_crash'
   }
   return 'unknown'
+}
+
+function isRecoverableError(type: SessionErrorType): boolean {
+  return type === 'quota_exceeded' ||
+    type === 'auth_failed' ||
+    type === 'rate_limited' ||
+    type === 'timeout' ||
+    type === 'adapter_timeout' ||
+    type === 'network_error'
 }
 
 function errorMessage(err: unknown): string {

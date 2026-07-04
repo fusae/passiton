@@ -2130,10 +2130,12 @@ function builtInPipelineTemplateRecords(): PipelineTemplateRecord[] {
   }))
 }
 
-function parseResumeBody(body: unknown): { extraRounds?: number } {
+function parseResumeBody(body: unknown): { extraRounds?: number; agentOverride?: AgentRef; permissionMode?: Session['permissionMode'] } {
   const data = requireRecord(body, 'body')
   return {
     extraRounds: optionalPositiveInt(data.extraRounds, 'extraRounds'),
+    agentOverride: data.agentOverride === undefined ? undefined : parseAgentRef(data.agentOverride, 'agentOverride'),
+    permissionMode: parsePermissionMode(data.permissionMode),
   }
 }
 
@@ -2735,12 +2737,13 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // POST /api/sessions/:id/resume
       const resumeMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/resume$/)
       if (resumeMatch && method === 'POST') {
-        const { extraRounds } = parseResumeBody(await parseBody(req))
+        const resumeOpts = parseResumeBody(await parseBody(req))
         const current = state.getSession(resumeMatch[1], authUser!.userId)
         if (!current) return json(res, 404, { error: 'Not found' })
+        assertPermissionModeAllowed(resumeOpts.permissionMode, current.cwd)
         const session = current.status === 'error'
-          ? await router.resumeErrorSession(resumeMatch[1])
-          : await router.resumeSession(resumeMatch[1], extraRounds)
+          ? await router.resumeErrorSession(resumeMatch[1], resumeOpts)
+          : await router.resumeSession(resumeMatch[1], resumeOpts)
         return json(res, 200, session)
       }
 

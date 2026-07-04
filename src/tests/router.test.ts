@@ -1522,3 +1522,38 @@ test('extractExistingOutputFile ignores absolute paths outside cwd', () => {
     rmSync(parent, { recursive: true, force: true })
   }
 })
+
+test('recoverable quota errors pause and can resume with an agent override', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    const calls: string[] = []
+
+    router.registerAdapter(new StubAdapter('limited', async () => {
+      calls.push('limited')
+      throw new Error('quota exceeded: usage limit reached')
+    }))
+    router.registerAdapter(new StubAdapter('opencode', async (session) => {
+      calls.push(`${session.nextTurn}:${session.to.adapter}`)
+      return '[RESULT]continued after quota[/RESULT]\n[DONE]'
+    }))
+
+    const session = router.startSession({
+      from: { adapter: 'opencode' },
+      to: { adapter: 'limited' },
+      initialPrompt: 'continue safely',
+      maxRounds: 2,
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'paused')
+    const paused = state.getSession(session.id)!
+    assert.equal(paused.errorType, 'quota_exceeded')
+    assert.equal(paused.nextTurn, 'to')
+
+    await router.resumeSession(session.id, { agentOverride: { adapter: 'opencode' }, extraRounds: 1 })
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+    assert.equal(calls.filter((call) => call === 'limited').length, 2)
+    assert.ok(calls.includes('to:opencode'))
+    assert.equal(state.getSession(session.id)?.to.adapter, 'opencode')
+  })
+})

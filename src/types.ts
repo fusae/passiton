@@ -233,6 +233,10 @@ export type SessionErrorType =
   | 'adapter_crash'
   | 'network_error'
   | 'policy_stop'
+  | 'quota_exceeded'
+  | 'auth_failed'
+  | 'rate_limited'
+  | 'timeout'
   | 'unknown'
 
 export type AgentErrorCode =

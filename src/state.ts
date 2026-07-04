@@ -853,11 +853,19 @@ export function getSessionByIdempotencyKey(userId: string, idempotencyKey: strin
   return row ? rowToSession(row) : undefined
 }
 
-export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'currentRound' | 'maxRounds' | 'approveMode' | 'permissionMode' | 'nextTurn' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount' | 'context' | 'systemPrompts' | 'gitSnapshot' | 'artifacts'>>, userId?: string): Session {
+export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'from' | 'to' | 'currentRound' | 'maxRounds' | 'approveMode' | 'permissionMode' | 'nextTurn' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount' | 'context' | 'systemPrompts' | 'gitSnapshot' | 'artifacts'>>, userId?: string): Session {
   const fields: string[] = ['updated_at = ?']
   const values: unknown[] = [Date.now()]
 
   if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status) }
+  if (updates.from !== undefined) {
+    fields.push('from_adapter = ?', 'from_label = ?')
+    values.push(updates.from.adapter, updates.from.label ?? null)
+  }
+  if (updates.to !== undefined) {
+    fields.push('to_adapter = ?', 'to_label = ?')
+    values.push(updates.to.adapter, updates.to.label ?? null)
+  }
   if (updates.nextTurn !== undefined) { fields.push('next_turn = ?'); values.push(updates.nextTurn) }
   if (updates.currentRound !== undefined) { fields.push('current_round = ?'); values.push(updates.currentRound) }
   if (updates.maxRounds !== undefined) { fields.push('max_rounds = ?'); values.push(updates.maxRounds) }
@@ -886,7 +894,7 @@ export function updateSession(id: string, updates: Partial<Pick<Session, 'status
 export function clearSessionError(id: string): Session {
   db.prepare(`
     UPDATE sessions
-    SET error_type = NULL, error_round = NULL, error_message = NULL, updated_at = ?
+    SET error_type = NULL, error_round = NULL, error_message = NULL, last_agent_output = NULL, updated_at = ?
     WHERE id = ?
   `).run(Date.now(), id)
   return getSession(id)!
