@@ -1,6 +1,8 @@
 import { spawn } from 'child_process'
 import type { AdapterSendOpts } from '../types.js'
 
+const HARD_TIMEOUT_MS = 2 * 60 * 60 * 1000
+
 interface RunCommandOptions {
   adapterName: string
   command: string
@@ -60,13 +62,22 @@ export function runCommand({
     let stderrBuffer = ''
     let lastOutput = ''
     const startedAt = Date.now()
+    let lastActivityAt = startedAt
     let settled = false
-    let timer: NodeJS.Timeout | undefined
+    let idleTimer: NodeJS.Timeout | undefined
+    let hardTimer: NodeJS.Timeout | undefined
+
+    const cleanupTimers = () => {
+      if (idleTimer) clearTimeout(idleTimer)
+      if (hardTimer) clearTimeout(hardTimer)
+    }
+
+    const currentIdleTimeout = () => timeout + Math.max(0, getTimeoutExtensionMs?.() ?? 0)
 
     const abort = () => {
       if (settled) return
       settled = true
-      if (timer) clearTimeout(timer)
+      cleanupTimers()
       proc.kill('SIGTERM')
       reject(withLastOutput(new Error(`[${adapterName}] interrupted by human message`), lastOutput))
     }
@@ -78,6 +89,8 @@ export function runCommand({
 
     const capture = (chunk: Buffer, stream: 'stdout' | 'stderr') => {
       const text = chunk.toString()
+      lastActivityAt = Date.now()
+      scheduleIdleTimeout()
       if (stream === 'stdout') {
         stdout += text
         stdoutBuffer = emitCompleteLines(stdoutBuffer + text, (line) => {
@@ -96,24 +109,53 @@ export function runCommand({
     proc.stdout!.on('data', (d: Buffer) => { capture(d, 'stdout') })
     proc.stderr!.on('data', (d: Buffer) => { capture(d, 'stderr') })
 
-    const scheduleTimeout = () => {
-      const totalTimeout = timeout + Math.max(0, getTimeoutExtensionMs?.() ?? 0)
-      const remaining = startedAt + totalTimeout - Date.now()
+    function scheduleIdleTimeout() {
+      if (settled) return
+      if (idleTimer) clearTimeout(idleTimer)
+      const idleTimeout = currentIdleTimeout()
+      const remaining = lastActivityAt + idleTimeout - Date.now()
       if (remaining > 0) {
-        timer = setTimeout(scheduleTimeout, remaining)
+        idleTimer = setTimeout(scheduleIdleTimeout, remaining)
         return
       }
-      proc.kill('SIGTERM')
-      settled = true
-      signal?.removeEventListener('abort', abort)
-      reject(withLastOutput(new Error(withHint(adapterName, command, null, '', `[${adapterName}] timed out after ${totalTimeout}ms`, totalTimeout)), lastOutput))
+      idleTimer = setTimeout(() => {
+        if (settled) return
+        const latestIdleTimeout = currentIdleTimeout()
+        proc.kill('SIGTERM')
+        settled = true
+        cleanupTimers()
+        signal?.removeEventListener('abort', abort)
+        reject(withLastOutput(new Error(withHint(adapterName, command, null, '', `[${adapterName}] idle timed out after ${latestIdleTimeout}ms`, latestIdleTimeout)), lastOutput))
+      }, 0)
     }
-    scheduleTimeout()
+
+    const scheduleHardTimeout = () => {
+      if (settled) return
+      if (hardTimer) clearTimeout(hardTimer)
+      const hardTimeout = Math.max(HARD_TIMEOUT_MS, currentIdleTimeout())
+      const remaining = startedAt + hardTimeout - Date.now()
+      if (remaining > 0) {
+        hardTimer = setTimeout(scheduleHardTimeout, remaining)
+        return
+      }
+      hardTimer = setTimeout(() => {
+        if (settled) return
+        const latestHardTimeout = Math.max(HARD_TIMEOUT_MS, currentIdleTimeout())
+        proc.kill('SIGTERM')
+        settled = true
+        cleanupTimers()
+        signal?.removeEventListener('abort', abort)
+        reject(withLastOutput(new Error(withHint(adapterName, command, null, '', `[${adapterName}] hard timed out after ${latestHardTimeout}ms`, latestHardTimeout)), lastOutput))
+      }, 0)
+    }
+
+    scheduleIdleTimeout()
+    scheduleHardTimeout()
 
     proc.on('close', (code) => {
       if (settled) return
       settled = true
-      if (timer) clearTimeout(timer)
+      cleanupTimers()
       signal?.removeEventListener('abort', abort)
       const finalStdout = flushLine(stdoutBuffer, onOutput)
       const finalStderr = flushLine(stderrBuffer, onOutput)
@@ -121,14 +163,14 @@ export function runCommand({
       if (code === 0) {
         resolve(stdout.trim())
       } else {
-        reject(withLastOutput(new Error(withHint(adapterName, command, code, stderr, `[${adapterName}] exited with code ${code}: ${stderr.trim()}`, timeout + Math.max(0, getTimeoutExtensionMs?.() ?? 0))), lastOutput))
+        reject(withLastOutput(new Error(withHint(adapterName, command, code, stderr, `[${adapterName}] exited with code ${code}: ${stderr.trim()}`, currentIdleTimeout())), lastOutput))
       }
     })
 
     proc.on('error', (err) => {
       if (settled) return
       settled = true
-      if (timer) clearTimeout(timer)
+      cleanupTimers()
       signal?.removeEventListener('abort', abort)
       reject(withLastOutput(new Error(withHint(adapterName, command, null, '', `[${adapterName}] spawn error: ${err.message}`, timeout)), lastOutput))
     })
@@ -218,7 +260,8 @@ export function withHint(adapterName: string, command: string, code: number | nu
   // 3. Timeout — point at the timeout knob.
   if (lower.includes('timed out')) {
     const seconds = Math.round(timeoutMs / 1000)
-    return `${message}\n状态：timeout\n提示：该 Agent 超过 ${seconds}s 仍未返回。可在配置里调大该 Agent 的 \`timeout\`，或检查网络/模型是否可用。`
+    const mode = lower.includes('idle timed out') ? '连续无输出' : lower.includes('hard timed out') ? '总运行时长' : '等待'
+    return `${message}\n状态：timeout\n提示：该 Agent ${mode}超过 ${seconds}s。正常有持续输出时不会触发空闲超时；如任务确实很长，可在 Settings 调大该 Agent 的 \`timeout\`。`
   }
   return message
 }
