@@ -593,12 +593,52 @@ function sessionForClient(session: Session): Session & { displayTitle: string } 
   }
 }
 
-function sessionsForClient(sessions: Session[]): (Session & { displayTitle: string })[] {
+function sessionsForClient(sessions: Session[]): Array<Pick<Session,
+  | 'id'
+  | 'userId'
+  | 'from'
+  | 'to'
+  | 'status'
+  | 'mode'
+  | 'nextTurn'
+  | 'maxRounds'
+  | 'currentRound'
+  | 'approveMode'
+  | 'permissionMode'
+  | 'cwd'
+  | 'templateId'
+  | 'errorType'
+  | 'errorRound'
+  | 'errorMessage'
+  | 'lastAgentOutput'
+  | 'resumeCount'
+  | 'createdAt'
+  | 'updatedAt'
+> & { displayTitle: string }> {
   const ids = sessions.map((s) => s.id)
   const stepTitles = state.getPipelineStepTitles(ids)
   const firstMessages = state.getFirstHumanMessages(ids)
   return sessions.map((session) => ({
-    ...session,
+    id: session.id,
+    userId: session.userId,
+    from: session.from,
+    to: session.to,
+    status: session.status,
+    mode: session.mode,
+    nextTurn: session.nextTurn,
+    maxRounds: session.maxRounds,
+    currentRound: session.currentRound,
+    approveMode: session.approveMode,
+    permissionMode: session.permissionMode,
+    cwd: session.cwd,
+    templateId: session.templateId,
+    errorType: session.errorType,
+    errorRound: session.errorRound,
+    errorMessage: truncateText(session.errorMessage, 500),
+    lastAgentOutput: truncateText(session.lastAgentOutput, 500),
+    resumeCount: session.resumeCount,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
     displayTitle: sessionDisplayTitleBatch(session, stepTitles, firstMessages),
   }))
 }
