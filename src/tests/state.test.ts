@@ -129,6 +129,51 @@ test('task CRUD persists prompt, context, and result', () => {
   }
 })
 
+test('task persists permission mode and idempotency key', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
+
+  try {
+    state.initDb(join(dir, 'turing.db'))
+    const task = state.createTask({
+      id: 'trusted-task',
+      userId: 'local',
+      idempotencyKey: 'task-key-1',
+      agent: { adapter: 'codex' },
+      prompt: 'write files',
+      permissionMode: 'trusted',
+      cwd: '/tmp/project',
+    })
+
+    assert.equal(task.permissionMode, 'trusted')
+    assert.equal(task.idempotencyKey, 'task-key-1')
+    assert.equal(state.getTaskByIdempotencyKey('local', 'task-key-1')?.id, 'trusted-task')
+  } finally {
+    state.closeDb()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('session persists idempotency key', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
+
+  try {
+    state.initDb(join(dir, 'turing.db'))
+    const session = state.createSession({
+      id: 'idem-session',
+      userId: 'local',
+      idempotencyKey: 'session-key-1',
+      from: { adapter: 'opencode' },
+      to: { adapter: 'codex' },
+    })
+
+    assert.equal(session.idempotencyKey, 'session-key-1')
+    assert.equal(state.getSessionByIdempotencyKey('local', 'session-key-1')?.id, 'idem-session')
+  } finally {
+    state.closeDb()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('pipeline template CRUD persists reusable workflow steps', () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
 

@@ -1003,6 +1003,7 @@ function parseSessionBody(body: unknown) {
   const templateId = optionalString(data.template_id ?? data.templateId, 'template_id')
 
   return {
+    idempotencyKey: optionalString(data.idempotencyKey, 'idempotencyKey'),
     from: parseAgentRef(data.from, 'from'),
     to: parseAgentRef(data.to, 'to'),
     initialPrompt: requireNonEmptyString(data.initialPrompt, 'initialPrompt'),
@@ -1036,10 +1037,12 @@ function parseManualArtifactsBody(body: unknown): { paths: string[]; summary?: s
 function parseTaskBody(body: unknown) {
   const data = requireRecord(body, 'body')
   return {
+    idempotencyKey: optionalString(data.idempotencyKey, 'idempotencyKey'),
     agent: parseAgentRef(data.agent, 'agent'),
     prompt: requireNonEmptyString(data.prompt, 'prompt'),
     context: parseSessionContext(data.context, 'context'),
     systemPrompt: optionalString(data.systemPrompt, 'systemPrompt'),
+    permissionMode: parsePermissionMode(data.permissionMode),
     cwd: optionalString(data.cwd, 'cwd'),
   }
 }
@@ -1325,6 +1328,8 @@ function mcpTools(): McpTool[] {
         agent: agentSchema('Agent adapter name or agent reference.'),
         prompt: { type: 'string' },
         cwd: { type: 'string', description: 'Optional working directory. Required for filesystem work.' },
+        permissionMode: { type: 'string', enum: ['safe', 'trusted'], description: 'Use trusted for filesystem writes with local CLI agents.' },
+        idempotencyKey: { type: 'string', description: 'Optional stable key to avoid duplicate task creation on retries.' },
         systemPrompt: { type: 'string' },
         context: contextSchema(),
       }, ['agent', 'prompt']),
@@ -1349,6 +1354,7 @@ function mcpTools(): McpTool[] {
         maxRounds: { type: 'integer' },
         approveMode: { type: 'boolean' },
         permissionMode: { type: 'string', enum: ['safe', 'trusted'] },
+        idempotencyKey: { type: 'string', description: 'Optional stable key to avoid duplicate session creation on retries.' },
         cwd: { type: 'string' },
         systemPromptFrom: { type: 'string' },
         systemPromptTo: { type: 'string' },
@@ -1487,19 +1493,96 @@ function mcpAgentStatus(agent: {
   return 'unavailable'
 }
 
+function findReusableMcpTask(userId: string, params: {
+  idempotencyKey?: string
+  agent: AgentRef
+  prompt: string
+  context?: SessionContext
+  systemPrompt?: string
+  permissionMode?: Task['permissionMode']
+  cwd?: string
+}): Task | undefined {
+  if (params.idempotencyKey) {
+    return state.getTaskByIdempotencyKey(userId, params.idempotencyKey)
+  }
+  return state.listTasks({ userId, limit: 50 }).find((task) => (
+    (task.status === 'queued' || task.status === 'running') &&
+    sameAgentRef(task.agent, params.agent) &&
+    task.prompt === params.prompt &&
+    task.cwd === params.cwd &&
+    task.systemPrompt === params.systemPrompt &&
+    task.permissionMode === (params.permissionMode ?? 'safe') &&
+    stableJson(task.context) === stableJson(params.context)
+  ))
+}
+
+function findReusableMcpSession(userId: string, params: {
+  idempotencyKey?: string
+  from: AgentRef
+  to: AgentRef
+  initialPrompt: string
+  mode?: SessionMode
+  context?: SessionContext
+  systemPrompts?: { from: string; to: string }
+  maxRounds?: number
+  approveMode?: boolean
+  permissionMode?: Session['permissionMode']
+  cwd?: string
+}): Session | undefined {
+  if (params.idempotencyKey) {
+    return state.getSessionByIdempotencyKey(userId, params.idempotencyKey)
+  }
+  const candidates = state.listSessions({ userId, limit: 50 })
+    .filter((session) => session.status === 'active' || session.status === 'paused')
+  const prompts = state.getFirstHumanMessages(candidates.map((session) => session.id))
+  return candidates.find((session) => (
+    sameAgentRef(session.from, params.from) &&
+    sameAgentRef(session.to, params.to) &&
+    prompts.get(session.id) === params.initialPrompt &&
+    session.cwd === params.cwd &&
+    session.mode === (params.mode ?? 'freeform') &&
+    session.maxRounds === (params.maxRounds ?? loadConfig().defaults.maxRounds) &&
+    session.approveMode === (params.approveMode ?? false) &&
+    session.permissionMode === (params.permissionMode ?? 'safe') &&
+    stableJson(session.context) === stableJson(params.context) &&
+    stableJson(session.systemPrompts) === stableJson(params.systemPrompts)
+  ))
+}
+
+function sameAgentRef(a: AgentRef, b: AgentRef): boolean {
+  return a.adapter === b.adapter && (a.label ?? '') === (b.label ?? '')
+}
+
+function stableJson(value: unknown): string {
+  if (value === undefined) return ''
+  return JSON.stringify(value)
+}
+
 async function mcpCreateTask(args: unknown, ctx: McpContext): Promise<unknown> {
   const params = parseTaskBody(normalizeTaskArgs(args))
   assertAllowedWorkspace(params.cwd)
+  assertPermissionModeAllowed(params.permissionMode, params.cwd)
   assertTaskFilesystemCapability(ctx.authUser.userId, params.agent, params.cwd)
   await assertMcpAgentUsable(ctx, params.agent, 'agent')
+  const context = resolveSessionContext(params.context, params.cwd)
+  const existing = findReusableMcpTask(ctx.authUser.userId, { ...params, context })
+  if (existing) {
+    return {
+      task: summarizeTask(existing),
+      url: `/tasks/${existing.id}`,
+      reused: true,
+      message: `Task ${existing.id} reused. Use turing_get_task_result with this id to check progress.`,
+    }
+  }
   const task = ctx.router.startTask({
     userId: ctx.authUser.userId,
     ...params,
-    context: resolveSessionContext(params.context, params.cwd),
+    context,
   })
   return {
     task: summarizeTask(task),
     url: `/tasks/${task.id}`,
+    reused: false,
     message: `Task ${task.id} created. Use turing_get_task_result with this id to check progress.`,
   }
 }
@@ -1520,6 +1603,7 @@ function mcpGetTaskResult(args: unknown, ctx: McpContext): unknown {
       id: task.id,
       status: task.status,
       agent: agentLabel(task.agent),
+      permissionMode: task.permissionMode,
       cwd: task.cwd,
       summary: compactTaskSummary(task),
       result: truncateText(task.result, 16_000),
@@ -1539,14 +1623,20 @@ async function mcpCreateSession(args: unknown, ctx: McpContext): Promise<unknown
   assertSessionFilesystemCapability(ctx.authUser.userId, params.to, params.cwd)
   await assertMcpAgentUsable(ctx, params.from, 'from')
   await assertMcpAgentUsable(ctx, params.to, 'to')
-  const session = ctx.router.startSession({
-    userId: ctx.authUser.userId,
+  const context = resolveSessionContext(params.context, params.cwd)
+  const normalized = {
     ...params,
-    context: resolveSessionContext(params.context, params.cwd),
+    context,
     mode: params.mode ?? defaults.mode,
     maxRounds: params.maxRounds ?? defaults.maxRounds,
+  }
+  const existing = findReusableMcpSession(ctx.authUser.userId, normalized)
+  if (existing) return { session: summarizeSession(existing), url: `/sessions/${existing.id}`, reused: true }
+  const session = ctx.router.startSession({
+    userId: ctx.authUser.userId,
+    ...normalized,
   })
-  return { session: summarizeSession(session), url: `/sessions/${session.id}` }
+  return { session: summarizeSession(session), url: `/sessions/${session.id}`, reused: false }
 }
 
 async function assertMcpAgentUsable(ctx: McpContext, agent: AgentRef, field: string): Promise<void> {
@@ -1658,6 +1748,7 @@ function summarizeTask(task: Task, includeOutput = false): Record<string, unknow
     id: task.id,
     status: task.status,
     agent: agentLabel(task.agent),
+    permissionMode: task.permissionMode,
     cwd: task.cwd,
     result: truncateText(task.result, 4000),
     errorMessage: truncateText(task.errorMessage, 1000),
@@ -2560,6 +2651,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       if (pathname === '/api/tasks' && method === 'POST') {
         const params = parseTaskBody(await parseBody(req))
         assertAllowedWorkspace(params.cwd)
+        assertPermissionModeAllowed(params.permissionMode, params.cwd)
         assertTaskFilesystemCapability(authUser!.userId, params.agent, params.cwd)
         const task = router.startTask({
           userId: authUser!.userId,

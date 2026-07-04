@@ -547,71 +547,150 @@ test('POST /api/tasks runs a lead-agent task and exposes its result', async () =
 test('POST /mcp exposes tools and can create a task', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'mcp@example.com')
+    const projectDir = mkdtempSync(join(tmpdir(), 'turing-mcp-task-'))
 
-    const initialize = await fetch(`${baseUrl}/mcp`, {
-      method: 'POST',
-      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
-    })
-    assert.equal(initialize.status, 200)
-    assert.equal((await initialize.json() as { result: { serverInfo: { name: string } } }).result.serverInfo.name, 'turing')
+    try {
+      const initialize = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+      })
+      assert.equal(initialize.status, 200)
+      assert.equal((await initialize.json() as { result: { serverInfo: { name: string } } }).result.serverInfo.name, 'turing')
 
-    const tools = await fetch(`${baseUrl}/mcp`, {
-      method: 'POST',
-      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
-    })
-    assert.equal(tools.status, 200)
-    const toolsPayload = await tools.json() as { result: { resultType: string; tools: Array<{ name: string }> } }
-    assert.equal(toolsPayload.result.resultType, 'complete')
-    assert.ok(toolsPayload.result.tools.some((tool) => tool.name === 'turing_create_task'))
+      const tools = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+      })
+      assert.equal(tools.status, 200)
+      const toolsPayload = await tools.json() as { result: { resultType: string; tools: Array<{ name: string }> } }
+      assert.equal(toolsPayload.result.resultType, 'complete')
+      assert.ok(toolsPayload.result.tools.some((tool) => tool.name === 'turing_create_task'))
 
-    const created = await fetch(`${baseUrl}/mcp`, {
-      method: 'POST',
-      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 3,
-        method: 'tools/call',
-        params: {
-          name: 'turing_create_task',
-          arguments: {
-            agent: 'opencode',
-            prompt: 'write mcp article',
+      const created = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 3,
+          method: 'tools/call',
+          params: {
+            name: 'turing_create_task',
+            arguments: {
+              agent: 'opencode',
+              prompt: 'write mcp article',
+              cwd: projectDir,
+              permissionMode: 'trusted',
+              idempotencyKey: 'mcp-task-key',
+            },
           },
-        },
-      }),
-    })
-    assert.equal(created.status, 200)
-    const createPayload = await created.json() as { result: { resultType: string; content: Array<{ type: string; text: string }>; isError: boolean } }
-    assert.equal(createPayload.result.resultType, 'complete')
-    assert.equal(createPayload.result.isError, false)
-    const createdData = JSON.parse(createPayload.result.content[0]!.text) as { task: { id: string; status: string } }
-    const taskId = createdData.task.id
-    assert.equal(createdData.task.status, 'queued')
+        }),
+      })
+      assert.equal(created.status, 200)
+      const createPayload = await created.json() as { result: { resultType: string; content: Array<{ type: string; text: string }>; isError: boolean } }
+      assert.equal(createPayload.result.resultType, 'complete')
+      assert.equal(createPayload.result.isError, false)
+      const createdData = JSON.parse(createPayload.result.content[0]!.text) as { task: { id: string; status: string; permissionMode: string }; reused: boolean }
+      const taskId = createdData.task.id
+      assert.equal(createdData.task.status, 'queued')
+      assert.equal(createdData.task.permissionMode, 'trusted')
+      assert.equal(createdData.reused, false)
 
-    await waitFor(async () => {
-      const response = await fetch(`${baseUrl}/mcp`, {
+      const duplicate = await fetch(`${baseUrl}/mcp`, {
         method: 'POST',
         headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
         body: JSON.stringify({
           jsonrpc: '2.0',
           id: 4,
           method: 'tools/call',
-          params: { name: 'turing_get_task_result', arguments: { id: taskId } },
+          params: {
+            name: 'turing_create_task',
+            arguments: {
+              agent: 'opencode',
+              prompt: 'write mcp article',
+              cwd: projectDir,
+              permissionMode: 'trusted',
+              idempotencyKey: 'mcp-task-key',
+            },
+          },
         }),
       })
-      const payload = await response.json() as { result: { content: Array<{ text: string }> } }
-      const data = JSON.parse(payload.result.content[0]!.text) as { task: { status: string; result?: string } }
-      return data.task.status === 'done'
-    })
+      const duplicatePayload = await duplicate.json() as { result: { content: Array<{ text: string }> } }
+      const duplicateData = JSON.parse(duplicatePayload.result.content[0]!.text) as { task: { id: string }; reused: boolean }
+      assert.equal(duplicateData.task.id, taskId)
+      assert.equal(duplicateData.reused, true)
+
+      await waitFor(async () => {
+        const response = await fetch(`${baseUrl}/mcp`, {
+          method: 'POST',
+          headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 5,
+            method: 'tools/call',
+            params: { name: 'turing_get_task_result', arguments: { id: taskId } },
+          }),
+        })
+        const payload = await response.json() as { result: { content: Array<{ text: string }> } }
+        const data = JSON.parse(payload.result.content[0]!.text) as { task: { status: string; result?: string } }
+        return data.task.status === 'done'
+      })
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
+    }
   }, {
     allowRegistration: true,
     configureRouter: (router) => {
-      router.registerAdapter(new StubAdapter('opencode', async (_session, message) => {
+      router.registerAdapter(new StubAdapter('opencode', async (session, message) => {
         assert.equal(message, 'write mcp article')
+        assert.equal(session.permissionMode, 'trusted')
         return '[RESULT]mcp ready[/RESULT]'
       }))
+    },
+  })
+})
+
+test('POST /mcp reuses duplicate session idempotency keys', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'mcp-session-idempotency@example.com')
+
+    const create = async (id: number) => {
+      const response = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id,
+          method: 'tools/call',
+          params: {
+            name: 'turing_create_session',
+            arguments: {
+              from: 'opencode',
+              to: 'codex',
+              initialPrompt: 'build once',
+              mode: 'review',
+              maxRounds: 2,
+              idempotencyKey: 'mcp-session-key',
+            },
+          },
+        }),
+      })
+      assert.equal(response.status, 200)
+      const payload = await response.json() as { result: { content: Array<{ text: string }> } }
+      return JSON.parse(payload.result.content[0]!.text) as { session: { id: string }; reused: boolean }
+    }
+
+    const first = await create(1)
+    const second = await create(2)
+    assert.equal(second.session.id, first.session.id)
+    assert.equal(first.reused, false)
+    assert.equal(second.reused, true)
+  }, {
+    allowRegistration: true,
+    configureRouter: (router) => {
+      router.registerAdapter(new StubAdapter('opencode', async () => '[DONE]'))
+      router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
     },
   })
 })

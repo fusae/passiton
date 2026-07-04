@@ -128,19 +128,27 @@ export class Router extends EventEmitter {
 
   startTask(params: {
     userId?: string
+    idempotencyKey?: string
     agent: AgentRef
     prompt: string
     context?: SessionContext
     systemPrompt?: string
+    permissionMode?: Task['permissionMode']
     cwd?: string
   }): Task {
+    if (params.idempotencyKey && params.userId) {
+      const existing = state.getTaskByIdempotencyKey(params.userId, params.idempotencyKey)
+      if (existing) return existing
+    }
     const task = state.createTask({
       id: uuidv4(),
       userId: params.userId,
+      idempotencyKey: params.idempotencyKey,
       agent: params.agent,
       prompt: params.prompt,
       context: params.context,
       systemPrompt: params.systemPrompt,
+      permissionMode: params.permissionMode ?? 'safe',
       cwd: params.cwd,
     })
 
@@ -344,6 +352,7 @@ export class Router extends EventEmitter {
 
   startSession(params: {
     userId?: string
+    idempotencyKey?: string
     from: AgentRef
     to: AgentRef
     initialPrompt: string
@@ -356,6 +365,10 @@ export class Router extends EventEmitter {
     permissionMode?: Session['permissionMode']
     cwd?: string
   }): Session {
+    if (params.idempotencyKey && params.userId) {
+      const existing = state.getSessionByIdempotencyKey(params.userId, params.idempotencyKey)
+      if (existing) return existing
+    }
     const session = this.createSessionRecord(params, 'active')
 
     this.emitLog('info', `Session started: ${agentLabel(params.from)} → ${agentLabel(params.to)} [${session.id.slice(0, 8)}] mode=${session.mode} permission=${session.permissionMode}${session.cwd ? ` cwd=${session.cwd}` : ''}`, session.id)
@@ -1157,6 +1170,7 @@ export class Router extends EventEmitter {
 
   private createSessionRecord(params: {
     userId?: string
+    idempotencyKey?: string
     from: AgentRef
     to: AgentRef
     initialPrompt: string
@@ -1191,6 +1205,7 @@ export class Router extends EventEmitter {
     const created = state.createSession({
       id: uuidv4(),
       userId: params.userId,
+      idempotencyKey: params.idempotencyKey,
       from: params.from,
       to: params.to,
       mode,
@@ -1936,7 +1951,7 @@ function buildTaskSession(task: Task): Session {
     maxRounds: 1,
     currentRound: 0,
     approveMode: false,
-    permissionMode: 'safe',
+    permissionMode: task.permissionMode,
     cwd: task.cwd,
     context: task.context,
     systemPrompts: task.systemPrompt ? { from: task.systemPrompt, to: task.systemPrompt } : undefined,

@@ -150,6 +150,7 @@ function createTables(): void {
     CREATE TABLE IF NOT EXISTS sessions (
       id          TEXT PRIMARY KEY,
       user_id     TEXT NOT NULL DEFAULT 'local',
+      idempotency_key TEXT,
       from_adapter TEXT NOT NULL,
       from_label   TEXT,
       to_adapter   TEXT NOT NULL,
@@ -179,10 +180,12 @@ function createTables(): void {
     CREATE TABLE IF NOT EXISTS tasks (
       id                TEXT PRIMARY KEY,
       user_id           TEXT NOT NULL DEFAULT 'local',
+      idempotency_key   TEXT,
       agent_adapter     TEXT NOT NULL,
       agent_label       TEXT,
       prompt            TEXT NOT NULL,
       status            TEXT NOT NULL DEFAULT 'queued',
+      permission_mode   TEXT NOT NULL DEFAULT 'safe',
       cwd               TEXT,
       context           TEXT,
       system_prompt     TEXT,
@@ -334,6 +337,21 @@ function createTables(): void {
   try {
     db.exec(`ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'`)
   } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN idempotency_key TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN idempotency_key TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'safe'`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_user_idempotency ON sessions(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL`)
+  } catch { /* index already exists */ }
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_user_idempotency ON tasks(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL`)
+  } catch { /* index already exists */ }
   try {
     db.exec(`ALTER TABLE pipelines ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local'`)
   } catch { /* column already exists */ }
@@ -601,12 +619,14 @@ function rowToTask(row: Record<string, unknown>): Task {
   return {
     id: row.id as string,
     userId: (row.user_id as string | null) ?? undefined,
+    idempotencyKey: (row.idempotency_key as string | null) ?? undefined,
     agent: {
       adapter: row.agent_adapter as string,
       label: (row.agent_label as string | null) ?? undefined,
     },
     prompt: row.prompt as string,
     status: row.status as TaskStatus,
+    permissionMode: (row.permission_mode as Task['permissionMode'] | undefined) ?? 'safe',
     cwd: (row.cwd as string | null) ?? undefined,
     context,
     systemPrompt: (row.system_prompt as string | null) ?? undefined,
@@ -624,8 +644,10 @@ function rowToTask(row: Record<string, unknown>): Task {
 export function createTask(params: {
   id: string
   userId?: string
+  idempotencyKey?: string
   agent: AgentRef
   prompt: string
+  permissionMode?: Task['permissionMode']
   cwd?: string
   context?: SessionContext
   systemPrompt?: string
@@ -633,15 +655,17 @@ export function createTask(params: {
   const now = Date.now()
   db.prepare(`
     INSERT INTO tasks (
-      id, user_id, agent_adapter, agent_label, prompt, status, cwd, context, system_prompt, created_at, updated_at
+      id, user_id, idempotency_key, agent_adapter, agent_label, prompt, status, permission_mode, cwd, context, system_prompt, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)
   `).run(
     params.id,
     params.userId ?? DEFAULT_USER_ID,
+    params.idempotencyKey ?? null,
     params.agent.adapter,
     params.agent.label ?? null,
     params.prompt,
+    params.permissionMode ?? 'safe',
     params.cwd ?? null,
     params.context ? JSON.stringify(params.context) : null,
     params.systemPrompt ?? null,
@@ -655,6 +679,11 @@ export function getTask(id: string, userId?: string): Task | undefined {
   const row = userId
     ? db.prepare('SELECT * FROM tasks WHERE id = ? AND user_id = ?').get(id, userId) as Record<string, unknown> | undefined
     : db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined
+  return row ? rowToTask(row) : undefined
+}
+
+export function getTaskByIdempotencyKey(userId: string, idempotencyKey: string): Task | undefined {
+  const row = db.prepare('SELECT * FROM tasks WHERE user_id = ? AND idempotency_key = ?').get(userId, idempotencyKey) as Record<string, unknown> | undefined
   return row ? rowToTask(row) : undefined
 }
 
@@ -736,6 +765,7 @@ function rowToSession(row: Record<string, unknown>): Session {
   return {
     id: row.id as string,
     userId: row.user_id as string | undefined,
+    idempotencyKey: row.idempotency_key as string | undefined,
     from: { adapter: row.from_adapter as string, label: row.from_label as string | undefined },
     to: { adapter: row.to_adapter as string, label: row.to_label as string | undefined },
     status: row.status as SessionStatus,
@@ -764,6 +794,7 @@ function rowToSession(row: Record<string, unknown>): Session {
 export function createSession(params: {
   id: string
   userId?: string
+  idempotencyKey?: string
   from: AgentRef
   to: AgentRef
   mode?: SessionMode
@@ -780,14 +811,15 @@ export function createSession(params: {
 }): Session {
   const now = Date.now()
   const stmt = db.prepare(`
-    INSERT INTO sessions (id, user_id, from_adapter, from_label, to_adapter, to_label,
+    INSERT INTO sessions (id, user_id, idempotency_key, from_adapter, from_label, to_adapter, to_label,
       status, mode, next_turn, max_rounds, current_round, approve_mode, permission_mode, cwd, context, system_prompts, template_id,
       git_snapshot, artifacts, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   stmt.run(
     params.id,
     params.userId ?? DEFAULT_USER_ID,
+    params.idempotencyKey ?? null,
     params.from.adapter,
     params.from.label ?? null,
     params.to.adapter,
@@ -813,6 +845,11 @@ export function getSession(id: string, userId?: string): Session | undefined {
   const row = userId
     ? db.prepare('SELECT * FROM sessions WHERE id = ? AND user_id = ?').get(id, userId) as Record<string, unknown> | undefined
     : db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as Record<string, unknown> | undefined
+  return row ? rowToSession(row) : undefined
+}
+
+export function getSessionByIdempotencyKey(userId: string, idempotencyKey: string): Session | undefined {
+  const row = db.prepare('SELECT * FROM sessions WHERE user_id = ? AND idempotency_key = ?').get(userId, idempotencyKey) as Record<string, unknown> | undefined
   return row ? rowToSession(row) : undefined
 }
 

@@ -83,6 +83,7 @@ export interface SessionContext {
 export interface Session {
   id: string
   userId?: string
+  idempotencyKey?: string
   from: AgentRef
   to: AgentRef
   status: SessionStatus
@@ -118,9 +119,11 @@ export interface SessionWithMessages extends Session {
 export interface Task {
   id: string
   userId?: string
+  idempotencyKey?: string
   agent: AgentRef
   prompt: string
   status: TaskStatus
+  permissionMode: PermissionMode
   cwd?: string
   context?: SessionContext
   systemPrompt?: string
