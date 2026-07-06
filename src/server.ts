@@ -1509,7 +1509,7 @@ function findReusableMcpTask(userId: string, params: {
     (task.status === 'queued' || task.status === 'running') &&
     sameAgentRef(task.agent, params.agent) &&
     task.prompt === params.prompt &&
-    task.cwd === params.cwd &&
+    sameOptionalString(task.cwd, params.cwd) &&
     task.systemPrompt === params.systemPrompt &&
     task.permissionMode === (params.permissionMode ?? 'safe') &&
     stableJson(task.context) === stableJson(params.context)
@@ -1539,18 +1539,22 @@ function findReusableMcpSession(userId: string, params: {
     sameAgentRef(session.from, params.from) &&
     sameAgentRef(session.to, params.to) &&
     prompts.get(session.id) === params.initialPrompt &&
-    session.cwd === params.cwd &&
+    sameOptionalString(session.cwd, params.cwd) &&
     session.mode === (params.mode ?? 'freeform') &&
     session.maxRounds === (params.maxRounds ?? loadConfig().defaults.maxRounds) &&
     session.approveMode === (params.approveMode ?? false) &&
     session.permissionMode === (params.permissionMode ?? 'safe') &&
     stableJson(session.context) === stableJson(params.context) &&
-    stableJson(session.systemPrompts) === stableJson(params.systemPrompts)
+    (params.systemPrompts === undefined || stableJson(session.systemPrompts) === stableJson(params.systemPrompts))
   ))
 }
 
 function sameAgentRef(a: AgentRef, b: AgentRef): boolean {
   return a.adapter === b.adapter && (a.label ?? '') === (b.label ?? '')
+}
+
+function sameOptionalString(a: string | null | undefined, b: string | null | undefined): boolean {
+  return (a ?? undefined) === (b ?? undefined)
 }
 
 function stableJson(value: unknown): string {

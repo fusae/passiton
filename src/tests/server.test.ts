@@ -695,6 +695,56 @@ test('POST /mcp reuses duplicate session idempotency keys', async () => {
   })
 })
 
+test('POST /mcp reuses duplicate sessions without explicit idempotency keys', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'mcp-session-dedupe@example.com')
+
+    const create = async (id: number) => {
+      const response = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id,
+          method: 'tools/call',
+          params: {
+            name: 'turing_create_session',
+            arguments: {
+              from: 'opencode',
+              to: 'codex',
+              initialPrompt: 'build once without key',
+              mode: 'review',
+              maxRounds: 2,
+            },
+          },
+        }),
+      })
+      assert.equal(response.status, 200)
+      const payload = await response.json() as { result: { content: Array<{ text: string }> } }
+      return JSON.parse(payload.result.content[0]!.text) as { session: { id: string }; reused: boolean }
+    }
+
+    const first = await create(1)
+    await waitFor(async () => {
+      const response = await fetch(`${baseUrl}/api/sessions/${first.session.id}`, { headers: authHeaders(auth.token) })
+      const session = await response.json() as { status: string }
+      return session.status === 'paused'
+    })
+    const second = await create(2)
+    assert.equal(second.session.id, first.session.id)
+    assert.equal(first.reused, false)
+    assert.equal(second.reused, true)
+  }, {
+    allowRegistration: true,
+    configureRouter: (router) => {
+      router.registerAdapter(new StubAdapter('opencode', async () => '[DONE]'))
+      router.registerAdapter(new StubAdapter('codex', async () => {
+        throw new Error('quota exceeded')
+      }))
+    },
+  })
+})
+
 test('MCP accepts token query authentication for custom app setup', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'mcp-query-token@example.com')
