@@ -4,6 +4,7 @@
 const API = ''  // same origin
 const AUTH_TOKEN_KEY = 'turing-jwt'
 const THEME_KEY = 'turing-theme'
+const OPS_POSITION_KEY = 'turing-ops-position'
 
 const PROVIDER_PRESETS = {
   anthropic: {
@@ -119,6 +120,16 @@ const state = {
   currentTask: null,
   currentPipelineId: null,
   currentPipeline: null,
+  opsOpen: false,
+  opsBusy: false,
+  opsMessages: [],
+  opsLastReport: null,
+  opsPosition: loadOpsPosition(),
+  opsDragging: false,
+  opsDragged: false,
+  opsWalkTimer: null,
+  opsWalkFrame: null,
+  opsWalkTarget: null,
   expandedWorkflowStep: null,
   liveReviewStep: null,
   liveReviewDrafts: new Map(),
@@ -495,6 +506,63 @@ function renderSidebar(active) {
         Turing Cloud v0.1.0
       </div>
     </aside>
+    ${renderOpsWidget()}
+  `
+}
+
+function renderOpsWidget() {
+  const open = state.opsOpen
+  const pos = clampOpsPosition(state.opsPosition)
+  const alignX = pos.x < window.innerWidth / 2 ? 'align-left' : 'align-right'
+  const alignY = pos.y < 360 ? 'drop-down' : 'drop-up'
+  const messages = state.opsMessages.length
+    ? state.opsMessages
+    : [{ from: 'ops', content: '我可以检查平台异常、解释任务卡住原因，并给出修复建议。' }]
+  return `
+    <div class="ops-widget ${open ? 'open' : ''} ${alignX} ${alignY}" id="ops-widget" style="--ops-x: ${pos.x}px; --ops-y: ${pos.y}px;">
+      <button class="ops-fab" onpointerdown="window.beginOpsDrag(event)" title="Turing Ops">
+        <span class="ops-mascot" aria-hidden="true">
+          <span class="ops-mascot-head">
+            <span class="ops-mascot-eye left"></span>
+            <span class="ops-mascot-eye right"></span>
+          </span>
+          <span class="ops-mascot-body">
+            <span class="ops-mascot-arm left"></span>
+            <span class="ops-mascot-arm right"></span>
+          </span>
+          <span class="ops-mascot-leg left"></span>
+          <span class="ops-mascot-leg right"></span>
+        </span>
+        <span class="ops-fab-label">Ops</span>
+      </button>
+      <section class="ops-panel ${open ? 'open' : ''}" id="ops-panel">
+        <div class="ops-header">
+          <div>
+            <div class="ops-kicker">TURING OPS</div>
+            <h3>平台管家</h3>
+          </div>
+          <button class="icon-btn" onclick="window.toggleOps()">×</button>
+        </div>
+        <div class="ops-quick-actions">
+          <button onclick="window.askOps('现在平台有什么异常？')">全局检查</button>
+          <button onclick="window.askOpsForCurrent()">检查当前页</button>
+        </div>
+        <div class="ops-thread" id="ops-thread">
+          ${messages.map(message => `
+          <div class="ops-message ${message.from === 'user' ? 'user' : 'ops'}">
+            <div class="ops-message-role">${message.from === 'user' ? '你' : 'Ops'}</div>
+            <div class="ops-message-body">${renderMarkdownCached(message.content || '')}</div>
+            ${renderOpsMessageActions(message)}
+          </div>
+        `).join('')}
+          ${state.opsBusy ? '<div class="ops-message ops"><div class="ops-message-role">Ops</div><div class="ops-message-body">诊断中...</div></div>' : ''}
+        </div>
+        <form class="ops-composer" onsubmit="window.submitOpsQuestion(event)">
+          <textarea id="ops-input" rows="2" placeholder="问：为什么这个任务卡住？"></textarea>
+          <button class="btn btn-primary btn-sm" type="submit" ${state.opsBusy ? 'disabled' : ''}>发送</button>
+        </form>
+      </section>
+    </div>
   `
 }
 
@@ -1665,9 +1733,15 @@ async function renderTask(id) {
 
 function renderTaskActions(task) {
   if (task.status === 'queued' || task.status === 'running') {
-    return '<button class="btn btn-danger btn-sm" onclick="window.stopCurrentTask()">■ Stop</button>'
+    return `
+      <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">Ask Ops</button>
+      <button class="btn btn-danger btn-sm" onclick="window.stopCurrentTask()">■ Stop</button>
+    `
   }
-  return `<button class="btn btn-primary btn-sm" onclick="window.showTaskFeedbackModal()">✎ Feedback & Rerun</button>`
+  return `
+    <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">Ask Ops</button>
+    <button class="btn btn-primary btn-sm" onclick="window.showTaskFeedbackModal()">✎ Feedback & Rerun</button>
+  `
 }
 
 function renderTaskHeader(task) {
@@ -1889,6 +1963,7 @@ async function renderWorkflow(id) {
 
 function renderWorkflowActions(pipeline) {
   return `
+    <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">Ask Ops</button>
     ${pipeline.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.pauseWorkflow()">⏸ Pause</button>' : ''}
     ${pipeline.status === 'paused' ? '<button class="btn btn-primary btn-sm" onclick="window.resumeWorkflow()">▶ Resume</button>' : ''}
     <button class="btn btn-ghost btn-sm" onclick="window.deleteCurrentWorkflow()">Delete</button>
@@ -2838,6 +2913,7 @@ async function renderSession(id) {
 
 function renderSessionActions(session) {
   return `
+    <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">Ask Ops</button>
     <button class="btn btn-secondary btn-sm" onclick="window.exportCurrentSession()">Export</button>
     ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.extendSessionTimeout()">+5m</button>' : ''}
     ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.pauseSession()">⏸ Pause</button>' : ''}
@@ -3276,6 +3352,299 @@ window.injectMessage = async function() {
   } catch (err) {
     showToast(err.message)
   }
+}
+
+window.toggleOps = function() {
+  state.opsOpen = !state.opsOpen
+  updateOpsPanel()
+  if (state.opsOpen) stopOpsWalker()
+  else startOpsWalker()
+  if (state.opsOpen) setTimeout(() => document.getElementById('ops-input')?.focus(), 0)
+}
+
+window.beginOpsDrag = function(event) {
+  if (event.button !== 0) return
+  const widget = document.getElementById('ops-widget')
+  if (!widget) return
+  event.preventDefault()
+  stopOpsWalker()
+  state.opsDragging = true
+  state.opsDragged = false
+  const start = clampOpsPosition(state.opsPosition)
+  const drag = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    x: start.x,
+    y: start.y,
+  }
+  event.currentTarget?.setPointerCapture?.(event.pointerId)
+  const onMove = moveEvent => {
+    if (moveEvent.pointerId !== drag.pointerId) return
+    const next = clampOpsPosition({
+      x: drag.x + moveEvent.clientX - drag.startX,
+      y: drag.y + moveEvent.clientY - drag.startY,
+    })
+    if (Math.abs(next.x - drag.x) > 4 || Math.abs(next.y - drag.y) > 4) state.opsDragged = true
+    applyOpsPosition(next, true)
+  }
+  const onEnd = endEvent => {
+    if (endEvent.pointerId !== drag.pointerId) return
+    state.opsDragging = false
+    event.currentTarget?.releasePointerCapture?.(event.pointerId)
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onEnd)
+    window.removeEventListener('pointercancel', onEnd)
+    if (state.opsDragged) {
+      saveOpsPosition(state.opsPosition)
+      if (!state.opsOpen) startOpsWalker(4000)
+    } else {
+      window.toggleOps()
+    }
+    setTimeout(() => { state.opsDragged = false }, 160)
+  }
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onEnd)
+  window.addEventListener('pointercancel', onEnd)
+}
+
+window.submitOpsQuestion = async function(event) {
+  event.preventDefault()
+  const input = document.getElementById('ops-input')
+  const question = input?.value?.trim()
+  if (!question) return
+  input.value = ''
+  await window.askOps(question)
+}
+
+window.askOpsForCurrent = async function() {
+  const context = currentOpsContext()
+  const question = context.target
+    ? `检查当前 ${context.target.kind} 是否异常`
+    : '检查当前页面是否有异常'
+  await askOpsInternal(question, context.target)
+}
+
+window.askOps = async function(question) {
+  await askOpsInternal(question, undefined)
+}
+
+async function askOpsInternal(question, target) {
+  state.opsOpen = true
+  state.opsMessages.push({ from: 'user', content: question })
+  state.opsBusy = true
+  updateOpsPanel()
+  try {
+    const report = await api('/api/ops/diagnose', 'POST', { question, target })
+    state.opsLastReport = report
+    state.opsMessages.push({ from: 'ops', content: formatOpsReport(report), actions: collectOpsActions(report) })
+  } catch (err) {
+    state.opsMessages.push({ from: 'ops', content: `诊断失败：${err.message}` })
+  } finally {
+    state.opsBusy = false
+    updateOpsPanel()
+  }
+}
+
+function currentOpsContext() {
+  if (state.currentTaskId) return { target: { kind: 'task', id: state.currentTaskId } }
+  if (state.currentSessionId) return { target: { kind: 'session', id: state.currentSessionId } }
+  if (state.currentPipelineId) return { target: { kind: 'workflow', id: state.currentPipelineId } }
+  const path = location.pathname
+  if (path.startsWith('/task/')) return { target: { kind: 'task', id: path.split('/')[2] } }
+  if (path.startsWith('/session/')) return { target: { kind: 'session', id: path.split('/')[2] } }
+  if (path.startsWith('/workflow/') || path.startsWith('/workflows/')) return { target: { kind: 'workflow', id: path.split('/')[2] } }
+  return {}
+}
+
+function updateOpsPanel() {
+  const existing = document.getElementById('ops-widget')
+  if (!existing) return
+  const markup = renderOpsWidget()
+  const wrapper = document.createElement('div')
+  wrapper.innerHTML = markup
+  existing.replaceWith(wrapper.querySelector('.ops-widget'))
+  initOpsWidget()
+  const thread = document.getElementById('ops-thread')
+  if (thread) thread.scrollTop = thread.scrollHeight
+}
+
+function loadOpsPosition() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OPS_POSITION_KEY) || 'null')
+    if (Number.isFinite(saved?.x) && Number.isFinite(saved?.y)) return saved
+  } catch {}
+  const width = typeof window === 'undefined' ? 1280 : window.innerWidth
+  const height = typeof window === 'undefined' ? 800 : window.innerHeight
+  return { x: Math.max(20, width - 96), y: Math.max(20, height - 104) }
+}
+
+function saveOpsPosition(pos) {
+  localStorage.setItem(OPS_POSITION_KEY, JSON.stringify(clampOpsPosition(pos)))
+}
+
+function clampOpsPosition(pos) {
+  const widgetWidth = 76
+  const widgetHeight = 86
+  const margin = 12
+  const maxX = Math.max(margin, window.innerWidth - widgetWidth - margin)
+  const maxY = Math.max(margin, window.innerHeight - widgetHeight - margin)
+  return {
+    x: Math.min(Math.max(pos?.x ?? maxX, margin), maxX),
+    y: Math.min(Math.max(pos?.y ?? maxY, margin), maxY),
+  }
+}
+
+function applyOpsPosition(pos, persist = false) {
+  state.opsPosition = clampOpsPosition(pos)
+  const widget = document.getElementById('ops-widget')
+  if (widget) {
+    widget.style.setProperty('--ops-x', `${state.opsPosition.x}px`)
+    widget.style.setProperty('--ops-y', `${state.opsPosition.y}px`)
+    widget.classList.toggle('align-left', state.opsPosition.x < window.innerWidth / 2)
+    widget.classList.toggle('align-right', state.opsPosition.x >= window.innerWidth / 2)
+    widget.classList.toggle('drop-down', state.opsPosition.y < 360)
+    widget.classList.toggle('drop-up', state.opsPosition.y >= 360)
+  }
+  if (persist) saveOpsPosition(state.opsPosition)
+}
+
+function initOpsWidget() {
+  if (!document.getElementById('ops-widget')) return
+  applyOpsPosition(state.opsPosition)
+  if (!state.opsOpen) startOpsWalker()
+}
+
+function startOpsWalker(delay = 1800) {
+  if (state.opsOpen || state.opsDragging || state.opsWalkTimer) return
+  state.opsWalkTimer = window.setTimeout(() => {
+    state.opsWalkTimer = null
+    walkOpsTo(randomOpsPosition())
+  }, delay)
+}
+
+function stopOpsWalker() {
+  if (state.opsWalkTimer) {
+    clearTimeout(state.opsWalkTimer)
+    state.opsWalkTimer = null
+  }
+  if (state.opsWalkFrame) {
+    cancelAnimationFrame(state.opsWalkFrame)
+    state.opsWalkFrame = null
+  }
+}
+
+function randomOpsPosition() {
+  const current = clampOpsPosition(state.opsPosition)
+  const maxStep = Math.min(260, Math.max(140, window.innerWidth * 0.18))
+  const angle = Math.random() * Math.PI * 2
+  return clampOpsPosition({
+    x: current.x + Math.cos(angle) * (90 + Math.random() * maxStep),
+    y: current.y + Math.sin(angle) * (70 + Math.random() * maxStep),
+  })
+}
+
+function walkOpsTo(target) {
+  if (state.opsOpen || state.opsDragging) return
+  const from = clampOpsPosition(state.opsPosition)
+  const to = clampOpsPosition(target)
+  const distance = Math.hypot(to.x - from.x, to.y - from.y)
+  const duration = Math.min(3600, Math.max(1400, distance * 10))
+  const start = performance.now()
+  const step = now => {
+    if (state.opsOpen || state.opsDragging) {
+      state.opsWalkFrame = null
+      return
+    }
+    const t = Math.min(1, (now - start) / duration)
+    const eased = 0.5 - Math.cos(t * Math.PI) / 2
+    applyOpsPosition({
+      x: from.x + (to.x - from.x) * eased,
+      y: from.y + (to.y - from.y) * eased,
+    })
+    if (t < 1) state.opsWalkFrame = requestAnimationFrame(step)
+    else {
+      state.opsWalkFrame = null
+      saveOpsPosition(state.opsPosition)
+      startOpsWalker(2500 + Math.random() * 3500)
+    }
+  }
+  state.opsWalkFrame = requestAnimationFrame(step)
+}
+
+function formatOpsReport(report) {
+  const counts = report.counts || {}
+  const lines = [
+    report.summary || '诊断完成。',
+    '',
+    `- 严重：${counts.critical || 0}`,
+    `- 警告：${counts.warning || 0}`,
+    `- 提示：${counts.info || 0}`,
+  ]
+  const issues = report.issues || []
+  if (issues.length) {
+    lines.push('', '优先处理：')
+    for (const issue of issues.slice(0, 5)) {
+      const target = issue.target ? `（${issue.target.kind} ${String(issue.target.id).slice(0, 8)}）` : ''
+      lines.push(`- [${issue.severity}] ${issue.title}${target}：${issue.detail}`)
+      lines.push(`  建议：${issue.recommendation}`)
+    }
+  }
+  return lines.join('\n')
+}
+
+function collectOpsActions(report) {
+  const actions = []
+  for (const issue of report.issues || []) {
+    for (const action of issue.actions || []) {
+      if (!actions.some(item => item.id === action.id && item.target?.id === action.target?.id)) actions.push(action)
+    }
+  }
+  return actions.slice(0, 4)
+}
+
+function renderOpsMessageActions(message) {
+  const actions = message.actions || []
+  if (!actions.length) return ''
+  return `
+    <div class="ops-actions">
+      ${actions.map(action => `
+        <button class="ops-action-btn ${action.risk === 'high' ? 'danger' : ''}" onclick='window.executeOpsAction(${jsString(JSON.stringify(action))})'>
+          ${escapeHtml(action.label)}
+        </button>
+      `).join('')}
+    </div>
+  `
+}
+
+window.executeOpsAction = async function(actionJson) {
+  const action = JSON.parse(actionJson)
+  const label = action.label || action.id
+  if (!confirm(`${label}\n\n${action.description || ''}\n\n确认执行？`)) return
+  state.opsBusy = true
+  updateOpsPanel()
+  try {
+    const result = await api('/api/ops/action', 'POST', {
+      actionId: action.id,
+      target: action.target,
+      confirmed: true,
+    })
+    state.opsMessages.push({ from: 'ops', content: opsActionResultText(result) })
+    if (result.task?.id) navigate(`/task/${result.task.id}`)
+    else if (result.session?.id) navigate(`/session/${result.session.id}`)
+  } catch (err) {
+    state.opsMessages.push({ from: 'ops', content: `动作失败：${err.message}` })
+  } finally {
+    state.opsBusy = false
+    updateOpsPanel()
+  }
+}
+
+function opsActionResultText(result) {
+  if (result.task?.id) return `已执行 ${result.action}，Task：${result.task.id}`
+  if (result.session?.id) return `已执行 ${result.action}，Session：${result.session.id}`
+  if (result.workflow?.id) return `已执行 ${result.action}，Workflow：${result.workflow.id}`
+  return `已执行 ${result.action || 'ops action'}。`
 }
 
 window.extendSessionTimeout = async function() {
@@ -5672,6 +6041,11 @@ document.addEventListener('click', event => {
 document.addEventListener('DOMContentLoaded', () => {
   initTheme()
   render()
+  initOpsWidget()
+  new MutationObserver(() => initOpsWidget()).observe(document.body, { childList: true })
+  window.addEventListener('resize', () => {
+    applyOpsPosition(state.opsPosition, true)
+  })
 
   if (getAuthToken()) {
     connectWs()

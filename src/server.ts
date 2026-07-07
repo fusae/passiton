@@ -102,6 +102,29 @@ type McpContext = {
   authUser: AuthUser
 }
 
+type OpsTarget = {
+  kind?: 'task' | 'session' | 'workflow'
+  id?: string
+}
+
+type OpsIssue = {
+  severity: 'critical' | 'warning' | 'info'
+  title: string
+  detail: string
+  recommendation: string
+  target?: Required<OpsTarget>
+  actions?: OpsAction[]
+}
+
+type OpsAction = {
+  id: 'stop_task' | 'rerun_task' | 'resume_session' | 'rerun_workflow_step' | 'create_repair_task'
+  label: string
+  description: string
+  target: Required<OpsTarget>
+  risk: 'low' | 'medium' | 'high'
+  requiresConfirmation: boolean
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html',
   '.js': 'application/javascript',
@@ -1821,6 +1844,210 @@ function summarizeWorkflow(workflow: Pipeline | PipelineWithSessions): Record<st
   }
 }
 
+async function buildOpsReport(
+  userId: string,
+  agentCatalog: AgentCatalog,
+  input: { question?: string; target?: OpsTarget } = {}
+) {
+  const now = Date.now()
+  const issues: OpsIssue[] = []
+  const tasks = state.listTasks({ userId })
+  const sessions = state.listSessions({ userId })
+  const workflows = state.listPipelines(userId)
+  const agents = await listAgentModels(userId, agentCatalog).catch(() => [])
+  const staleMs = 10 * 60 * 1000
+  const queuedMs = 5 * 60 * 1000
+
+  for (const task of tasks) {
+    if (task.status === 'running' && now - task.updatedAt > staleMs) {
+      issues.push({
+        severity: 'critical',
+        title: 'Task 可能卡住',
+        detail: `${task.agent.label || task.agent.adapter} 已运行 ${formatDuration(now - (task.startedAt || task.updatedAt))}，最近 ${formatDuration(now - task.updatedAt)} 没有更新。`,
+        recommendation: '先查看 last agent output 和项目 git diff；若无子进程活动，停止后用相同 prompt 重跑。',
+        target: { kind: 'task', id: task.id },
+        actions: [
+          opsAction('stop_task', { kind: 'task', id: task.id }, '停止 Task', '停止这个卡住的后台任务。', 'medium'),
+          opsAction('rerun_task', { kind: 'task', id: task.id }, '重跑 Task', '用原 prompt 创建一个新的 Task。', 'medium'),
+        ],
+      })
+    }
+    if (task.status === 'queued' && now - task.createdAt > queuedMs) {
+      issues.push({
+        severity: 'warning',
+        title: 'Task 排队过久',
+        detail: `任务已排队 ${formatDuration(now - task.createdAt)}。`,
+        recommendation: '检查 task concurrency 是否被长任务占满，必要时停止卡住的 running task。',
+        target: { kind: 'task', id: task.id },
+        actions: [
+          opsAction('stop_task', { kind: 'task', id: task.id }, '取消排队', '停止这个排队中的任务。', 'low'),
+        ],
+      })
+    }
+    if (task.status === 'error') {
+      issues.push({
+        severity: classifyOpsSeverity(task.errorMessage),
+        title: 'Task 失败',
+        detail: task.errorMessage || task.lastAgentOutput || '任务失败但没有保存错误详情。',
+        recommendation: recommendationForError(task.errorMessage || task.lastAgentOutput || ''),
+        target: { kind: 'task', id: task.id },
+        actions: [
+          opsAction('rerun_task', { kind: 'task', id: task.id }, '重跑 Task', '用原 prompt 创建一个新的 Task。', 'medium'),
+          opsAction('create_repair_task', { kind: 'task', id: task.id }, '创建修复 Task', '创建一个新 Task，让 agent 根据错误原因修复；不由管家直接改文件。', 'high'),
+        ],
+      })
+    }
+  }
+
+  for (const session of sessions) {
+    if (session.status === 'active' && now - session.updatedAt > staleMs) {
+      issues.push({
+        severity: 'critical',
+        title: 'Session 可能卡住',
+        detail: `${agentLabel(session.from)} -> ${agentLabel(session.to)} 最近 ${formatDuration(now - session.updatedAt)} 没有更新。`,
+        recommendation: '检查当前轮 agent 输出；如是额度或认证问题，切换 agent 后 resume。',
+        target: { kind: 'session', id: session.id },
+        actions: [
+          opsAction('resume_session', { kind: 'session', id: session.id }, '继续 Session', '尝试让这个 Session 继续运行。', 'medium'),
+        ],
+      })
+    }
+    if (session.status === 'error') {
+      issues.push({
+        severity: classifyOpsSeverity(session.errorMessage || session.errorType),
+        title: 'Session 失败',
+        detail: session.errorMessage || session.errorType || session.lastAgentOutput || '会话失败但没有保存错误详情。',
+        recommendation: recommendationForError(session.errorMessage || session.errorType || session.lastAgentOutput || ''),
+        target: { kind: 'session', id: session.id },
+        actions: [
+          opsAction('resume_session', { kind: 'session', id: session.id }, '从错误继续', '从错误状态恢复这个 Session。', 'medium'),
+        ],
+      })
+    }
+    if (session.status === 'paused') {
+      issues.push({
+        severity: 'info',
+        title: 'Session 等待处理',
+        detail: `${agentLabel(session.from)} -> ${agentLabel(session.to)} 处于 paused。`,
+        recommendation: session.errorType ? '确认错误原因后 resume，必要时指定备用 agent。' : '如果是人工审核点，确认产物后继续。',
+        target: { kind: 'session', id: session.id },
+        actions: [
+          opsAction('resume_session', { kind: 'session', id: session.id }, '继续 Session', '恢复这个 paused Session。', 'low'),
+        ],
+      })
+    }
+  }
+
+  for (const workflow of workflows) {
+    if (workflow.status === 'active' && now - workflow.updatedAt > staleMs) {
+      issues.push({
+        severity: 'warning',
+        title: 'Workflow 长时间未更新',
+        detail: `${workflow.name} 最近 ${formatDuration(now - workflow.updatedAt)} 没有更新。`,
+        recommendation: '进入 Workflow 查看 active step；优先处理失败或等待审核的步骤。',
+        target: { kind: 'workflow', id: workflow.id },
+      })
+    }
+    if (workflow.status === 'error' || workflow.status === 'paused') {
+      issues.push({
+        severity: workflow.status === 'error' ? 'critical' : 'info',
+        title: `Workflow ${workflow.status}`,
+        detail: `${workflow.name} 当前状态为 ${workflow.status}。`,
+        recommendation: '检查步骤时间线，定位第一个非 done 步骤。',
+        target: { kind: 'workflow', id: workflow.id },
+      })
+    }
+  }
+
+  for (const agent of agents) {
+    const status = String((agent as { status?: unknown }).status || '')
+    if (status && status !== 'ready' && status !== 'discovered') {
+      issues.push({
+        severity: status === 'invalid' || status === 'no_key' ? 'critical' : 'warning',
+        title: 'Agent 不可用',
+        detail: `${String((agent as { name?: unknown }).name || 'unknown')} 状态为 ${status}。`,
+        recommendation: '到 Settings 重新诊断；API agent 检查 key，CLI agent 检查登录、PATH 和订阅额度。',
+      })
+    }
+  }
+
+  const targetIssue = input.target?.id
+    ? issues.filter(issue => issue.target?.kind === input.target?.kind && issue.target?.id === input.target?.id)
+    : []
+  const relevant = targetIssue.length ? targetIssue : issues
+  const summary = summarizeOpsIssues(relevant, input)
+
+  return {
+    ok: issues.filter(issue => issue.severity === 'critical').length === 0,
+    checkedAt: now,
+    summary,
+    policy: 'read_only_diagnose_with_confirmed_platform_actions',
+    counts: {
+      critical: issues.filter(issue => issue.severity === 'critical').length,
+      warning: issues.filter(issue => issue.severity === 'warning').length,
+      info: issues.filter(issue => issue.severity === 'info').length,
+    },
+    issues: relevant.slice(0, 20),
+    totals: {
+      tasks: tasks.length,
+      sessions: sessions.length,
+      workflows: workflows.length,
+      agents: agents.length,
+    },
+  }
+}
+
+function summarizeOpsIssues(issues: OpsIssue[], input: { question?: string; target?: OpsTarget }): string {
+  if (issues.length === 0) {
+    return input.target?.id
+      ? '当前对象没有检测到明显异常。'
+      : '当前没有检测到高优先级异常。'
+  }
+  const first = issues[0]
+  const prefix = input.target?.id ? '这个对象' : '平台'
+  return `${prefix}检测到 ${issues.length} 个问题。最优先处理：${first.title}。${first.recommendation}`
+}
+
+function opsAction(
+  id: OpsAction['id'],
+  target: Required<OpsTarget>,
+  label: string,
+  description: string,
+  risk: OpsAction['risk']
+): OpsAction {
+  return {
+    id,
+    label,
+    description,
+    target,
+    risk,
+    requiresConfirmation: true,
+  }
+}
+
+function classifyOpsSeverity(text: unknown): OpsIssue['severity'] {
+  const value = String(text || '').toLowerCase()
+  if (/quota|usage limit|insufficient|429|rate limit|auth|login|unauthorized|permission|timeout|timed out/.test(value)) return 'critical'
+  return 'warning'
+}
+
+function recommendationForError(text: string): string {
+  const value = text.toLowerCase()
+  if (/quota|usage limit|insufficient|429|rate limit/.test(value)) return '额度或限流问题；等待恢复后切换备用 agent 或手动 resume。'
+  if (/auth|login|unauthorized|forbidden|401|403/.test(value)) return '认证问题；重新登录 CLI 或更新 Provider Key。'
+  if (/timeout|timed out|idle/.test(value)) return '超时问题；检查是否已有落盘改动，必要时延长超时后重跑。'
+  if (/permission|eacces|access/.test(value)) return '权限问题；检查 cwd、文件权限和 permission mode。'
+  return '查看最后输出和日志，确认是否可重跑或需要切换 agent。'
+}
+
+function formatDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  return `${Math.round(minutes / 60)}h`
+}
+
 function summarizeMessage(message: Message): Record<string, unknown> {
   return {
     id: message.id,
@@ -2150,11 +2377,112 @@ function parseHumanMessageBody(body: unknown): { content: string } {
   }
 }
 
+function parseOpsDiagnoseBody(body: unknown): { question?: string; target?: OpsTarget } {
+  const data = body && typeof body === 'object' && !Array.isArray(body)
+    ? body as Record<string, unknown>
+    : {}
+  const targetData = data.target && typeof data.target === 'object' && !Array.isArray(data.target)
+    ? data.target as Record<string, unknown>
+    : undefined
+  const kind = targetData?.kind
+  const target: OpsTarget | undefined = targetData && (kind === 'task' || kind === 'session' || kind === 'workflow') && typeof targetData.id === 'string'
+    ? { kind: kind as OpsTarget['kind'], id: targetData.id }
+    : undefined
+  return {
+    question: optionalString(data.question, 'question'),
+    target,
+  }
+}
+
+function parseOpsActionBody(body: unknown): { actionId: OpsAction['id']; target: Required<OpsTarget>; confirmed: boolean } {
+  const data = requireRecord(body, 'body')
+  const actionId = optionalString(data.actionId, 'actionId')
+  if (actionId !== 'stop_task' && actionId !== 'rerun_task' && actionId !== 'resume_session' && actionId !== 'rerun_workflow_step' && actionId !== 'create_repair_task') {
+    throw new HttpError(400, 'Unsupported ops action')
+  }
+  const targetData = requireRecord(data.target, 'target')
+  const kind = optionalString(targetData.kind, 'target.kind')
+  if (kind !== 'task' && kind !== 'session' && kind !== 'workflow') throw new HttpError(400, 'Invalid target.kind')
+  return {
+    actionId,
+    target: { kind, id: requireNonEmptyString(targetData.id, 'target.id') },
+    confirmed: data.confirmed === true,
+  }
+}
+
 function parseNudgeBody(body: unknown): { content: string } {
   const data = requireRecord(body, 'body')
   return {
     content: requireNonEmptyString(data.content, 'content'),
   }
+}
+
+async function executeOpsAction(
+  router: Router,
+  userId: string,
+  input: { actionId: OpsAction['id']; target: Required<OpsTarget>; confirmed: boolean }
+): Promise<unknown> {
+  if (!input.confirmed) throw new HttpError(400, 'Ops action requires explicit confirmation')
+  const { actionId, target } = input
+  if ((actionId === 'stop_task' || actionId === 'rerun_task' || actionId === 'create_repair_task') && target.kind !== 'task') {
+    throw new HttpError(400, 'Task action requires task target')
+  }
+  if (actionId === 'resume_session' && target.kind !== 'session') {
+    throw new HttpError(400, 'Session action requires session target')
+  }
+  if (actionId === 'rerun_workflow_step' && target.kind !== 'session') {
+    throw new HttpError(400, 'Workflow step rerun requires session target')
+  }
+
+  if (actionId === 'stop_task') {
+    if (!state.getTask(target.id, userId)) throw new HttpError(404, 'Task not found')
+    return { action: actionId, task: await router.stopTask(target.id) }
+  }
+
+  if (actionId === 'resume_session') {
+    if (!state.getSession(target.id, userId)) throw new HttpError(404, 'Session not found')
+    return { action: actionId, session: await router.resumeSession(target.id) }
+  }
+
+  if (actionId === 'rerun_workflow_step') {
+    if (!state.getSession(target.id, userId)) throw new HttpError(404, 'Session not found')
+    return { action: actionId, workflow: await router.rerunPipelineStep(target.id) }
+  }
+
+  const task = state.getTask(target.id, userId)
+  if (!task) throw new HttpError(404, 'Task not found')
+  if (actionId === 'rerun_task') {
+    const created = router.startTask({
+      userId,
+      agent: task.agent,
+      prompt: task.prompt,
+      cwd: task.cwd,
+      context: task.context,
+      systemPrompt: task.systemPrompt,
+      permissionMode: task.permissionMode,
+    })
+    return { action: actionId, task: created }
+  }
+
+  const previous = task.result || task.output || task.lastAgentOutput || task.errorMessage || ''
+  const created = router.startTask({
+    userId,
+    agent: task.agent,
+    cwd: task.cwd,
+    context: task.context,
+    systemPrompt: task.systemPrompt,
+    permissionMode: task.permissionMode,
+    prompt: [
+      '你是被 Turing Ops 创建的修复任务。请只修复下面任务失败暴露的问题。',
+      '要求：先检查当前工作区状态；只改必要文件；不要 push；不要改历史；完成后给出变更摘要。',
+      '',
+      '## 原始任务',
+      task.prompt,
+      '',
+      previous ? `## 失败输出或错误\n${previous}` : '',
+    ].filter(Boolean).join('\n'),
+  })
+  return { action: actionId, task: created }
 }
 
 export function createServer(router: Router, port: number, agentCatalog: AgentCatalog, host?: string): http.Server {
@@ -2431,6 +2759,21 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // GET /api/stats
       if (pathname === '/api/stats' && method === 'GET') {
         return json(res, 200, state.getStats(authUser!.userId))
+      }
+
+      // GET /api/ops/status
+      if (pathname === '/api/ops/status' && method === 'GET') {
+        return json(res, 200, await buildOpsReport(authUser!.userId, agentCatalog))
+      }
+
+      // POST /api/ops/diagnose
+      if (pathname === '/api/ops/diagnose' && method === 'POST') {
+        return json(res, 200, await buildOpsReport(authUser!.userId, agentCatalog, parseOpsDiagnoseBody(await parseBody(req))))
+      }
+
+      // POST /api/ops/action
+      if (pathname === '/api/ops/action' && method === 'POST') {
+        return json(res, 200, await executeOpsAction(router, authUser!.userId, parseOpsActionBody(await parseBody(req))))
       }
 
       // GET /api/config

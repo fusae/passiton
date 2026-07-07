@@ -126,6 +126,66 @@ test('GET /api/stats returns aggregated stats payload', async () => {
   })
 })
 
+test('ops endpoints report task failures and targeted diagnostics', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'ops@example.com')
+    state.createTask({
+      id: 'ops-task-1',
+      userId: auth.userId,
+      agent: { adapter: 'opencode' },
+      prompt: 'inspect',
+    })
+    state.updateTask('ops-task-1', {
+      status: 'error',
+      errorMessage: '[opencode] idle timed out after 600000ms',
+      finishedAt: Date.now(),
+    }, auth.userId)
+
+    const statusResponse = await fetch(`${baseUrl}/api/ops/status`, { headers: authHeaders(auth.token) })
+    assert.equal(statusResponse.status, 200)
+    const status = await statusResponse.json() as {
+      ok: boolean
+      counts: { critical: number }
+      issues: Array<{ target?: { kind: string; id: string }; recommendation: string }>
+    }
+    assert.equal(status.ok, false)
+    assert.equal(status.counts.critical, 1)
+    assert.equal(status.issues[0]?.target?.id, 'ops-task-1')
+    assert.match(status.issues[0]?.recommendation || '', /超时/)
+
+    const diagnoseResponse = await fetch(`${baseUrl}/api/ops/diagnose`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ question: 'why failed', target: { kind: 'task', id: 'ops-task-1' } }),
+    })
+    assert.equal(diagnoseResponse.status, 200)
+    const diagnose = await diagnoseResponse.json() as { issues: Array<{ target?: { id: string } }> }
+    assert.equal(diagnose.issues.length, 1)
+    assert.equal(diagnose.issues[0]?.target?.id, 'ops-task-1')
+
+    const unconfirmed = await fetch(`${baseUrl}/api/ops/action`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ actionId: 'create_repair_task', target: { kind: 'task', id: 'ops-task-1' } }),
+    })
+    assert.equal(unconfirmed.status, 400)
+
+    const actionResponse = await fetch(`${baseUrl}/api/ops/action`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ actionId: 'create_repair_task', target: { kind: 'task', id: 'ops-task-1' }, confirmed: true }),
+    })
+    assert.equal(actionResponse.status, 200)
+    const action = await actionResponse.json() as { task: { id: string; prompt: string } }
+    assert.ok(action.task.id)
+    assert.match(action.task.prompt, /Turing Ops/)
+  }, {
+    configureRouter(router) {
+      router.registerAdapter(new StubAdapter('opencode', async () => '[DONE] repaired'))
+    },
+  })
+})
+
 test('GET /health returns unauthenticated liveness payload', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/health`)
