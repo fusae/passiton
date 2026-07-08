@@ -321,11 +321,11 @@ A provider participates in two flows:
    step whose `nodeType` is in `handledNodeTypes`, bypassing the adapter run
    loop entirely.
 
-Minimal example:
+Minimal example (imports use local source paths — Turing is not published to npm):
 
 ```ts
-import { Router } from 'turing'
-import type { ExternalTaskProvider } from 'turing'
+import { Router } from './src/router.js'
+import type { ExternalTaskProvider } from './src/types.js'
 
 const myProvider: ExternalTaskProvider = {
   name: 'my-renderer',

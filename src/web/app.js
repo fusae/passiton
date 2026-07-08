@@ -130,6 +130,7 @@ const state = {
   opsWalkTimer: null,
   opsWalkFrame: null,
   opsWalkTarget: null,
+  taskRunningTimer: null,
   expandedWorkflowStep: null,
   liveReviewStep: null,
   liveReviewDrafts: new Map(),
@@ -194,12 +195,15 @@ function render() {
   if (!path.startsWith('/task/')) { if (state.taskDetailController) state.taskDetailController.abort() }
   if (path !== '/sessions') { if (state.sessionsListController) state.sessionsListController.abort() }
   if (path !== '/tasks') { if (state.tasksListController) state.tasksListController.abort() }
+  if (path !== '/tasks') stopTaskRunningTimer()
   if (!path.startsWith('/workflow/') && !path.startsWith('/workflows/')) { if (state.pipelineDetailController) state.pipelineDetailController.abort() }
   if (path !== '/workflows') { if (state.pipelinesListController) state.pipelinesListController.abort() }
   if (path !== '/settings') { if (state.settingsController) state.settingsController.abort() }
 
-  // Auth check
+  // Auth check — remember the intended destination so the login flow can
+  // restore it after (auto-)login instead of always defaulting to /sessions.
   if (path !== '/' && path !== '/login' && !getValidAuthToken()) {
+    state.pendingPath = path
     return navigate('/login')
   }
 
@@ -1229,7 +1233,9 @@ window.handleLogin = async function(e) {
     const data = await api('/api/auth/login', 'POST', { email, password })
     setAuthToken(data.token)
     state.user = data.user
-    navigate('/sessions')
+    const target = state.pendingPath || '/sessions'
+    state.pendingPath = null
+    navigate(target)
   } catch (err) {
     showToast(err.message)
   }
@@ -1240,7 +1246,9 @@ window.handleLocalLogin = async function() {
     const data = await api('/api/auth/local', 'POST', {})
     setAuthToken(data.token)
     state.user = data.user
-    navigate('/sessions')
+    const target = state.pendingPath || '/sessions'
+    state.pendingPath = null
+    navigate(target)
   } catch (err) {
     showToast(err.message)
   }
@@ -1407,9 +1415,13 @@ function renderTaskCards() {
   if (!container) return
   if (state.tasks.length === 0) {
     container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No tasks yet. Create your first one!</p>'
+    stopTaskRunningTimer()
     return
   }
-  const cards = state.tasks.map(task => `
+  const cards = state.tasks.map(task => {
+    const isRunning = task.status === 'running' && task.startedAt
+    const startedMs = isRunning ? new Date(task.startedAt).getTime() : 0
+    return `
     <a href="/task/${task.id}" class="card session-card task-card">
       <div class="session-card-header">
         <span class="session-card-title">${escapeHtml(taskTitle(task))}</span>
@@ -1418,15 +1430,19 @@ function renderTaskCards() {
       <div class="task-card-agent">${escapeHtml(agentLabel(task.agent))}</div>
       <div class="task-card-prompt">${escapeHtml(taskSubtitle(task))}</div>
       <div class="session-card-meta">
-        <span>⏱ ${formatTime(task.updatedAt)}</span>
+        ${isRunning
+          ? `<span class="task-running-elapsed" data-task-start="${startedMs}">运行 ${formatDuration(Date.now() - startedMs)}</span>`
+          : `<span>⏱ ${formatTime(task.updatedAt)}</span>`}
         ${task.cwd ? `<span>⌂ ${escapeHtml(task.cwd)}</span>` : ''}
       </div>
     </a>
-  `).join('')
+  `}).join('')
 
   container.innerHTML = state.taskListHasMore
     ? `${cards}<div id="task-load-more" style="grid-column: 1 / -1;">${tasksLoadMoreButtonHtml()}</div>`
     : cards
+
+  syncTaskRunningTimer()
 }
 
 function tasksLoadMoreButtonHtml() {
@@ -1484,21 +1500,33 @@ async function loadSessionsData() {
   renderSessionCards()
 }
 
+// Check whether a timestamp falls on the same local calendar day as now,
+// using the browser's timezone (not the server's).
+function isSameLocalDay(timestamp) {
+  if (!timestamp) return false
+  const date = new Date(timestamp)
+  const now = new Date()
+  return date.getFullYear() === now.getFullYear()
+    && date.getMonth() === now.getMonth()
+    && date.getDate() === now.getDate()
+}
+
 function renderSessionStats() {
   const statActive = document.getElementById('stat-active')
   const statDone = document.getElementById('stat-done')
   const statRounds = document.getElementById('stat-rounds')
   const statAgents = document.getElementById('stat-agents')
-  const sessionStats = state.stats?.sessions || {}
-  const active = Number(sessionStats.active) || 0
-  const doneToday = Number(sessionStats.completedToday) || 0
-  const avgRounds = Number(sessionStats.avgRounds) || 0
-  const readyAgents = (state.agents || []).filter(agent => agent.status === 'ready').length
+  const sessions = state.sessions || []
+  const active = sessions.filter(s => s.status === 'active').length
+  const doneToday = sessions.filter(s => s.status === 'done' && isSameLocalDay(s.updatedAt)).length
+  const totalRounds = sessions.reduce((sum, s) => sum + (Number(s.currentRound) || 0), 0)
+  const avgRounds = sessions.length > 0 ? totalRounds / sessions.length : 0
+  const configuredAgents = (state.agents || []).filter(a => a.status !== 'invalid' && a.status !== 'discovered').length
 
   if (statActive) statActive.textContent = active
   if (statDone) statDone.textContent = doneToday
   if (statRounds) statRounds.textContent = formatStatNumber(avgRounds)
-  if (statAgents) statAgents.textContent = readyAgents
+  if (statAgents) statAgents.textContent = configuredAgents
 }
 
 /**
@@ -3572,12 +3600,20 @@ function stopOpsWalker() {
 }
 
 function randomOpsPosition() {
-  const current = clampOpsPosition(state.opsPosition)
-  const maxStep = Math.min(260, Math.max(140, window.innerWidth * 0.18))
-  const angle = Math.random() * Math.PI * 2
+  // Constrain walk targets to a bottom-right safe zone so the mascot never
+  // stops on top of main content (titles, panels, list rows). The zone spans
+  // ~220px inward from the right and bottom viewport edges. Dragging still
+  // works anywhere; after release the mascot walks back to this zone.
+  const w = window.innerWidth
+  const h = window.innerHeight
+  const zone = 220
+  const maxX = Math.max(12, w - 88)
+  const maxY = Math.max(12, h - 98)
+  const minX = Math.max(12, w - zone)
+  const minY = Math.max(12, h - zone)
   return clampOpsPosition({
-    x: current.x + Math.cos(angle) * (90 + Math.random() * maxStep),
-    y: current.y + Math.sin(angle) * (70 + Math.random() * maxStep),
+    x: minX + Math.random() * Math.max(0, maxX - minX),
+    y: minY + Math.random() * Math.max(0, maxY - minY),
   })
 }
 
@@ -3984,6 +4020,8 @@ window.addLocalCliAgent = async function(name) {
     const saved = state.agents.find(item => item.kind === 'local' && item.name === name)
     if (saved?.status === 'invalid') {
       window.showLocalCliAgentDiagnostics(name, 'Agent was saved but validation failed.')
+    } else {
+      showToast(`「${name}」已添加到已配置列表`, 'success')
     }
   } catch (err) {
     showToast(err.message)
@@ -4122,6 +4160,7 @@ window.saveLocalCliAgent = async function(e, originalName) {
     await loadAgents()
     closeModal()
     renderLocalCliAgentsList()
+    showToast(`「${originalName}」已保存`, 'success')
   } catch (err) {
     showToast(err.message)
   }
@@ -4142,6 +4181,7 @@ window.deleteLocalCliAgent = async function(name) {
     )
     renderAgentsList()
     renderLocalCliAgentsList()
+    showToast(`「${name}」已移除`, 'success')
     loadAgents().then(() => {
       renderAgentsList()
       renderLocalCliAgentsList()
@@ -5395,6 +5435,7 @@ window.saveAgent = async function(e, originalName) {
     await loadApiKeys()
     closeModal()
     renderAgentsList()
+    showToast('Assistant saved', 'success')
   } catch (err) {
     showToast(err.message)
   }
@@ -5411,6 +5452,7 @@ window.deleteAgent = async function(name) {
     state.agents = await api(`/api/agents/${encodeURIComponent(name)}`, 'DELETE')
     await loadApiKeys()
     renderAgentsList()
+    showToast('Assistant deleted', 'success')
   } catch (err) {
     showToast(err.message)
   }
@@ -5467,6 +5509,7 @@ window.saveApiKey = async function(e) {
     state.apiKeys.unshift(key)
     closeModal()
     renderApiKeysList()
+    showToast('Provider key added', 'success')
   } catch (err) {
     showToast(err.message)
   }
@@ -5483,6 +5526,7 @@ window.deleteApiKey = async function(id) {
     await api(`/api/keys/${encodeURIComponent(id)}`, 'DELETE')
     state.apiKeys = state.apiKeys.filter(key => key.id !== id)
     renderApiKeysList()
+    showToast('Provider key deleted', 'success')
   } catch (err) {
     showToast(err.message)
   }
@@ -6092,6 +6136,40 @@ function formatTime(timestamp) {
   if (minutes < 60) return `${minutes} min ago`
   if (hours < 24) return `${hours} hr ago`
   return `${days} day${days > 1 ? 's' : ''} ago`
+}
+
+function formatDuration(ms) {
+  const totalSec = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = totalSec % 60
+  if (h > 0) return `${h}h${m}m`
+  if (m > 0) return `${m}m${s.toString().padStart(2, '0')}s`
+  return `${s}s`
+}
+
+function syncTaskRunningTimer() {
+  const hasRunning = state.tasks.some(task => task.status === 'running' && task.startedAt)
+  if (hasRunning && location.pathname === '/tasks') {
+    if (!state.taskRunningTimer) {
+      state.taskRunningTimer = setInterval(() => {
+        if (location.pathname !== '/tasks') { stopTaskRunningTimer(); return }
+        document.querySelectorAll('[data-task-start]').forEach(el => {
+          const start = Number(el.dataset.taskStart)
+          if (start) el.textContent = `运行 ${formatDuration(Date.now() - start)}`
+        })
+      }, 1000)
+    }
+  } else {
+    stopTaskRunningTimer()
+  }
+}
+
+function stopTaskRunningTimer() {
+  if (state.taskRunningTimer) {
+    clearInterval(state.taskRunningTimer)
+    state.taskRunningTimer = null
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────

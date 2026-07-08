@@ -2501,6 +2501,64 @@ function sessionApiDocs() {
       refreshList: 'GET /api/agents?refresh=1',
       diagnostics: 'GET /api/agents/:name/diagnostics?refresh=1',
     },
+    agentManagement: {
+      createApiAgent: {
+        method: 'POST',
+        path: '/api/agents',
+        description: 'Create an API-backed agent (API Assistant) using a saved Provider Key. keyId is required.',
+        body: {
+          name: 'my-openai-agent',
+          adapter: 'openai-api',
+          keyId: '<provider-key-id from POST /api/keys>',
+          model: 'gpt-4o',
+          baseUrl: 'https://api.example.com/v1',
+          timeout: 120000,
+        },
+      },
+      updateApiAgent: {
+        method: 'PUT',
+        path: '/api/agents/:name',
+        description: 'Update an existing API Assistant. keyId is required when changing adapter.',
+        body: {
+          name: 'my-openai-agent',
+          adapter: 'openai-api',
+          model: 'gpt-4o-mini',
+        },
+      },
+      deleteApiAgent: {
+        method: 'DELETE',
+        path: '/api/agents/:name',
+        description: 'Delete an API Assistant.',
+      },
+      createCliAgent: {
+        method: 'POST',
+        path: '/api/config/agents',
+        description: 'Register a local CLI Agent in the server config file.',
+        body: {
+          name: 'my-codex',
+          adapter: 'codex',
+          command: 'codex',
+          args: ['--full-auto'],
+          timeout: 600000,
+          env: {},
+        },
+      },
+      updateCliAgent: {
+        method: 'PUT',
+        path: '/api/config/agents/:name',
+        description: 'Update an existing local CLI Agent configuration.',
+        body: {
+          name: 'my-codex',
+          adapter: 'codex',
+          command: 'codex',
+        },
+      },
+      deleteCliAgent: {
+        method: 'DELETE',
+        path: '/api/config/agents/:name',
+        description: 'Remove a local CLI Agent from the server config file.',
+      },
+    },
     pipelineTemplates: 'GET /api/pipeline-templates',
   }
 }
@@ -3523,6 +3581,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
   // ── WebSocket ──────────────────────────────────────────────────────────────
 
   const wss = new WebSocketServer({ server, path: '/ws' })
+  wss.on('error', () => {})
   const heartbeat = setInterval(() => {
     for (const ws of clients.keys()) {
       const live = ws as WebSocket & { isAlive?: boolean }
@@ -3574,6 +3633,14 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
     const displayHost = host === '0.0.0.0' ? '127.0.0.1' : host
     console.log(`[server] Turing running at http://${displayHost ?? 'localhost'}:${port}`)
   }
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[server] 端口 ${port} 已被占用。可能已有 Turing 实例在运行；请停止它，或修改 ${getConfigPath()} 中的 server.port 后重试。`)
+    } else {
+      console.error(`[server] 启动失败: ${err.code ?? ''} ${err.message}`)
+    }
+    process.exit(1)
+  })
   if (host) server.listen(port, host, onListening)
   else server.listen(port, onListening)
 

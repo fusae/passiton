@@ -1,12 +1,10 @@
-// Config module — load ~/.turing/config.json and merge with defaults
+// Config module — load config.json from TURING_HOME (default ~/.turing) and merge with defaults
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { delimiter, join, dirname } from 'path'
-import { homedir } from 'os'
 import type { AppConfig, SessionMode } from './types.js'
 import { defaultClaudeCodeArgs } from './adapters/claude-code.js'
-
-const CONFIG_PATH = join(homedir(), '.turing', 'config.json')
+import { resolveTuringHome } from './paths.js'
 const DEFAULT_CODEX_COMMAND = process.env.TURING_CODEX_COMMAND ?? 'codex'
 const DEFAULT_CLAUDE_COMMAND = process.env.TURING_CLAUDE_COMMAND ?? 'claude'
 const DEFAULT_GEMINI_COMMAND = process.env.TURING_GEMINI_COMMAND ?? 'gemini'
@@ -72,12 +70,13 @@ export function loadConfig(): AppConfig {
 }
 
 function readConfig(): AppConfig {
-  if (!existsSync(CONFIG_PATH)) {
+  const configPath = getConfigPath()
+  if (!existsSync(configPath)) {
     return DEFAULT_CONFIG
   }
 
   try {
-    const raw = readFileSync(CONFIG_PATH, 'utf-8')
+    const raw = readFileSync(configPath, 'utf-8')
     const user = JSON.parse(raw) as Partial<AppConfig>
     const merged = deepMerge(DEFAULT_CONFIG, user) as AppConfig
     if (isPlainObject(user.agents)) {
@@ -90,7 +89,7 @@ function readConfig(): AppConfig {
     }
     return normalizeConfig(merged)
   } catch (err) {
-    console.warn(`[config] failed to load ${CONFIG_PATH}:`, err)
+    console.warn(`[config] failed to load ${configPath}:`, err)
     return DEFAULT_CONFIG
   }
 }
@@ -184,6 +183,7 @@ function normalizeConfig(config: AppConfig): AppConfig {
     ...config,
     server: {
       ...config.server,
+      port: resolvePort(process.env.PORT) ?? config.server?.port ?? DEFAULT_CONFIG.server.port,
       host: process.env.TURING_HOST ?? config.server?.host ?? DEFAULT_CONFIG.server.host,
     },
     auth,
@@ -280,17 +280,28 @@ function parseListEnv(value: string | undefined): string[] | undefined {
   return value.split(delimiter).map((item) => item.trim()).filter(Boolean)
 }
 
+function resolvePort(envValue: string | undefined): number | undefined {
+  if (envValue === undefined) return undefined
+  const parsed = Number.parseInt(envValue, 10)
+  if (Number.isNaN(parsed) || parsed < 1 || parsed > 65535) {
+    console.warn(`[config] Invalid PORT "${envValue}", falling back to config file or default`)
+    return undefined
+  }
+  return parsed
+}
+
 export function writeConfig(config: AppConfig): void {
   const validated = validateConfig(config)
-  const configDir = dirname(CONFIG_PATH)
+  const configPath = getConfigPath()
+  const configDir = dirname(configPath)
 
   if (!existsSync(configDir)) {
     mkdirSync(configDir, { recursive: true })
   }
 
-  writeFileSync(CONFIG_PATH, JSON.stringify(validated, null, 2), 'utf-8')
+  writeFileSync(configPath, JSON.stringify(validated, null, 2), 'utf-8')
 }
 
 export function getConfigPath(): string {
-  return CONFIG_PATH
+  return join(resolveTuringHome(), 'config.json')
 }

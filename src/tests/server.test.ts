@@ -368,8 +368,11 @@ test('GET /api/docs returns unauthenticated API reference', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/docs`)
     assert.equal(response.status, 200)
-    const payload = await response.json() as { createSession: { path: string } }
+    const payload = await response.json() as { createSession: { path: string }; agentManagement: { createApiAgent: { path: string }; createCliAgent: { path: string } } }
     assert.equal(payload.createSession.path, '/api/sessions')
+    assert.ok(payload.agentManagement, 'docs include agentManagement section')
+    assert.equal(payload.agentManagement.createApiAgent.path, '/api/agents')
+    assert.equal(payload.agentManagement.createCliAgent.path, '/api/config/agents')
   })
 })
 
@@ -1224,4 +1227,41 @@ test('GET /api/tasks limit+offset only returns the requesting user tasks', async
     assert.equal(payload.length, 2)
     assert.ok(payload.every((t) => t.id.startsWith('owner-task-')), 'no cross-user leakage')
   })
+})
+
+test('EADDRINUSE prints a friendly message and exits with code 1', async () => {
+  const blocker = http.createServer()
+  await new Promise<void>((resolve) => blocker.listen(0, resolve))
+  const blockerAddr = blocker.address()
+  if (!blockerAddr || typeof blockerAddr === 'string') throw new Error('blocker did not start')
+  const occupiedPort = blockerAddr.port
+
+  const dir = mkdtempSync(join(tmpdir(), 'turing-eaddrinuse-'))
+  state.initDb(join(dir, 'turing.db'))
+
+  const originalExit = process.exit
+  const originalStderrWrite = process.stderr.write.bind(process.stderr)
+  let exitCode: number | null = null
+  let stderrOutput = ''
+  process.exit = ((code?: number) => { exitCode = code ?? 0; return undefined as never }) as typeof process.exit
+  process.stderr.write = ((chunk: string | Uint8Array) => { stderrOutput += chunk.toString(); return true }) as typeof process.stderr.write
+
+  let server: http.Server | undefined
+  try {
+    const router = new Router()
+    server = createServer(router, occupiedPort, new StubAgentCatalog() as never)
+    await new Promise<void>((resolve) => {
+      server!.on('error', () => resolve())
+      setTimeout(resolve, 2000)
+    })
+    assert.equal(exitCode, 1)
+    assert.match(stderrOutput, /端口.*已被占用/)
+  } finally {
+    process.exit = originalExit
+    process.stderr.write = originalStderrWrite
+    await new Promise<void>((resolve) => { server?.close(() => resolve()); setTimeout(resolve, 500) })
+    await new Promise<void>((resolve) => blocker.close(() => resolve()))
+    state.closeDb()
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

@@ -22,3 +22,4 @@ logs/
 .generated-skills/
 downloads/
 .gstack/
+.DS_Store

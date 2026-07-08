@@ -186,6 +186,13 @@ h3 { font-size: 1.15rem; font-weight: 600; }
 .badge-paused  { background: rgba(234,179,8,0.12); color: var(--yellow); }
 .badge-paused::before  { background: var(--yellow); }
 
+/* --- Running task elapsed timer (task list cards) --- */
+.task-running-elapsed {
+  color: var(--green);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- Input --- */
 .input {
   width: 100%;
@@ -784,6 +791,23 @@ textarea.input { resize: vertical; min-height: 80px; }
   50%      { box-shadow: 0 0 40px rgba(99,102,241,0.35); }
 }
 .pulse-glow { animation: pulse-glow 3s ease-in-out infinite; }
+
+/* --- Reduced motion: respect prefers-reduced-motion --- */
+@media (prefers-reduced-motion: reduce) {
+  .fade-in-up,
+  .delay-1,
+  .delay-2,
+  .delay-3,
+  .delay-4 {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .pulse-glow,
+  .stream-cursor {
+    animation: none;
+  }
+}
 
 /* ============================================================
    Settings-specific

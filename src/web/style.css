@@ -196,6 +196,13 @@ h3 { font-size: 1.15rem; font-weight: 600; }
 .badge-invalid { background: rgba(239,68,68,0.12); color: var(--red); }
 .badge-invalid::before { background: var(--red); }
 
+/* --- Running task elapsed timer (task list cards) --- */
+.task-running-elapsed {
+  color: var(--green);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- Input --- */
 .input {
   width: 100%;

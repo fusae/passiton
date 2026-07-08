@@ -14,6 +14,12 @@ npm start
 
 Open `http://localhost:4590`.
 
+Optional verification (run the test suite):
+
+```bash
+npm test
+```
+
 ## Prerequisites
 
 - **Node.js 20+**

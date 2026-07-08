@@ -13,11 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed hardcoded personal binary paths from `DREAMINA_COMMAND` and `GeminiImageAdapter`. Both now require explicit environment configuration and degrade gracefully when unconfigured.
 - Rewrote `docs/README.md` to remove personal-assistant references and fix path/status inaccuracies.
 - Added `stopped` to documented session status values in `docs/EXTERNAL_AGENT_USAGE.md`.
+- Aligned README and CONTRIBUTING quickstart commands, agent status flow, External Task Provider import paths, HTTP API endpoint list, and `timeout` semantics with actual code behavior.
 
 ### Added
 
+- `agentManagement` section in `GET /api/docs` self-describing API reference, documenting `POST /api/agents` (API Assistant), `PUT`/`DELETE /api/agents/:name`, and `POST`/`PUT`/`DELETE /api/config/agents` (local CLI Agent config) with required fields and minimal body examples.
 - `LICENSE` (Apache-2.0), `CONTRIBUTING.md`, `SECURITY.md`, this `CHANGELOG.md`.
 - Environment variable `TURING_GEMINI_SKILL_SCRIPT` for the experimental Gemini Image adapter.
+
+### Fixed
+
+- Landing page content was invisible under `prefers-reduced-motion` because the entrance animation held `opacity:0` and never recovered.
+- Startup on an occupied port crashed with a raw stack trace; it now prints a single actionable error line.
+- The `PORT` environment variable was documented in `.env.example` but never read by the server; it is now honoured with priority `PORT` > config file `server.port` > default `4590`.
 
 ## [0.1.0] - 2026-06-21
 
@@ -34,5 +42,5 @@ Initial public baseline. Local-first agent-to-agent orchestration:
 - **Web UI**, HTTP API, WebSocket events, and `turing` CLI.
 - **Auth**: JWT with auto-generated secret on first run, encrypted provider key vault, local-access auto-login.
 
-[Unreleased]: https://github.com/<owner>/<repo>/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/<owner>/<repo>/releases/tag/v0.1.0
+[Unreleased]: https://github.com/fusae/turing/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/fusae/turing/releases/tag/v0.1.0

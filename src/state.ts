@@ -1,9 +1,9 @@
 // State module — SQLite persistence via better-sqlite3
 
 import Database from 'better-sqlite3'
-import { homedir } from 'os'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
+import { resolveTuringHome } from './paths.js'
 import type {
   Session,
   Message,
@@ -28,7 +28,7 @@ import type {
   ExternalJob,
 } from './types.js'
 
-const DB_DIR = join(homedir(), '.turing')
+const DB_DIR = resolveTuringHome()
 const DB_PATH = join(DB_DIR, 'turing.db')
 const DEFAULT_MESSAGE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 const MESSAGE_GC_INTERVAL_MS = 60 * 60 * 1000
@@ -85,7 +85,7 @@ export function initDb(
   dbPath = DB_PATH,
   options?: { messageRetentionMs?: number }
 ): void {
-  mkdirSync(join(homedir(), '.turing'), { recursive: true })
+  mkdirSync(resolveTuringHome(), { recursive: true })
   db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
