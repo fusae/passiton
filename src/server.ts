@@ -1672,7 +1672,7 @@ function findReusableMcpSession(userId: string, params: {
   const candidates = state.listSessions({ userId, limit: 50 })
     .filter((session) => session.status === 'active' || session.status === 'paused')
   const prompts = state.getFirstHumanMessages(candidates.map((session) => session.id))
-  return candidates.find((session) => (
+  const cheapMatch = candidates.filter((session) => (
     sameAgentRef(session.from, params.from) &&
     sameAgentRef(session.to, params.to) &&
     prompts.get(session.id) === params.initialPrompt &&
@@ -1680,10 +1680,19 @@ function findReusableMcpSession(userId: string, params: {
     session.mode === (params.mode ?? 'freeform') &&
     session.maxRounds === (params.maxRounds ?? loadConfig().defaults.maxRounds) &&
     session.approveMode === (params.approveMode ?? false) &&
-    session.permissionMode === (params.permissionMode ?? 'safe') &&
-    stableJson(session.context) === stableJson(params.context) &&
-    (params.systemPrompts === undefined || stableJson(session.systemPrompts) === stableJson(params.systemPrompts))
+    session.permissionMode === (params.permissionMode ?? 'safe')
   ))
+  for (const candidate of cheapMatch) {
+    const full = state.getSession(candidate.id, userId)
+    if (!full) continue
+    if (
+      stableJson(full.context) === stableJson(params.context) &&
+      (params.systemPrompts === undefined || stableJson(full.systemPrompts) === stableJson(params.systemPrompts))
+    ) {
+      return full
+    }
+  }
+  return undefined
 }
 
 function sameAgentRef(a: AgentRef, b: AgentRef): boolean {

@@ -339,3 +339,72 @@ test('stats aggregate sessions, pipelines, and agent usage', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('listSessions returns slim rows without context/system_prompts/artifacts/gitSnapshot', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
+
+  try {
+    state.initDb(join(dir, 'turing.db'))
+    state.createSession({
+      id: 'slim-session-1',
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      context: { text: 'large context blob', rules: 'do things' },
+      systemPrompts: { from: 'you are agent A', to: 'you are agent B' },
+      artifacts: { generatedFiles: ['output.md'] },
+      gitSnapshot: 'abc123',
+    })
+    state.createSession({
+      id: 'slim-session-2',
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+    })
+
+    const sessions = state.listSessions()
+
+    assert.equal(sessions.length, 2)
+    const s1 = sessions.find((s) => s.id === 'slim-session-1')!
+    assert.ok(s1, 'slim-session-1 should be in list')
+    assert.equal(s1.context, undefined, 'listSessions should not include context')
+    assert.equal(s1.systemPrompts, undefined, 'listSessions should not include systemPrompts')
+    assert.equal(s1.artifacts, undefined, 'listSessions should not include artifacts')
+    assert.equal(s1.gitSnapshot, undefined, 'listSessions should not include gitSnapshot')
+    assert.equal(s1.status, 'active', 'listSessions should still include status')
+    assert.equal(s1.from.adapter, 'codex', 'listSessions should still include from')
+
+    const sessionsByStatus = state.listSessions({ status: 'active' })
+    assert.equal(sessionsByStatus.length, 2)
+    assert.equal(sessionsByStatus[0].context, undefined)
+    assert.equal(sessionsByStatus[0].systemPrompts, undefined)
+  } finally {
+    state.closeDb()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('getSession returns full rows with context/system_prompts/artifacts', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
+
+  try {
+    state.initDb(join(dir, 'turing.db'))
+    state.createSession({
+      id: 'full-session',
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      context: { text: 'large context blob', rules: 'do things' },
+      systemPrompts: { from: 'you are agent A', to: 'you are agent B' },
+      artifacts: { generatedFiles: ['output.md'] },
+      gitSnapshot: 'abc123',
+    })
+
+    const session = state.getSession('full-session')!
+    assert.ok(session, 'getSession should return the session')
+    assert.deepEqual(session.context, { text: 'large context blob', rules: 'do things' })
+    assert.deepEqual(session.systemPrompts, { from: 'you are agent A', to: 'you are agent B' })
+    assert.deepEqual(session.artifacts, { generatedFiles: ['output.md'] })
+    assert.equal(session.gitSnapshot, 'abc123')
+  } finally {
+    state.closeDb()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

@@ -964,22 +964,32 @@ export function resetSessionForPipelineRerun(id: string): Session {
   return getSession(id)!
 }
 
+const SESSION_SLIM_COLUMNS = [
+  'id', 'user_id', 'idempotency_key',
+  'from_adapter', 'from_label', 'to_adapter', 'to_label',
+  'status', 'mode', 'next_turn', 'max_rounds', 'current_round',
+  'approve_mode', 'permission_mode', 'cwd', 'template_id',
+  'error_type', 'error_round', 'error_message', 'last_agent_output',
+  'resume_count', 'created_at', 'updated_at',
+].join(', ')
+
 export function listSessions(filter?: { status?: SessionStatus; userId?: string; limit?: number }): Session[] {
   const limit = filter?.limit && Number.isInteger(filter.limit) && filter.limit > 0 ? filter.limit : undefined
   const applyLimit = (rows: Record<string, unknown>[]) => limit ? rows.slice(0, limit) : rows
+  const cols = SESSION_SLIM_COLUMNS
   if (filter?.status && filter.userId) {
-    const rows = db.prepare('SELECT * FROM sessions WHERE status = ? AND user_id = ? ORDER BY created_at DESC').all(filter.status, filter.userId) as Record<string, unknown>[]
+    const rows = db.prepare(`SELECT ${cols} FROM sessions WHERE status = ? AND user_id = ? ORDER BY created_at DESC`).all(filter.status, filter.userId) as Record<string, unknown>[]
     return applyLimit(rows).map(rowToSession)
   }
   if (filter?.status) {
-    const rows = db.prepare('SELECT * FROM sessions WHERE status = ? ORDER BY created_at DESC').all(filter.status) as Record<string, unknown>[]
+    const rows = db.prepare(`SELECT ${cols} FROM sessions WHERE status = ? ORDER BY created_at DESC`).all(filter.status) as Record<string, unknown>[]
     return applyLimit(rows).map(rowToSession)
   }
   if (filter?.userId) {
-    const rows = db.prepare('SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC').all(filter.userId) as Record<string, unknown>[]
+    const rows = db.prepare(`SELECT ${cols} FROM sessions WHERE user_id = ? ORDER BY created_at DESC`).all(filter.userId) as Record<string, unknown>[]
     return applyLimit(rows).map(rowToSession)
   }
-  const rows = db.prepare('SELECT * FROM sessions ORDER BY created_at DESC').all() as Record<string, unknown>[]
+  const rows = db.prepare(`SELECT ${cols} FROM sessions ORDER BY created_at DESC`).all() as Record<string, unknown>[]
   return applyLimit(rows).map(rowToSession)
 }
 
