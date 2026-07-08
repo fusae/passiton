@@ -4,6 +4,7 @@ import Database from 'better-sqlite3'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
 import { resolveTuringHome } from './paths.js'
+import { clampSessionContext } from './prompts.js'
 import type {
   Session,
   Message,
@@ -93,7 +94,49 @@ export function initDb(
   messageRetentionMs = options?.messageRetentionMs ?? DEFAULT_MESSAGE_RETENTION_MS
   lastMessageGcAt = 0
   createTables()
+  runOneTimeBloatMigration()
   pruneExpiredMessages()
+}
+
+/**
+ * One-time migration (user_version 0 → 1) that cleans up legacy DB bloat:
+ *
+ * - system_prompts: any row whose stored JSON exceeds 1 MB is set to NULL.
+ *   These are always generated prompts (now reconstructed at runtime via
+ *   resolveSystemPrompts).  User-provided prompts are tiny (< 10 KB) and
+ *   are never touched.
+ *
+ * - context: left AS-IS.  Context is user-supplied structured data (file
+ *   contents, rules, text).  Setting it to NULL would silently break session
+ *   reconstruction — the agent would lose all background context for that
+ *   session, with no way to recover.  Going forward, new writes are clamped
+ *   by clampSessionContext(), so the problem won't grow.  Existing oversized
+ *   context rows are a one-time cost that decreases as old sessions age out.
+ *
+ * After cleanup, VACUUM reclaims the freed pages.
+ */
+function runOneTimeBloatMigration(): void {
+  const version = (db.pragma('user_version', { simple: true }) as number) ?? 0
+  if (version >= 1) return
+
+  console.log('[turing] Running one-time DB bloat cleanup migration (user_version 0 → 1)…')
+
+  // ── system_prompts: NULL out anything over 1 MB ──
+  const promptResult = db.prepare(
+    `UPDATE sessions SET system_prompts = NULL WHERE LENGTH(system_prompts) > 1048576`
+  ).run()
+  if (promptResult.changes > 0) {
+    console.log(`[turing] Bloat cleanup: nulled ${promptResult.changes} oversized system_prompts row(s)`)
+  }
+
+  // context: intentionally NOT touched (see function doc above).
+
+  // ── VACUUM to reclaim disk space ──
+  console.log('[turing] Bloat cleanup: running VACUUM to reclaim freed space (may take a few seconds)…')
+  db.exec('VACUUM')
+
+  db.pragma('user_version = 1')
+  console.log('[turing] Bloat cleanup migration complete (user_version set to 1)')
 }
 
 export function closeDb(): void {
@@ -676,7 +719,7 @@ export function createTask(params: {
     params.prompt,
     params.permissionMode ?? 'safe',
     params.cwd ?? null,
-    params.context ? JSON.stringify(params.context) : null,
+    params.context ? JSON.stringify(clampSessionContext(params.context) ?? params.context) : null,
     params.systemPrompt ?? null,
     now,
     now
@@ -841,7 +884,7 @@ export function createSession(params: {
     params.approveMode ? 1 : 0,
     params.permissionMode ?? 'safe',
     params.cwd ?? null,
-    params.context ? JSON.stringify(params.context) : null,
+    params.context ? JSON.stringify(clampSessionContext(params.context) ?? params.context) : null,
     params.systemPrompts ? JSON.stringify(params.systemPrompts) : null,
     params.templateId ?? null,
     params.gitSnapshot ?? null,
@@ -887,7 +930,7 @@ export function updateSession(id: string, updates: Partial<Pick<Session, 'status
   if (updates.errorMessage !== undefined) { fields.push('error_message = ?'); values.push(updates.errorMessage) }
   if (updates.lastAgentOutput !== undefined) { fields.push('last_agent_output = ?'); values.push(updates.lastAgentOutput) }
   if (updates.resumeCount !== undefined) { fields.push('resume_count = ?'); values.push(updates.resumeCount) }
-  if (updates.context !== undefined) { fields.push('context = ?'); values.push(JSON.stringify(updates.context)) }
+  if (updates.context !== undefined) { fields.push('context = ?'); values.push(JSON.stringify(clampSessionContext(updates.context) ?? updates.context)) }
   if (updates.systemPrompts !== undefined) { fields.push('system_prompts = ?'); values.push(JSON.stringify(updates.systemPrompts)) }
   if (updates.gitSnapshot !== undefined) { fields.push('git_snapshot = ?'); values.push(updates.gitSnapshot) }
   if (updates.artifacts !== undefined) { fields.push('artifacts = ?'); values.push(JSON.stringify(updates.artifacts)) }

@@ -1,6 +1,133 @@
 // Prompts module — system prompt templates for each session mode
 
-import type { SessionMode, AgentRef, SessionContext } from './types.js'
+import type { SessionMode, AgentRef, SessionContext, SessionContextFile } from './types.js'
+
+// ── Context clamping ──────────────────────────────────────────────────────────
+
+/** Maximum size of a single context file content (256 KB). */
+export const CONTEXT_FILE_MAX_BYTES = 256 * 1024
+/** Maximum total size of all context files + text (2 MB). */
+export const CONTEXT_TOTAL_MAX_BYTES = 2 * 1024 * 1024
+
+/**
+ * Clamp a SessionContext so that no single file exceeds {@link CONTEXT_FILE_MAX_BYTES}
+ * and the combined size of all files + text stays within {@link CONTEXT_TOTAL_MAX_BYTES}.
+ *
+ * When truncation occurs, a marker line is appended to the affected content
+ * so consumers can tell their data was modified.
+ *
+ * Returns a *new* object — the input is never mutated.
+ */
+export function clampSessionContext(context?: SessionContext): SessionContext | undefined {
+  if (!context) return context
+
+  // Helper: truncate a string to *byteLength* and append a marker.
+  function truncateWithMarker(content: string, maxBytes: number, originalBytes: number): string {
+    // Encode, slice at byte boundary, decode back (handles multi-byte chars).
+    const buf = Buffer.from(content, 'utf8')
+    if (buf.length <= maxBytes) return content
+    const sliced = buf.subarray(0, Math.max(0, maxBytes - 200)) // leave room for marker
+    let result = sliced.toString('utf8')
+    // Fix any trailing partial multi-byte sequence.
+    for (let i = 0; i < 4; i++) {
+      try {
+        result = Buffer.from(result, 'utf8').toString('utf8')
+        break
+      } catch {
+        result = result.slice(0, -1)
+      }
+    }
+    const originalKB = Math.round(originalBytes / 1024)
+    const keptKB = Math.round(maxBytes / 1024)
+    result += `\n[Turing: file truncated from ${originalKB}KB to ${keptKB}KB]`
+    return result
+  }
+
+  // Byte-length helper (UTF-8).
+  function byteLength(s: string): number {
+    return Buffer.byteLength(s, 'utf8')
+  }
+
+  // --- Phase 1: clamp individual files to CONTEXT_FILE_MAX_BYTES ---
+  let files: SessionContextFile[] | undefined
+  let fileChanged = false
+  if (context.files && context.files.length > 0) {
+    files = context.files.map((file) => {
+      const originalBytes = byteLength(file.content)
+      if (originalBytes > CONTEXT_FILE_MAX_BYTES) {
+        fileChanged = true
+        return {
+          ...file,
+          content: truncateWithMarker(file.content, CONTEXT_FILE_MAX_BYTES, originalBytes),
+        }
+      }
+      return file
+    })
+  }
+
+  // --- Phase 2: if total files + text still exceeds limit, shrink largest files ---
+  let text = context.text
+  const computeTotal = (): number => {
+    let total = 0
+    for (const f of files ?? []) total += byteLength(f.content)
+    if (text) total += byteLength(text)
+    return total
+  }
+
+  let totalChanged = false
+  while (computeTotal() > CONTEXT_TOTAL_MAX_BYTES && files && files.length > 0) {
+    // Find the largest file by current byte size.
+    let maxIndex = 0
+    let maxSize = 0
+    for (let i = 0; i < files.length; i++) {
+      const size = byteLength(files[i].content)
+      if (size > maxSize) {
+        maxSize = size
+        maxIndex = i
+      }
+    }
+    if (maxSize === 0) break
+
+    const total = computeTotal()
+    const overage = total - CONTEXT_TOTAL_MAX_BYTES
+    const currentSize = byteLength(files[maxIndex].content)
+    const targetSize = Math.max(0, currentSize - overage)
+    if (targetSize === 0) {
+      // Remove the file entirely if target is 0.
+      files.splice(maxIndex, 1)
+      totalChanged = true
+      continue
+    }
+    const originalContent = files[maxIndex].content
+    const originalBytes = byteLength(originalContent)
+    files[maxIndex] = {
+      ...files[maxIndex],
+      content: truncateWithMarker(originalContent, targetSize, originalBytes),
+    }
+    totalChanged = true
+  }
+
+  // If text alone is still over the limit (rare, but possible if no files),
+  // truncate it too.
+  if (text) {
+    const textBytes = byteLength(text)
+    if (textBytes > CONTEXT_TOTAL_MAX_BYTES) {
+      text = truncateWithMarker(text, CONTEXT_TOTAL_MAX_BYTES, textBytes)
+      totalChanged = true
+    }
+  }
+
+  // Build result only if something changed (avoid unnecessary copy).
+  if (!fileChanged && !totalChanged) return context
+
+  console.warn(`[turing] session context clamped (file-level=${fileChanged}, total-level=${totalChanged})`)
+
+  const result: SessionContext = {}
+  if (context.rules) result.rules = context.rules
+  if (files && files.length > 0) result.files = files
+  if (text) result.text = text
+  return Object.keys(result).length > 0 ? result : undefined
+}
 
 interface PromptPair {
   from: string
