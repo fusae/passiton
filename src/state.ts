@@ -769,16 +769,15 @@ export function listTasks(filter?: { status?: TaskStatus; userId?: string; limit
   return rows.map(rowToTask)
 }
 
-export function updateTask(id: string, updates: Partial<Pick<Task,
+export function updateTask(id: string, updates: Omit<Partial<Pick<Task,
   'status' |
   'output' |
   'result' |
   'errorMessage' |
   'lastAgentOutput' |
-  'workspaceState' |
   'startedAt' |
   'finishedAt'
->>, userId?: string): Task {
+>>, 'workspaceState'> & { workspaceState?: WorkspaceDirtyState | null }, userId?: string): Task {
   const fields: string[] = ['updated_at = ?']
   const values: unknown[] = [Date.now()]
 
@@ -787,7 +786,14 @@ export function updateTask(id: string, updates: Partial<Pick<Task,
   if (updates.result !== undefined) { fields.push('result = ?'); values.push(updates.result) }
   if (updates.errorMessage !== undefined) { fields.push('error_message = ?'); values.push(updates.errorMessage) }
   if (updates.lastAgentOutput !== undefined) { fields.push('last_agent_output = ?'); values.push(updates.lastAgentOutput) }
-  if (updates.workspaceState !== undefined) { fields.push('workspace_state = ?'); values.push(JSON.stringify(updates.workspaceState)) }
+  if (updates.workspaceState !== undefined) {
+    if (updates.workspaceState === null) {
+      fields.push('workspace_state = NULL')
+    } else {
+      fields.push('workspace_state = ?')
+      values.push(JSON.stringify(updates.workspaceState))
+    }
+  }
   if (updates.startedAt !== undefined) { fields.push('started_at = ?'); values.push(updates.startedAt) }
   if (updates.finishedAt !== undefined) { fields.push('finished_at = ?'); values.push(updates.finishedAt) }
 

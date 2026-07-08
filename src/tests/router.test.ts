@@ -920,9 +920,15 @@ test('failed task with cwd captures workspace dirty state', async () => {
       const failed = state.getTask(task.id)
       assert.equal(failed?.status, 'error')
       assert.ok(failed?.workspaceState, 'workspaceState should be present on failed task')
-      assert.equal(failed?.workspaceState?.dirty, true)
-      assert.ok((failed?.workspaceState?.changedFileCount ?? 0) > 0, 'should detect changed files')
-      assert.ok(failed?.workspaceState?.files?.some(f => f.includes('modified.txt')), 'should list modified.txt')
+      // modified.txt was dirty BEFORE the task started running (baseline captured at
+      // running transition), so it is classified as preexisting, not agent-caused.
+      assert.equal(failed?.workspaceState?.dirty, false)
+      assert.equal(failed?.workspaceState?.changedFileCount, 0)
+      assert.ok((failed?.workspaceState?.preexistingFileCount ?? 0) > 0, 'should detect preexisting dirty files')
+      assert.ok(
+        failed?.workspaceState?.preexistingFiles?.some(f => f.includes('modified.txt')),
+        'should list modified.txt as preexisting'
+      )
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -948,6 +954,122 @@ test('failed task with non-git cwd has no workspace state', async () => {
       const failed = state.getTask(task.id)
       assert.equal(failed?.status, 'error')
       assert.equal(failed?.workspaceState, undefined)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+test('workspace dirty diff: pre-existing dirty file + agent-caused change are separated', async () => {
+  await withTempDb(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turing-diff-'))
+    try {
+      execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.name', 'Turing Test'], { cwd: dir, stdio: 'ignore' })
+      writeFileSync(join(dir, 'committed.txt'), 'base', 'utf-8')
+      execFileSync('git', ['add', '.'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' })
+      // Pre-existing dirty file (before task starts)
+      writeFileSync(join(dir, 'preexisting.txt'), 'user WIP', 'utf-8')
+
+      const router = new Router({ retries: 0 })
+      router.registerAdapter(new StubAdapter('opencode', async () => {
+        // Agent creates a new dirty file during the task
+        writeFileSync(join(dir, 'agent-changed.txt'), 'agent change', 'utf-8')
+        throw new Error('intentional failure')
+      }))
+
+      const task = router.startTask({
+        agent: { adapter: 'opencode' },
+        prompt: 'change and fail',
+        cwd: dir,
+      })
+
+      await waitFor(() => state.getTask(task.id)?.status === 'error')
+      const failed = state.getTask(task.id)
+      const ws = failed?.workspaceState
+      assert.ok(ws, 'workspaceState should be present')
+      // Agent-caused: only agent-changed.txt
+      assert.equal(ws?.dirty, true)
+      assert.equal(ws?.changedFileCount, 1)
+      assert.ok(ws?.files?.some(f => f.includes('agent-changed.txt')), 'files should contain agent-changed.txt')
+      assert.ok(!ws?.files?.some(f => f.includes('preexisting.txt')), 'files should NOT contain preexisting.txt')
+      // Pre-existing: only preexisting.txt
+      assert.equal(ws?.preexistingFileCount, 1)
+      assert.ok(ws?.preexistingFiles?.some(f => f.includes('preexisting.txt')), 'preexisting should contain preexisting.txt')
+      assert.ok(!ws?.preexistingFiles?.some(f => f.includes('agent-changed.txt')), 'preexisting should NOT contain agent-changed.txt')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+test('workspace dirty diff: only pre-existing dirty, no agent-caused change', async () => {
+  await withTempDb(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turing-pure-preexisting-'))
+    try {
+      execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.name', 'Turing Test'], { cwd: dir, stdio: 'ignore' })
+      writeFileSync(join(dir, 'committed.txt'), 'base', 'utf-8')
+      execFileSync('git', ['add', '.'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' })
+      // Pre-existing dirty file (before task starts)
+      writeFileSync(join(dir, 'preexisting.txt'), 'user WIP', 'utf-8')
+
+      const router = new Router({ retries: 0 })
+      router.registerAdapter(new StubAdapter('opencode', async () => {
+        throw new Error('intentional failure')
+      }))
+
+      const task = router.startTask({
+        agent: { adapter: 'opencode' },
+        prompt: 'fail without changing',
+        cwd: dir,
+      })
+
+      await waitFor(() => state.getTask(task.id)?.status === 'error')
+      const failed = state.getTask(task.id)
+      const ws = failed?.workspaceState
+      assert.ok(ws, 'workspaceState should be present')
+      // No agent-caused changes
+      assert.equal(ws?.dirty, false)
+      assert.equal(ws?.changedFileCount, 0)
+      assert.deepEqual(ws?.files, [])
+      // Pre-existing dirty detected
+      assert.equal(ws?.preexistingFileCount, 1)
+      assert.ok(ws?.preexistingFiles?.some(f => f.includes('preexisting.txt')))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+test('successful task clears workspace_state', async () => {
+  await withTempDb(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turing-clear-'))
+    try {
+      execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.name', 'Turing Test'], { cwd: dir, stdio: 'ignore' })
+      writeFileSync(join(dir, 'committed.txt'), 'base', 'utf-8')
+      execFileSync('git', ['add', '.'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' })
+
+      const router = new Router()
+      router.registerAdapter(new StubAdapter('opencode', async () => '[RESULT]done[/RESULT]'))
+
+      const task = router.startTask({
+        agent: { adapter: 'opencode' },
+        prompt: 'succeed',
+        cwd: dir,
+      })
+
+      await waitFor(() => state.getTask(task.id)?.status === 'done')
+      const done = state.getTask(task.id)
+      assert.equal(done?.status, 'done')
+      assert.equal(done?.workspaceState, undefined)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

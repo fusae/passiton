@@ -165,7 +165,8 @@ export class Router extends EventEmitter {
   recoverTasks(): void {
     for (const task of state.listTasks({ status: 'running' })) {
       if (task.cwd) {
-        checkWorkspaceDirty(task.cwd).then((workspaceState) => {
+        const baseline = task.workspaceState?.baselineFiles
+        checkWorkspaceDirty(task.cwd, baseline).then((workspaceState) => {
           const failed = state.updateTask(task.id, {
             status: 'error',
             errorMessage: 'Task interrupted by server restart',
@@ -292,7 +293,9 @@ export class Router extends EventEmitter {
     const adapter = this.resolveAdapter(task.agent.adapter, task.userId)
     if (!adapter) {
       if (state.getTask(task.id, task.userId)?.status === 'stopped') return
-      const workspaceState = task.cwd ? await checkWorkspaceDirty(task.cwd) : undefined
+      const currentTask = state.getTask(task.id, task.userId)
+      const baseline = currentTask?.workspaceState?.baselineFiles
+      const workspaceState = task.cwd ? await checkWorkspaceDirty(task.cwd, baseline) : undefined
       const failed = state.updateTask(task.id, {
         status: 'error',
         errorMessage: `Adapter not found: ${task.agent.adapter}`,
@@ -308,6 +311,15 @@ export class Router extends EventEmitter {
       startedAt: Date.now(),
     }, task.userId)
     this.emit('event', { type: 'task:updated', payload: running } satisfies WsEvent)
+
+    if (task.cwd) {
+      const baselineFiles = await snapshotWorkspaceDirty(task.cwd)
+      if (baselineFiles) {
+        state.updateTask(task.id, {
+          workspaceState: { dirty: false, changedFileCount: 0, files: [], baselineFiles },
+        }, task.userId)
+      }
+    }
 
     let lastOutput = ''
     let liveOutput = ''
@@ -338,11 +350,14 @@ export class Router extends EventEmitter {
         result: extractResultSummary(output),
         lastAgentOutput: liveOutput || lastOutput || output,
         finishedAt: Date.now(),
+        workspaceState: null,
       }, task.userId)
       this.emit('event', { type: 'task:done', payload: done } satisfies WsEvent)
     } catch (err) {
       if (state.getTask(task.id, task.userId)?.status === 'stopped') return
-      const workspaceState = task.cwd ? await checkWorkspaceDirty(task.cwd) : undefined
+      const currentTask = state.getTask(task.id, task.userId)
+      const baseline = currentTask?.workspaceState?.baselineFiles
+      const workspaceState = task.cwd ? await checkWorkspaceDirty(task.cwd, baseline) : undefined
       const failed = state.updateTask(task.id, {
         status: 'error',
         errorMessage: err instanceof Error ? err.message : String(err),
@@ -2447,7 +2462,22 @@ function captureGitHead(cwd?: string): string | undefined {
 
 const execFileAsync = promisify(execFile)
 
-async function checkWorkspaceDirty(cwd: string): Promise<WorkspaceDirtyState | undefined> {
+async function snapshotWorkspaceDirty(cwd: string): Promise<string[] | undefined> {
+  if (!fs.existsSync(path.join(cwd, '.git'))) return undefined
+  try {
+    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+      cwd,
+      timeout: GIT_STATUS_DIRTY_TIMEOUT_MS,
+      encoding: 'utf8',
+      maxBuffer: 1024 * 512,
+    })
+    return stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+  } catch {
+    return undefined
+  }
+}
+
+async function checkWorkspaceDirty(cwd: string, baseline?: string[]): Promise<WorkspaceDirtyState | undefined> {
   if (!fs.existsSync(path.join(cwd, '.git'))) return undefined
   try {
     const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
@@ -2457,10 +2487,21 @@ async function checkWorkspaceDirty(cwd: string): Promise<WorkspaceDirtyState | u
       maxBuffer: 1024 * 512,
     })
     const lines = stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+    const baselineSet = baseline ? new Set(baseline) : undefined
+    const newFiles = baselineSet
+      ? lines.filter((line) => !baselineSet.has(line))
+      : lines
+    const preexisting = baselineSet
+      ? lines.filter((line) => baselineSet.has(line))
+      : []
     return {
-      dirty: lines.length > 0,
-      changedFileCount: lines.length,
-      files: lines.slice(0, MAX_DIRTY_FILES_DISPLAY),
+      dirty: newFiles.length > 0,
+      changedFileCount: newFiles.length,
+      files: newFiles.slice(0, MAX_DIRTY_FILES_DISPLAY),
+      ...(baselineSet ? {
+        preexistingFileCount: preexisting.length,
+        preexistingFiles: preexisting.slice(0, MAX_DIRTY_FILES_DISPLAY),
+      } : {}),
     }
   } catch {
     return undefined

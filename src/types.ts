@@ -120,6 +120,9 @@ export interface WorkspaceDirtyState {
   dirty: boolean
   changedFileCount: number
   files: string[]
+  baselineFiles?: string[]
+  preexistingFileCount?: number
+  preexistingFiles?: string[]
 }
 
 export interface Task {

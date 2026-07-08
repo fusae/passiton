@@ -646,6 +646,15 @@ textarea.input { resize: vertical; min-height: 80px; }
   max-height: 320px; overflow-y: auto;
 }
 .workspace-warning-file-list li { word-break: break-all; }
+.workspace-warning-neutral {
+  background: rgba(100,116,139,0.06);
+  border-color: rgba(100,116,139,0.2);
+}
+.workspace-warning-neutral .workspace-warning-title {
+  color: var(--text-secondary); font-weight: 500;
+}
+.workspace-warning-preexisting { margin-top: 6px; }
+.workspace-warning-preexisting summary { color: var(--text-muted); font-weight: 500; }
 
 /* ============================================================
    Landing-specific

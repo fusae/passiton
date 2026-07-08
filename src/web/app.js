@@ -1797,6 +1797,48 @@ function renderTaskHeader(task) {
 function renderWorkspaceWarning(task) {
   const ws = task.workspaceState
   if (ws && ws.dirty !== undefined) {
+    const hasNewData = ws.preexistingFileCount !== undefined || ws.preexistingFiles !== undefined
+
+    if (hasNewData) {
+      const hasAgentChanges = ws.changedFileCount > 0
+      const hasPreexisting = (ws.preexistingFileCount ?? 0) > 0
+
+      if (!hasAgentChanges && hasPreexisting) {
+        const preexistingRows = (ws.preexistingFiles || []).map(f => `<li>${escapeHtml(f)}</li>`).join('')
+        return `
+          <section class="workspace-warning workspace-warning-neutral">
+            <div class="workspace-warning-title">工作区有改动，但均为任务开始前已存在</div>
+            <details class="workspace-warning-files">
+              <summary>查看 ${ws.preexistingFileCount} 个文件</summary>
+              <ul class="workspace-warning-file-list">${preexistingRows}</ul>
+            </details>
+          </section>
+        `
+      }
+
+      const fileRows = (ws.files || []).map(f => `<li>${escapeHtml(f)}</li>`).join('')
+      let preexistingSection = ''
+      if (hasPreexisting) {
+        const preexistingRows = (ws.preexistingFiles || []).map(f => `<li>${escapeHtml(f)}</li>`).join('')
+        preexistingSection = `
+          <details class="workspace-warning-files workspace-warning-preexisting">
+            <summary>另有 ${ws.preexistingFileCount} 个文件的改动在任务开始前已存在</summary>
+            <ul class="workspace-warning-file-list">${preexistingRows}</ul>
+          </details>
+        `
+      }
+      return `
+        <section class="workspace-warning">
+          <div class="workspace-warning-title">⚠ 该任务产生了 ${ws.changedFileCount} 个文件的新改动且未正常完成</div>
+          <details class="workspace-warning-files">
+            <summary>查看变更文件列表</summary>
+            <ul class="workspace-warning-file-list">${fileRows}</ul>
+          </details>
+          ${preexistingSection}
+        </section>
+      `
+    }
+
     const fileRows = (ws.files || []).map(f => `<li>${escapeHtml(f)}</li>`).join('')
     return `
       <section class="workspace-warning">
