@@ -91,6 +91,306 @@ const PROVIDER_PRESETS = {
   },
 }
 
+// ── i18n ──────────────────────────────────────────────────────────────────────
+const LANG_KEY = 'turing_lang'
+
+const MESSAGES = {
+  en: {
+    // Navigation
+    'nav.sessions': 'Sessions',
+    'nav.tasks': 'Tasks',
+    'nav.workflows': 'Workflows',
+    'nav.settings': 'Settings',
+
+    // Settings — tabs
+    'settings.tab.apiAssistants': 'API Assistants',
+    'settings.tab.providerKeys': 'Provider Keys',
+    'settings.tab.localCli': 'Local CLI Agents',
+    'settings.tab.diagnostics': 'Diagnostics',
+    'settings.tab.apiDocs': 'API Docs',
+    'settings.tab.general': 'General',
+
+    // Settings — API Assistants
+    'settings.agents.title': 'API Assistants',
+    'settings.agents.desc': 'Manage your AI model connections',
+    'settings.agents.add': '+ Add Assistant',
+    'settings.agents.empty': 'No API assistants configured',
+    'settings.agents.verify': 'Verify',
+    'settings.agents.edit': 'Edit',
+    'settings.agents.delete': 'Delete',
+
+    // Settings — Provider Keys
+    'settings.keys.title': 'Provider Keys',
+    'settings.keys.desc': 'Manage keys used by API assistants and sessions',
+    'settings.keys.add': '+ Add Key',
+    'settings.keys.empty': 'No provider keys stored',
+
+    // Settings — Local CLI Agents
+    'settings.localCli.title': 'Local CLI Agents',
+    'settings.localCli.desc': 'Discovered on this machine; add the ones you want to use in sessions',
+    'settings.localCli.empty': 'No local CLI agents available',
+    'settings.localCli.add': 'Add',
+    'settings.localCli.diagnose': 'Diagnose',
+
+    // Settings — Diagnostics
+    'settings.diagnostics.title': 'Diagnostics',
+    'settings.diagnostics.desc': 'Check deployment and CLI agent runtime status',
+    'settings.diagnostics.refresh': 'Refresh',
+    'settings.diagnostics.deployment': 'Deployment',
+    'settings.diagnostics.notChecked': 'not checked',
+    'settings.diagnostics.run': 'Run',
+
+    // Settings — API Docs
+    'settings.apiDocs.title': 'Session HTTP API',
+
+    // Settings — General
+    'settings.general.title': 'General Settings',
+    'settings.general.maxTurns': 'Default Max Turns',
+    'settings.general.mode': 'Default Mode',
+    'settings.general.mode.collaborate': 'Collaboration',
+    'settings.general.mode.discuss': 'Discuss',
+    'settings.general.mode.review': 'Review',
+    'settings.general.mode.freeform': 'Freeform',
+    'settings.general.workspaces': 'Allowed Workspaces',
+    'settings.general.save': 'Save Settings',
+    'settings.general.language': 'Language',
+    'settings.general.language.en': 'English',
+    'settings.general.language.zh': '中文',
+
+    // Agent diagnostics modal
+    'modal.agentDiagnostics.title': 'Agent Diagnostics',
+
+    // Edit Local CLI Agent modal
+    'modal.localCli.edit.title': 'Edit Local CLI Agent',
+
+    // Add/Edit Assistant modal
+    'modal.agent.add': 'Add Assistant',
+    'modal.agent.edit': 'Edit Assistant',
+    'modal.agent.desc': 'Configure an API-backed model.',
+    'modal.agent.baseUrl': 'Base URL',
+    'modal.agent.providerKey': 'Provider Key',
+    'modal.agent.keyRequired': 'Required',
+    'modal.agent.keyOptional': 'Optional override',
+
+    // Add Provider Key modal
+    'modal.key.title': 'Add Provider Key',
+    'modal.key.desc': 'Stored encrypted in the local key vault.',
+    'modal.key.namePlaceholder': 'Work key',
+
+    // Common form labels
+    'common.name': 'Name',
+    'common.provider': 'Provider',
+    'common.model': 'Model',
+    'common.adapter': 'Adapter',
+    'common.command': 'Command',
+    'common.args': 'Args',
+    'common.timeout': 'Timeout (ms)',
+    'common.env': 'Environment',
+    'common.apiKey': 'API Key',
+    'common.close': 'Close',
+    'common.cancel': 'Cancel',
+    'common.save': 'Save',
+
+    // Status labels
+    'status.ready': 'Available',
+    'status.unverified': 'Unverified',
+    'status.discovered': 'Discovered',
+    'status.no_key': 'No Key',
+    'status.invalid': 'Invalid',
+
+    // Key source labels
+    'keySource.vault': 'saved key',
+    'keySource.assistant': 'agent key',
+    'keySource.global': 'global config',
+
+    // Badge labels
+    'badge.linked': 'linked',
+    'badge.ok': 'ok',
+    'badge.unknown': 'unknown',
+
+    // Toast messages
+    'toast.settingsSaved': 'Settings saved successfully',
+    'toast.assistantSaved': 'Assistant saved',
+    'toast.assistantDeleted': 'Assistant deleted',
+    'toast.keyAdded': 'Provider key added',
+    'toast.keyDeleted': 'Provider key deleted',
+    'toast.localCliAdded': '"{name}" has been added to configured agents',
+    'toast.localCliSaved': '"{name}" saved',
+    'toast.localCliRemoved': '"{name}" removed',
+    'toast.agentValidationFailed': 'Agent was saved but validation failed.',
+    'toast.languageChanged': 'Language switched to {lang}',
+
+    // Confirm dialogs
+    'confirm.deleteAgent.title': 'Delete Assistant',
+    'confirm.deleteAgent.message': 'Delete assistant "{name}"?',
+    'confirm.deleteAgent.confirm': 'Delete',
+    'confirm.deleteKey.title': 'Delete API Key',
+    'confirm.deleteKey.message': 'Delete this API key?',
+    'confirm.deleteKey.confirm': 'Delete',
+    'confirm.deleteLocalCli.title': 'Remove Local CLI Agent',
+    'confirm.deleteLocalCli.message': 'Remove local CLI agent "{name}" from sessions?',
+    'confirm.deleteLocalCli.confirm': 'Remove',
+  },
+
+  zh: {
+    // Navigation
+    'nav.sessions': 'Sessions',
+    'nav.tasks': 'Tasks',
+    'nav.workflows': 'Workflows',
+    'nav.settings': 'Settings',
+
+    // Settings — tabs
+    'settings.tab.apiAssistants': 'API 助手',
+    'settings.tab.providerKeys': '供应商密钥',
+    'settings.tab.localCli': '本地 CLI 代理',
+    'settings.tab.diagnostics': '诊断',
+    'settings.tab.apiDocs': 'API 文档',
+    'settings.tab.general': '通用',
+
+    // Settings — API Assistants
+    'settings.agents.title': 'API 助手',
+    'settings.agents.desc': '管理 AI 模型连接',
+    'settings.agents.add': '+ 添加助手',
+    'settings.agents.empty': '暂无 API 助手',
+    'settings.agents.verify': '验证',
+    'settings.agents.edit': '编辑',
+    'settings.agents.delete': '删除',
+
+    // Settings — Provider Keys
+    'settings.keys.title': '供应商密钥',
+    'settings.keys.desc': '管理 API 助手和会话使用的密钥',
+    'settings.keys.add': '+ 添加密钥',
+    'settings.keys.empty': '暂无供应商密钥',
+
+    // Settings — Local CLI Agents
+    'settings.localCli.title': '本地 CLI 代理',
+    'settings.localCli.desc': '已在本机发现；添加你想在会话中使用的代理',
+    'settings.localCli.empty': '暂无可用的本地 CLI 代理',
+    'settings.localCli.add': '添加',
+    'settings.localCli.diagnose': '诊断',
+
+    // Settings — Diagnostics
+    'settings.diagnostics.title': '诊断',
+    'settings.diagnostics.desc': '检查部署和 CLI 代理运行状态',
+    'settings.diagnostics.refresh': '刷新',
+    'settings.diagnostics.deployment': '部署',
+    'settings.diagnostics.notChecked': '未检查',
+    'settings.diagnostics.run': '运行',
+
+    // Settings — API Docs
+    'settings.apiDocs.title': '会话 HTTP API',
+
+    // Settings — General
+    'settings.general.title': '通用设置',
+    'settings.general.maxTurns': '默认最大轮次',
+    'settings.general.mode': '默认模式',
+    'settings.general.mode.collaborate': '协作',
+    'settings.general.mode.discuss': '讨论',
+    'settings.general.mode.review': '审查',
+    'settings.general.mode.freeform': '自由',
+    'settings.general.workspaces': '允许的工作区',
+    'settings.general.save': '保存设置',
+    'settings.general.language': '语言',
+    'settings.general.language.en': 'English',
+    'settings.general.language.zh': '中文',
+
+    // Agent diagnostics modal
+    'modal.agentDiagnostics.title': '代理诊断',
+
+    // Edit Local CLI Agent modal
+    'modal.localCli.edit.title': '编辑本地 CLI 代理',
+
+    // Add/Edit Assistant modal
+    'modal.agent.add': '添加助手',
+    'modal.agent.edit': '编辑助手',
+    'modal.agent.desc': '配置 API 支持的模型。',
+    'modal.agent.baseUrl': '基础 URL',
+    'modal.agent.providerKey': '供应商密钥',
+    'modal.agent.keyRequired': '必填',
+    'modal.agent.keyOptional': '可选覆盖',
+
+    // Add Provider Key modal
+    'modal.key.title': '添加供应商密钥',
+    'modal.key.desc': '加密存储在本地密钥库中。',
+    'modal.key.namePlaceholder': '工作密钥',
+
+    // Common form labels
+    'common.name': '名称',
+    'common.provider': '供应商',
+    'common.model': '模型',
+    'common.adapter': '适配器',
+    'common.command': '命令',
+    'common.args': '参数',
+    'common.timeout': '超时 (毫秒)',
+    'common.env': '环境变量',
+    'common.apiKey': 'API 密钥',
+    'common.close': '关闭',
+    'common.cancel': '取消',
+    'common.save': '保存',
+
+    // Status labels
+    'status.ready': '可用',
+    'status.unverified': '未验证',
+    'status.discovered': '已发现',
+    'status.no_key': '缺 Key',
+    'status.invalid': '不可用',
+
+    // Key source labels
+    'keySource.vault': '已保存密钥',
+    'keySource.assistant': '代理密钥',
+    'keySource.global': '全局配置',
+
+    // Badge labels
+    'badge.linked': '已关联',
+    'badge.ok': '正常',
+    'badge.unknown': '未知',
+
+    // Toast messages
+    'toast.settingsSaved': '设置保存成功',
+    'toast.assistantSaved': '助手已保存',
+    'toast.assistantDeleted': '助手已删除',
+    'toast.keyAdded': '供应商密钥已添加',
+    'toast.keyDeleted': '供应商密钥已删除',
+    'toast.localCliAdded': '「{name}」已添加到已配置列表',
+    'toast.localCliSaved': '「{name}」已保存',
+    'toast.localCliRemoved': '「{name}」已移除',
+    'toast.agentValidationFailed': '代理已保存但验证失败。',
+    'toast.languageChanged': '语言已切换为 {lang}',
+
+    // Confirm dialogs
+    'confirm.deleteAgent.title': '删除助手',
+    'confirm.deleteAgent.message': '删除助手「{name}」？',
+    'confirm.deleteAgent.confirm': '删除',
+    'confirm.deleteKey.title': '删除 API 密钥',
+    'confirm.deleteKey.message': '删除此 API 密钥？',
+    'confirm.deleteKey.confirm': '删除',
+    'confirm.deleteLocalCli.title': '移除本地 CLI 代理',
+    'confirm.deleteLocalCli.message': '从会话中移除本地 CLI 代理「{name}」？',
+    'confirm.deleteLocalCli.confirm': '移除',
+  },
+}
+
+function getCurrentLang() {
+  const lang = localStorage.getItem(LANG_KEY)
+  return (lang === 'zh' || lang === 'en') ? lang : 'en'
+}
+
+function t(key, params = {}) {
+  const lang = getCurrentLang()
+  let text = MESSAGES[lang]?.[key] ?? MESSAGES.en?.[key] ?? key
+  for (const [k, v] of Object.entries(params)) {
+    text = text.replaceAll(`{${k}}`, String(v))
+  }
+  return text
+}
+
+function setLanguage(lang) {
+  const resolved = (lang === 'zh' || lang === 'en') ? lang : 'en'
+  localStorage.setItem(LANG_KEY, resolved)
+  document.documentElement.lang = resolved
+  render()
+}
+
 // ── Global State ──────────────────────────────────────────────────────────────
 const state = {
   user: null,
@@ -498,16 +798,16 @@ function renderSidebar(active) {
       </div>
       <nav class="sidebar-nav">
         <a href="/sessions" class="${active === 'sessions' ? 'active' : ''}">
-          <span class="nav-icon">◉</span> Sessions
+          <span class="nav-icon">◉</span> ${t('nav.sessions')}
         </a>
         <a href="/tasks" class="${active === 'tasks' ? 'active' : ''}">
-          <span class="nav-icon">▣</span> Tasks
+          <span class="nav-icon">▣</span> ${t('nav.tasks')}
         </a>
         <a href="/workflows" class="${active === 'workflows' ? 'active' : ''}">
-          <span class="nav-icon">⛓</span> Workflows
+          <span class="nav-icon">⛓</span> ${t('nav.workflows')}
         </a>
         <a href="/settings" class="${active === 'settings' ? 'active' : ''}">
-          <span class="nav-icon">⚙</span> Settings
+          <span class="nav-icon">⚙</span> ${t('nav.settings')}
         </a>
       </nav>
       <div class="sidebar-footer">
@@ -1607,11 +1907,11 @@ function renderOnboardingPanel() {
 
 function statusLabel(status) {
   switch (status) {
-    case 'ready': return '可用'
-    case 'unverified': return '未验证'
-    case 'discovered': return '已发现'
-    case 'no_key': return '缺 Key'
-    case 'invalid': return '不可用'
+    case 'ready': return t('status.ready')
+    case 'unverified': return t('status.unverified')
+    case 'discovered': return t('status.discovered')
+    case 'no_key': return t('status.no_key')
+    case 'invalid': return t('status.invalid')
     default: return status
   }
 }
@@ -3860,13 +4160,13 @@ async function renderSettings() {
   // Stale guard: user navigated away while settings data was loading.
   if (state.viewToken !== myToken || location.pathname !== '/settings') return
 
-  const localCliTab = '<button class="tab-btn" data-tab="local-cli" onclick="window.switchSettingsTab(\'local-cli\')">Local CLI Agents</button>'
+  const localCliTab = `<button class="tab-btn" data-tab="local-cli" onclick="window.switchSettingsTab('local-cli')">${t('settings.tab.localCli')}</button>`
   const localCliPanel = `
             <div id="tab-local-cli" class="tab-panel" data-tab="local-cli">
               <div class="flex-between mb-24">
                 <div>
-                  <h3>Local CLI Agents</h3>
-                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Discovered on this machine; add the ones you want to use in sessions</p>
+                  <h3>${t('settings.localCli.title')}</h3>
+                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">${t('settings.localCli.desc')}</p>
                 </div>
               </div>
               <div class="agent-list" id="local-cli-list"></div>
@@ -3880,7 +4180,7 @@ async function renderSettings() {
       <div class="main">
         <header class="topbar">
           <div class="topbar-left">
-            <h2>Settings</h2>
+            <h2>${t('nav.settings')}</h2>
           </div>
           <div class="topbar-right">
             <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
@@ -3891,21 +4191,21 @@ async function renderSettings() {
         <div class="content">
           <div style="max-width: 860px;">
             <div class="tabs">
-              <button class="tab-btn active" data-tab="agents" onclick="window.switchSettingsTab('agents')">API Assistants</button>
-              <button class="tab-btn" data-tab="apikeys" onclick="window.switchSettingsTab('apikeys')">Provider Keys</button>
+              <button class="tab-btn active" data-tab="agents" onclick="window.switchSettingsTab('agents')">${t('settings.tab.apiAssistants')}</button>
+              <button class="tab-btn" data-tab="apikeys" onclick="window.switchSettingsTab('apikeys')">${t('settings.tab.providerKeys')}</button>
               ${localCliTab}
-              <button class="tab-btn" data-tab="diagnostics" onclick="window.switchSettingsTab('diagnostics')">Diagnostics</button>
-              <button class="tab-btn" data-tab="api-docs" onclick="window.switchSettingsTab('api-docs')">API Docs</button>
-              <button class="tab-btn" data-tab="general" onclick="window.switchSettingsTab('general')">General</button>
+              <button class="tab-btn" data-tab="diagnostics" onclick="window.switchSettingsTab('diagnostics')">${t('settings.tab.diagnostics')}</button>
+              <button class="tab-btn" data-tab="api-docs" onclick="window.switchSettingsTab('api-docs')">${t('settings.tab.apiDocs')}</button>
+              <button class="tab-btn" data-tab="general" onclick="window.switchSettingsTab('general')">${t('settings.tab.general')}</button>
             </div>
 
             <div id="tab-agents" class="tab-panel active" data-tab="agents">
               <div class="flex-between mb-24">
                 <div>
-                  <h3>API Assistants</h3>
-                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage your AI model connections</p>
+                  <h3>${t('settings.agents.title')}</h3>
+                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">${t('settings.agents.desc')}</p>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="window.showAgentModal()">+ Add Assistant</button>
+                <button class="btn btn-primary btn-sm" onclick="window.showAgentModal()">${t('settings.agents.add')}</button>
               </div>
 
               <div class="agent-list" id="agents-list"></div>
@@ -3914,10 +4214,10 @@ async function renderSettings() {
             <div id="tab-apikeys" class="tab-panel" data-tab="apikeys">
               <div class="flex-between mb-24">
                 <div>
-                  <h3>Provider Keys</h3>
-                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Manage keys used by API assistants and sessions</p>
+                  <h3>${t('settings.keys.title')}</h3>
+                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">${t('settings.keys.desc')}</p>
                 </div>
-                <button class="btn btn-primary btn-sm" onclick="window.showApiKeyModal()">+ Add Key</button>
+                <button class="btn btn-primary btn-sm" onclick="window.showApiKeyModal()">${t('settings.keys.add')}</button>
               </div>
               <div class="agent-list" id="api-keys-list"></div>
             </div>
@@ -3927,43 +4227,51 @@ async function renderSettings() {
             <div id="tab-diagnostics" class="tab-panel" data-tab="diagnostics">
               <div class="flex-between mb-24">
                 <div>
-                  <h3>Diagnostics</h3>
-                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Check deployment and CLI agent runtime status</p>
+                  <h3>${t('settings.diagnostics.title')}</h3>
+                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">${t('settings.diagnostics.desc')}</p>
                 </div>
-                <button class="btn btn-secondary btn-sm" onclick="window.refreshDiagnostics()">Refresh</button>
+                <button class="btn btn-secondary btn-sm" onclick="window.refreshDiagnostics()">${t('settings.diagnostics.refresh')}</button>
               </div>
               <div id="diagnostics-panel"></div>
             </div>
 
             <div id="tab-api-docs" class="tab-panel" data-tab="api-docs">
-              <h3 class="mb-24">Session HTTP API</h3>
+              <h3 class="mb-24">${t('settings.apiDocs.title')}</h3>
               <pre class="code-block" style="white-space: pre-wrap;">${escapeHtml(JSON.stringify(state.apiDocs || {}, null, 2))}</pre>
             </div>
 
             <div id="tab-general" class="tab-panel" data-tab="general">
-              <h3 class="mb-24">General Settings</h3>
+              <h3 class="mb-24">${t('settings.general.title')}</h3>
 
               <div class="form-group">
-                <label>Default Max Turns</label>
-                <input type="number" class="input" value="${state.config?.defaults?.maxRounds || 20}" id="max-rounds-input">
-              </div>
-
-              <div class="form-group">
-                <label>Default Mode</label>
-                <select class="input" id="mode-input">
-                  <option value="collaborate" ${state.config?.defaults?.mode === 'collaborate' ? 'selected' : ''}>Collaboration</option>
-                  <option value="discuss" ${state.config?.defaults?.mode === 'discuss' ? 'selected' : ''}>Discuss</option>
-                  <option value="review" ${state.config?.defaults?.mode === 'review' ? 'selected' : ''}>Review</option>
-                  <option value="freeform" ${state.config?.defaults?.mode === 'freeform' ? 'selected' : ''}>Freeform</option>
+                <label>${t('settings.general.language')}</label>
+                <select class="input" id="lang-input" onchange="window.changeLanguage(this.value)">
+                  <option value="en" ${getCurrentLang() === 'en' ? 'selected' : ''}>${t('settings.general.language.en')}</option>
+                  <option value="zh" ${getCurrentLang() === 'zh' ? 'selected' : ''}>${t('settings.general.language.zh')}</option>
                 </select>
               </div>
 
               <div class="form-group">
-                <label>Allowed Workspaces</label>
+                <label>${t('settings.general.maxTurns')}</label>
+                <input type="number" class="input" value="${state.config?.defaults?.maxRounds || 20}" id="max-rounds-input">
+              </div>
+
+              <div class="form-group">
+                <label>${t('settings.general.mode')}</label>
+                <select class="input" id="mode-input">
+                  <option value="collaborate" ${state.config?.defaults?.mode === 'collaborate' ? 'selected' : ''}>${t('settings.general.mode.collaborate')}</option>
+                  <option value="discuss" ${state.config?.defaults?.mode === 'discuss' ? 'selected' : ''}>${t('settings.general.mode.discuss')}</option>
+                  <option value="review" ${state.config?.defaults?.mode === 'review' ? 'selected' : ''}>${t('settings.general.mode.review')}</option>
+                  <option value="freeform" ${state.config?.defaults?.mode === 'freeform' ? 'selected' : ''}>${t('settings.general.mode.freeform')}</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label>${t('settings.general.workspaces')}</label>
                 <textarea class="input" id="allowed-workspaces-input" rows="4" placeholder="/home/turing/projects&#10;/Users/me/Projects">${escapeHtml((state.config?.policy?.allowedWorkspaces || []).join('\n'))}</textarea>
               </div>
 
-              <button class="btn btn-primary" onclick="window.saveGeneralSettings()">Save Settings</button>
+              <button class="btn btn-primary" onclick="window.saveGeneralSettings()">${t('settings.general.save')}</button>
             </div>
           </div>
         </div>
@@ -3984,7 +4292,7 @@ function renderAgentsList() {
   const apiAgents = state.agents.filter(agent => agent.kind !== 'local')
 
   if (apiAgents.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No API assistants configured</p>'
+    container.innerHTML = `<p style="color: var(--text-muted); text-align: center; padding: 40px;">${t('settings.agents.empty')}</p>`
     return
   }
 
@@ -4003,9 +4311,9 @@ function renderAgentsList() {
         </div>
         <span class="badge badge-${statusBadgeClass(agent.status)}">${escapeHtml(statusLabel(agent.status))}</span>
         <div class="agent-actions">
-          <button class="btn btn-ghost btn-sm" onclick='window.showAgentDiagnostics(${jsString(agent.name)})'>Verify</button>
-          <button class="btn btn-ghost btn-sm" onclick='window.showAgentModal(${jsString(agent.name)})'>Edit</button>
-          <button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteAgent(${jsString(agent.name)})'>Delete</button>
+          <button class="btn btn-ghost btn-sm" onclick='window.showAgentDiagnostics(${jsString(agent.name)})'>${t('settings.agents.verify')}</button>
+          <button class="btn btn-ghost btn-sm" onclick='window.showAgentModal(${jsString(agent.name)})'>${t('settings.agents.edit')}</button>
+          <button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteAgent(${jsString(agent.name)})'>${t('settings.agents.delete')}</button>
         </div>
       </div>
     `
@@ -4017,7 +4325,7 @@ function renderApiKeysList() {
   if (!container) return
 
   if (state.apiKeys.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No provider keys stored</p>'
+    container.innerHTML = `<p style="color: var(--text-muted); text-align: center; padding: 40px;">${t('settings.keys.empty')}</p>`
     return
   }
 
@@ -4032,7 +4340,7 @@ function renderApiKeysList() {
           ${key.source ? ` · ${escapeHtml(keySourceLabel(key.source))}` : ''}
         </div>
       </div>
-      ${key.readOnly ? '<span class="badge badge-paused">linked</span>' : `<button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteApiKey(${jsString(key.id)})'>Delete</button>`}
+      ${key.readOnly ? `<span class="badge badge-paused">${t('badge.linked')}</span>` : `<button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteApiKey(${jsString(key.id)})'>${t('settings.agents.delete')}</button>`}
     </div>
   `).join('')
 }
@@ -4042,7 +4350,7 @@ function renderLocalCliAgentsList() {
   if (!container) return
   const agents = state.agents.filter(agent => agent.kind === 'local')
   if (agents.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No local CLI agents available</p>'
+    container.innerHTML = `<p style="color: var(--text-muted); text-align: center; padding: 40px;">${t('settings.localCli.empty')}</p>`
     return
   }
   container.innerHTML = agents.map(agent => {
@@ -4058,10 +4366,10 @@ function renderLocalCliAgentsList() {
       </div>
       <span class="badge badge-${badgeClass}">${escapeHtml(statusLabel(agent.status))}</span>
       <div class="agent-actions">
-        ${canAdd ? `<button class="btn btn-primary btn-sm" onclick='window.addLocalCliAgent(${jsString(agent.name)})'>Add</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>Diagnose</button>
-        ${canDelete ? `<button class="btn btn-ghost btn-sm" onclick='window.showLocalCliAgentModal(${jsString(agent.name)})'>Edit</button>` : ''}
-        ${canDelete ? `<button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteLocalCliAgent(${jsString(agent.name)})'>Delete</button>` : ''}
+        ${canAdd ? `<button class="btn btn-primary btn-sm" onclick='window.addLocalCliAgent(${jsString(agent.name)})'>${t('settings.localCli.add')}</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>${t('settings.localCli.diagnose')}</button>
+        ${canDelete ? `<button class="btn btn-ghost btn-sm" onclick='window.showLocalCliAgentModal(${jsString(agent.name)})'>${t('settings.agents.edit')}</button>` : ''}
+        ${canDelete ? `<button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteLocalCliAgent(${jsString(agent.name)})'>${t('settings.agents.delete')}</button>` : ''}
       </div>
     </div>
   `}).join('')
@@ -4084,9 +4392,9 @@ window.addLocalCliAgent = async function(name) {
     renderLocalCliAgentsList()
     const saved = state.agents.find(item => item.kind === 'local' && item.name === name)
     if (saved?.status === 'invalid') {
-      window.showLocalCliAgentDiagnostics(name, 'Agent was saved but validation failed.')
+      window.showLocalCliAgentDiagnostics(name, t('toast.agentValidationFailed'))
     } else {
-      showToast(`「${name}」已添加到已配置列表`, 'success')
+      showToast(t('toast.localCliAdded', { name }), 'success')
     }
   } catch (err) {
     showToast(err.message)
@@ -4103,10 +4411,10 @@ function renderDiagnosticsPanel() {
       <div class="agent-item">
         <div class="agent-icon">D</div>
         <div class="agent-info">
-          <div class="agent-name">Deployment</div>
-          <div class="agent-model">${state.deployCheck ? `pid ${escapeHtml(state.deployCheck.pid)} · ${escapeHtml(state.deployCheck.node)} · ${escapeHtml(state.deployCheck.durationMs)}ms` : 'not checked'}</div>
+          <div class="agent-name">${t('settings.diagnostics.deployment')}</div>
+          <div class="agent-model">${state.deployCheck ? `pid ${escapeHtml(state.deployCheck.pid)} · ${escapeHtml(state.deployCheck.node)} · ${escapeHtml(state.deployCheck.durationMs)}ms` : t('settings.diagnostics.notChecked')}</div>
         </div>
-        <span class="badge badge-${state.deployCheck?.ok ? 'active' : 'error'}">${state.deployCheck?.ok ? 'ok' : 'unknown'}</span>
+        <span class="badge badge-${state.deployCheck?.ok ? 'active' : 'error'}">${state.deployCheck?.ok ? t('badge.ok') : t('badge.unknown')}</span>
       </div>
       ${localAgents.map(agent => `
         <div class="agent-item">
@@ -4115,7 +4423,7 @@ function renderDiagnosticsPanel() {
             <div class="agent-name">${escapeHtml(agent.name)}</div>
             <div class="agent-model">${escapeHtml(agent.command || agent.adapter)}</div>
           </div>
-          <button class="btn btn-secondary btn-sm" onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>Run</button>
+          <button class="btn btn-secondary btn-sm" onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>${t('settings.diagnostics.run')}</button>
         </div>
       `).join('')}
     </div>
@@ -4143,10 +4451,10 @@ window.showAgentDiagnostics = async function(name, preface = '') {
       <div class="modal-card">
         <div class="modal-head">
           <div>
-            <h3>Agent Diagnostics</h3>
+            <h3>${t('modal.agentDiagnostics.title')}</h3>
             <p>${escapeHtml(name)}</p>
           </div>
-          <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+          <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
         </div>
         ${preface ? `<p style="color: var(--red); margin-bottom: 12px;">${escapeHtml(preface)}</p>` : ''}
         <pre class="code-block" style="white-space: pre-wrap;">${escapeHtml(JSON.stringify(diagnostic, null, 2))}</pre>
@@ -4164,44 +4472,44 @@ window.showLocalCliAgentModal = function(name) {
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>Edit Local CLI Agent</h3>
+          <h3>${t('modal.localCli.edit.title')}</h3>
           <p>${escapeHtml(agent.name)} · ${escapeHtml(agent.adapter)}</p>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
       </div>
       <form onsubmit='window.saveLocalCliAgent(event, ${jsString(agent.name)})'>
         <div class="form-row">
           <div class="form-group">
-            <label>Name</label>
+            <label>${t('common.name')}</label>
             <input class="input" name="name" required value="${escapeAttr(agent.name)}">
           </div>
           <div class="form-group">
-            <label>Adapter</label>
+            <label>${t('common.adapter')}</label>
             <input class="input" name="adapter" required value="${escapeAttr(agent.adapter)}">
           </div>
         </div>
         <div class="form-group">
-          <label>Command</label>
+          <label>${t('common.command')}</label>
           <input class="input" name="command" required value="${escapeAttr(agent.command || '')}">
         </div>
         <div class="form-group">
-          <label>Args</label>
+          <label>${t('common.args')}</label>
           <textarea class="input" name="args" rows="3">${escapeHtml((agent.args || []).join('\\n'))}</textarea>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>Timeout (ms)</label>
+            <label>${t('common.timeout')}</label>
             <input class="input" name="timeout" type="number" min="1" value="${escapeAttr(agent.timeout || '')}">
           </div>
           <div></div>
         </div>
         <div class="form-group">
-          <label>Environment</label>
+          <label>${t('common.env')}</label>
           <textarea class="input" name="env" rows="3" placeholder="KEY=value">${escapeHtml(envToLines(agent.env))}</textarea>
         </div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('common.cancel')}</button>
+          <button type="submit" class="btn btn-primary">${t('common.save')}</button>
         </div>
       </form>
     </div>
@@ -4225,7 +4533,7 @@ window.saveLocalCliAgent = async function(e, originalName) {
     await loadAgents()
     closeModal()
     renderLocalCliAgentsList()
-    showToast(`「${originalName}」已保存`, 'success')
+    showToast(t('toast.localCliSaved', { name: originalName }), 'success')
   } catch (err) {
     showToast(err.message)
   }
@@ -4233,9 +4541,9 @@ window.saveLocalCliAgent = async function(e, originalName) {
 
 window.deleteLocalCliAgent = async function(name) {
   if (!await confirmAction({
-    title: 'Remove Local CLI Agent',
-    message: `Remove local CLI agent "${name}" from sessions?`,
-    confirmText: 'Remove',
+    title: t('confirm.deleteLocalCli.title'),
+    message: t('confirm.deleteLocalCli.message', { name }),
+    confirmText: t('confirm.deleteLocalCli.confirm'),
     danger: true,
   })) return
   try {
@@ -4246,7 +4554,7 @@ window.deleteLocalCliAgent = async function(name) {
     )
     renderAgentsList()
     renderLocalCliAgentsList()
-    showToast(`「${name}」已移除`, 'success')
+    showToast(t('toast.localCliRemoved', { name }), 'success')
     loadAgents().then(() => {
       renderAgentsList()
       renderLocalCliAgentsList()
@@ -4265,6 +4573,12 @@ window.switchSettingsTab = function(tab) {
   })
 }
 
+window.changeLanguage = function(lang) {
+  const langLabel = lang === 'zh' ? t('settings.general.language.zh') : t('settings.general.language.en')
+  setLanguage(lang)
+  showToast(t('toast.languageChanged', { lang: langLabel }), 'success')
+}
+
 window.saveGeneralSettings = async function() {
   const maxRounds = parseInt(document.getElementById('max-rounds-input').value)
   const mode = document.getElementById('mode-input').value
@@ -4278,7 +4592,7 @@ window.saveGeneralSettings = async function() {
       defaults: { maxRounds, mode },
       policy: { allowedWorkspaces },
     })
-    showToast('Settings saved successfully', 'success')
+    showToast(t('toast.settingsSaved'), 'success')
   } catch (err) {
     showToast(err.message)
   }
@@ -5434,48 +5748,48 @@ window.showAgentModal = async function(name) {
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>${existing ? 'Edit Assistant' : 'Add Assistant'}</h3>
-          <p>Configure an API-backed model.</p>
+          <h3>${existing ? t('modal.agent.edit') : t('modal.agent.add')}</h3>
+          <p>${t('modal.agent.desc')}</p>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
       </div>
       <form onsubmit='window.saveAgent(event, ${existing ? jsString(existing.name) : 'null'})'>
         <div class="form-row">
           <div class="form-group">
-            <label>Name</label>
+            <label>${t('common.name')}</label>
             <input class="input" name="name" required value="${escapeAttr(existing?.name || '')}">
           </div>
           <div class="form-group">
-            <label>Provider</label>
+            <label>${t('common.provider')}</label>
             <select class="input" name="provider" id="agent-provider-select" required onchange="window.updateAgentProviderOptions()">
               ${providerPresetOptions(selectedProvider)}
             </select>
           </div>
         </div>
         <div class="form-group">
-          <label>Model</label>
+          <label>${t('common.model')}</label>
           <div id="agent-model-control">${modelControl(selectedProvider, selectedModel)}</div>
         </div>
         <div class="form-group">
-          <label>Base URL</label>
-          <input class="input" name="baseUrl" id="agent-base-url-input" value="${escapeAttr(existing?.baseUrl || selectedPreset.baseUrl)}" placeholder="${selectedProvider === 'custom' ? 'Required' : 'Optional override'}">
+          <label>${t('modal.agent.baseUrl')}</label>
+          <input class="input" name="baseUrl" id="agent-base-url-input" value="${escapeAttr(existing?.baseUrl || selectedPreset.baseUrl)}" placeholder="${selectedProvider === 'custom' ? t('modal.agent.keyRequired') : t('modal.agent.keyOptional')}">
         </div>
         <div class="form-group">
-          <label>Provider Key</label>
+          <label>${t('modal.agent.providerKey')}</label>
           <select class="input" name="keyId" id="agent-key-select" data-has-current-key="${existing?.hasKey ? 'true' : 'false'}" data-original-adapter="${escapeAttr(existing?.adapter || '')}">
             ${agentKeyOptions(selectedProvider, Boolean(existing?.hasKey))}
           </select>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>Timeout (ms)</label>
+            <label>${t('common.timeout')}</label>
             <input class="input" name="timeout" type="number" min="1" value="">
           </div>
           <div></div>
         </div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('common.cancel')}</button>
+          <button type="submit" class="btn btn-primary">${t('common.save')}</button>
         </div>
       </form>
     </div>
@@ -5500,7 +5814,7 @@ window.saveAgent = async function(e, originalName) {
     await loadApiKeys()
     closeModal()
     renderAgentsList()
-    showToast('Assistant saved', 'success')
+    showToast(t('toast.assistantSaved'), 'success')
   } catch (err) {
     showToast(err.message)
   }
@@ -5508,16 +5822,16 @@ window.saveAgent = async function(e, originalName) {
 
 window.deleteAgent = async function(name) {
   if (!await confirmAction({
-    title: 'Delete Assistant',
-    message: `Delete assistant "${name}"?`,
-    confirmText: 'Delete',
+    title: t('confirm.deleteAgent.title'),
+    message: t('confirm.deleteAgent.message', { name }),
+    confirmText: t('confirm.deleteAgent.confirm'),
     danger: true,
   })) return
   try {
     state.agents = await api(`/api/agents/${encodeURIComponent(name)}`, 'DELETE')
     await loadApiKeys()
     renderAgentsList()
-    showToast('Assistant deleted', 'success')
+    showToast(t('toast.assistantDeleted'), 'success')
   } catch (err) {
     showToast(err.message)
   }
@@ -5528,15 +5842,15 @@ window.showApiKeyModal = function() {
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>Add Provider Key</h3>
-          <p>Stored encrypted in the local key vault.</p>
+          <h3>${t('modal.key.title')}</h3>
+          <p>${t('modal.key.desc')}</p>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
       </div>
       <form onsubmit="window.saveApiKey(event)">
         <div class="form-row">
           <div class="form-group">
-            <label>Provider</label>
+            <label>${t('common.provider')}</label>
             <select class="input" name="provider">
               <option value="anthropic">Anthropic</option>
               <option value="openai">OpenAI</option>
@@ -5545,17 +5859,17 @@ window.showApiKeyModal = function() {
             </select>
           </div>
           <div class="form-group">
-            <label>Name</label>
-            <input class="input" name="name" placeholder="Work key">
+            <label>${t('common.name')}</label>
+            <input class="input" name="name" placeholder="${t('modal.key.namePlaceholder')}">
           </div>
         </div>
         <div class="form-group">
-          <label>API Key</label>
+          <label>${t('common.apiKey')}</label>
           <input class="input" name="key" type="password" required autocomplete="new-password">
         </div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">Save</button>
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('common.cancel')}</button>
+          <button type="submit" class="btn btn-primary">${t('common.save')}</button>
         </div>
       </form>
     </div>
@@ -5574,7 +5888,7 @@ window.saveApiKey = async function(e) {
     state.apiKeys.unshift(key)
     closeModal()
     renderApiKeysList()
-    showToast('Provider key added', 'success')
+    showToast(t('toast.keyAdded'), 'success')
   } catch (err) {
     showToast(err.message)
   }
@@ -5582,16 +5896,16 @@ window.saveApiKey = async function(e) {
 
 window.deleteApiKey = async function(id) {
   if (!await confirmAction({
-    title: 'Delete API Key',
-    message: 'Delete this API key?',
-    confirmText: 'Delete',
+    title: t('confirm.deleteKey.title'),
+    message: t('confirm.deleteKey.message'),
+    confirmText: t('confirm.deleteKey.confirm'),
     danger: true,
   })) return
   try {
     await api(`/api/keys/${encodeURIComponent(id)}`, 'DELETE')
     state.apiKeys = state.apiKeys.filter(key => key.id !== id)
     renderApiKeysList()
-    showToast('Provider key deleted', 'success')
+    showToast(t('toast.keyDeleted'), 'success')
   } catch (err) {
     showToast(err.message)
   }
@@ -6145,7 +6459,7 @@ function providerMatchesPreset(keyProvider, provider) {
 }
 
 function keySourceLabel(source) {
-  return ({ vault: 'saved key', assistant: 'agent key', global: 'global config' })[source] || source
+  return ({ vault: t('keySource.vault'), assistant: t('keySource.assistant'), global: t('keySource.global') })[source] || source
 }
 
 function preferredAgentName(agents, preferredAdapter, avoidName) {
@@ -6256,6 +6570,7 @@ document.addEventListener('click', event => {
 
 document.addEventListener('DOMContentLoaded', () => {
   initTheme()
+  document.documentElement.lang = getCurrentLang()
   render()
   initOpsWidget()
   new MutationObserver(() => initOpsWidget()).observe(document.body, { childList: true })
