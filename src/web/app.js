@@ -230,6 +230,172 @@ const MESSAGES = {
     'confirm.deleteLocalCli.title': 'Remove Local CLI Agent',
     'confirm.deleteLocalCli.message': 'Remove local CLI agent "{name}" from sessions?',
     'confirm.deleteLocalCli.confirm': 'Remove',
+
+    // Session status labels
+    'session.status.active': 'Active',
+    'session.status.paused': 'Paused',
+    'session.status.done': 'Completed',
+    'session.status.error': 'Error',
+    'session.status.cancelled': 'Cancelled',
+
+    // Sessions — list page
+    'sessions.title': 'Sessions',
+    'sessions.newSession': '+ New Session',
+    'sessions.stat.active': 'Active Sessions',
+    'sessions.stat.activeSub': 'running right now',
+    'sessions.stat.completed': 'Completed Today',
+    'sessions.stat.completedSub': '↑ vs yesterday',
+    'sessions.stat.avgTurns': 'Avg Turns',
+    'sessions.stat.avgTurnsSub': 'across all sessions',
+    'sessions.stat.activeAgents': 'Active Agents',
+    'sessions.stat.activeAgentsSub': 'providers configured',
+    'sessions.recentTitle': 'Recent Sessions',
+    'sessions.searchPlaceholder': 'Search sessions...',
+    'sessions.loading': 'Loading…',
+    'sessions.back': '← Back',
+    'sessions.turns': '{count} turns',
+    'sessions.delete': 'Delete',
+
+    // Sessions — onboarding
+    'sessions.onboarding.ready': 'Ready to Go',
+    'sessions.onboarding.readyDesc': 'Ready with <strong>{count}</strong> agent(s). Start your first session!',
+    'sessions.onboarding.manageAgents': 'Manage Agents',
+    'sessions.onboarding.welcome': 'Welcome to Turing',
+    'sessions.onboarding.welcomeDesc': 'Connect an AI model to get started. Pick your path:',
+    'sessions.onboarding.apiModel': 'API Model (Fastest)',
+    'sessions.onboarding.apiModelDesc': 'Add a provider key — no install needed. Supports Anthropic, OpenAI, Zhipu, DeepSeek, Qwen, Moonshot.',
+    'sessions.onboarding.addApiKey': 'Add API Key',
+    'sessions.onboarding.localCli': 'Local CLI Agent',
+    'sessions.onboarding.localCliDesc': 'Installed Codex / Claude Code / Gemini CLI / OpenCode? Make sure they\'re on your PATH and we\'ll auto-discover them.',
+    'sessions.onboarding.viewDiscovered': 'View Discovered Agents',
+    'sessions.onboarding.settingsHint': 'You can add or remove agents and keys in Settings anytime.',
+    'sessions.onboarding.unverifiedTitle': 'Agents Not Verified',
+    'sessions.onboarding.unverifiedDesc': 'Found <strong>{apiCount}</strong> API agent(s) and <strong>{cliCount}</strong> CLI agent(s), but none are confirmed working yet.',
+    'sessions.onboarding.unverifiedHint': 'Common causes: not logged in, expired credentials, lapsed subscription, or wrong binary path. Re-test or check in Settings.',
+    'sessions.onboarding.retest': 'Re-test',
+    'sessions.onboarding.goToSettings': 'Go to Settings',
+
+    // Session detail — header & actions
+    'session.askOps': 'Ask Ops',
+    'session.export': 'Export',
+    'session.extend': '+5m',
+    'session.pause': '⏸ Pause',
+    'session.resume': '▶ Resume',
+    'session.retry': '↻ Retry from Error',
+    'session.stop': '■ Stop',
+    'session.waitingOutput': 'Waiting for output…',
+    'session.idle': 'Idle',
+    'session.injectPlaceholder': 'Inject a message into this session…',
+    'session.send': 'Send',
+    'session.rawToggleHide': 'Hide raw output',
+    'session.rawToggleShow': 'Show raw output',
+    'session.scrollTop': 'Scroll to top',
+    'session.scrollBottom': 'Scroll to bottom',
+    'session.copy': 'Copy',
+    'session.noMessages': 'No messages yet',
+
+    // Session detail — panel
+    'session.info': 'Session Info',
+    'session.idLabel': 'Session ID',
+    'session.agentA': 'Agent A',
+    'session.agentB': 'Agent B',
+    'session.mode': 'Mode',
+    'session.template': 'Template',
+    'session.turnsLabel': 'Turns',
+    'session.statusLabel': 'Status',
+    'session.permission': 'Permission',
+    'session.created': 'Created',
+    'session.cwd': 'CWD',
+    'session.progress': 'Progress',
+    'session.turnOf': 'Turn {round} of {max}',
+    'session.errorTitle': 'Session error',
+    'session.lastOutput': 'Last Agent Output',
+    'session.start': 'Start',
+    'session.turn': 'Turn {round}',
+
+    // Session — artifacts
+    'session.artifact.noSummary': 'No summary',
+    'session.artifact.title': 'Artifacts',
+    'session.artifact.fileChanges': '📄 File Changes',
+    'session.artifact.summary': '📋 Summary',
+    'session.artifact.copySummary': 'Copy Summary',
+    'session.artifact.collapseDiff': 'Collapse full diff',
+    'session.artifact.viewDiff': 'View full diff',
+
+    // Session — step card
+    'session.step.collapse': 'Collapse details',
+    'session.step.expand': 'Expand details',
+
+    // Session — toast
+    'session.toast.summaryCopied': 'Summary copied',
+    'session.toast.copyFailed': 'Copy failed',
+
+    // Session — confirm dialogs
+    'session.confirm.stop.title': 'Stop Session',
+    'session.confirm.stop.message': 'Stop this session now?',
+    'session.confirm.stop.confirm': 'Stop',
+    'session.confirm.delete.title': 'Delete Session',
+    'session.confirm.delete.message': 'Delete this session permanently?',
+    'session.confirm.delete.confirm': 'Delete',
+
+    // Session — toasts
+    'session.toast.timeoutExtended': 'Timeout extended +{n}m',
+    'session.toast.cwdRequiresFilesystem': 'Sessions with cwd require Agent B to be a filesystem-capable local CLI agent',
+
+    // Session — creation details
+    'session.creationParams': 'Creation Params',
+    'session.maxTurnsLabel': 'Max Turns',
+    'session.approve': 'Approve',
+    'session.initialPrompt': 'Initial Prompt',
+
+    // Session — live status helpers
+    'session.status.processing': 'Processing…',
+    'session.status.reading': 'Reading {file}…',
+    'session.status.modifying': 'Modifying {file}…',
+    'session.status.executing': 'Executing {cmd}…',
+    'session.status.analyzing': 'Analyzing…',
+    'session.status.roundDone': 'Round complete',
+
+    // New Session modal
+    'newSession.title': 'New Session',
+    'newSession.choosePreset': 'Choose a scenario preset.',
+    'newSession.desc': 'Create an assistant collaboration session.',
+    'newSession.noAgents': 'No API assistants configured yet.',
+    'newSession.addOneFirst': 'Add one first',
+    'newSession.templateBadge': 'Template: {name}',
+    'newSession.agentA': 'Agent A',
+    'newSession.agentB': 'Agent B',
+    'newSession.agentBHint': 'executor; needs filesystem for cwd',
+    'newSession.mode': 'Mode',
+    'newSession.mode.collaborate': 'Collaboration',
+    'newSession.mode.discuss': 'Discuss',
+    'newSession.mode.review': 'Review',
+    'newSession.mode.freeform': 'Freeform',
+    'newSession.maxTurns': 'Max Turns',
+    'newSession.systemPromptA': 'Agent A System Prompt',
+    'newSession.systemPromptB': 'Agent B System Prompt',
+    'newSession.workingDir': 'Working Directory',
+    'newSession.workingDirPlaceholder': '/path/to/project',
+    'newSession.permissionMode': 'Permission mode',
+    'newSession.permissionSafe': 'Safe',
+    'newSession.permissionTrusted': 'Trusted · skip CLI approvals',
+    'newSession.prompt': 'Prompt',
+    'newSession.promptPlaceholder': 'Describe the session…',
+    'newSession.context': 'Context',
+    'newSession.contextRules': 'Rules / Constraints',
+    'newSession.contextBackground': 'Background',
+    'newSession.contextFiles': 'Files',
+    'newSession.contextFilesPlaceholder': 'src/web/app.js, src/web/style.css',
+    'newSession.approveMode': 'Approve mode',
+    'newSession.back': 'Back',
+    'newSession.create': 'Create',
+
+    // FormatTime relative labels
+    'time.justNow': 'just now',
+    'time.minAgo': '{n} min ago',
+    'time.hrAgo': '{n} hr ago',
+    'time.dayAgo': '{n} day ago',
+    'time.daysAgo': '{n} days ago',
   },
 
   zh: {
@@ -367,6 +533,172 @@ const MESSAGES = {
     'confirm.deleteLocalCli.title': '移除本地 CLI 代理',
     'confirm.deleteLocalCli.message': '从会话中移除本地 CLI 代理「{name}」？',
     'confirm.deleteLocalCli.confirm': '移除',
+
+    // Session status labels
+    'session.status.active': '进行中',
+    'session.status.paused': '已暂停',
+    'session.status.done': '已完成',
+    'session.status.error': '错误',
+    'session.status.cancelled': '已取消',
+
+    // Sessions — list page
+    'sessions.title': 'Sessions',
+    'sessions.newSession': '+ 新建会话',
+    'sessions.stat.active': '活跃会话',
+    'sessions.stat.activeSub': '正在运行',
+    'sessions.stat.completed': '今日完成',
+    'sessions.stat.completedSub': '↑ 较昨日',
+    'sessions.stat.avgTurns': '平均轮次',
+    'sessions.stat.avgTurnsSub': '全部会话',
+    'sessions.stat.activeAgents': '活跃 Agent',
+    'sessions.stat.activeAgentsSub': '已配置的供应商',
+    'sessions.recentTitle': '最近会话',
+    'sessions.searchPlaceholder': '搜索会话…',
+    'sessions.loading': '加载中…',
+    'sessions.back': '← 返回',
+    'sessions.turns': '{count} 轮',
+    'sessions.delete': '删除',
+
+    // Sessions — onboarding
+    'sessions.onboarding.ready': '一切就绪',
+    'sessions.onboarding.readyDesc': '已有 <strong>{count}</strong> 个可用的 Agent。开始你的第一个会话吧。',
+    'sessions.onboarding.manageAgents': '管理 Agent',
+    'sessions.onboarding.welcome': '欢迎使用 Turing',
+    'sessions.onboarding.welcomeDesc': '开始前需要先连接一个 AI 模型。下面两条路任选其一：',
+    'sessions.onboarding.apiModel': '用 API 模型（最快）',
+    'sessions.onboarding.apiModelDesc': '填一个 Provider Key 即可，无需安装任何东西。支持 Anthropic、OpenAI、智谱、DeepSeek、Qwen、Moonshot。',
+    'sessions.onboarding.addApiKey': '添加 API Key',
+    'sessions.onboarding.localCli': '用本地 CLI Agent',
+    'sessions.onboarding.localCliDesc': '已装好 Codex / Claude Code / Gemini CLI / OpenCode？确认它们在 PATH 里，系统会自动发现。',
+    'sessions.onboarding.viewDiscovered': '查看已发现的 Agent',
+    'sessions.onboarding.settingsHint': '在 Settings 页可以随时增删 Agent 和 Key。',
+    'sessions.onboarding.unverifiedTitle': 'Agent 尚未验证可用',
+    'sessions.onboarding.unverifiedDesc': '检测到 <strong>{apiCount}</strong> 个 API Agent、<strong>{cliCount}</strong> 个 CLI Agent，但没有一个确认能调通模型。',
+    'sessions.onboarding.unverifiedHint': '常见原因：未登录、凭证失效、订阅过期或二进制路径不对。重新检测或去 Settings 检查配置。',
+    'sessions.onboarding.retest': '重新检测',
+    'sessions.onboarding.goToSettings': '去 Settings 检查',
+
+    // Session detail — header & actions
+    'session.askOps': 'Ask Ops',
+    'session.export': '导出',
+    'session.extend': '+5m',
+    'session.pause': '⏸ 暂停',
+    'session.resume': '▶ 恢复',
+    'session.retry': '↻ 从错误中重试',
+    'session.stop': '■ 停止',
+    'session.waitingOutput': '等待输出…',
+    'session.idle': '空闲',
+    'session.injectPlaceholder': '向会话注入消息…',
+    'session.send': '发送',
+    'session.rawToggleHide': '隐藏原始输出',
+    'session.rawToggleShow': '显示原始输出',
+    'session.scrollTop': '跳到开头',
+    'session.scrollBottom': '跳到结尾',
+    'session.copy': '复制',
+    'session.noMessages': '暂无消息',
+
+    // Session detail — panel
+    'session.info': '会话信息',
+    'session.idLabel': '会话 ID',
+    'session.agentA': 'Agent A',
+    'session.agentB': 'Agent B',
+    'session.mode': '模式',
+    'session.template': '模板',
+    'session.turnsLabel': '轮次',
+    'session.statusLabel': '状态',
+    'session.permission': '权限',
+    'session.created': '创建于',
+    'session.cwd': '工作目录',
+    'session.progress': '进度',
+    'session.turnOf': '第 {round} / {max} 轮',
+    'session.errorTitle': '会话错误',
+    'session.lastOutput': '最近 Agent 输出',
+    'session.start': '开始',
+    'session.turn': '第 {round} 轮',
+
+    // Session — artifacts
+    'session.artifact.noSummary': '暂无摘要',
+    'session.artifact.title': '产出',
+    'session.artifact.fileChanges': '📄 文件变更',
+    'session.artifact.summary': '📋 摘要',
+    'session.artifact.copySummary': '复制摘要',
+    'session.artifact.collapseDiff': '收起完整 Diff',
+    'session.artifact.viewDiff': '查看完整 Diff',
+
+    // Session — step card
+    'session.step.collapse': '收起详情',
+    'session.step.expand': '展开详情',
+
+    // Session — toast
+    'session.toast.summaryCopied': '摘要已复制',
+    'session.toast.copyFailed': '复制失败',
+
+    // Session — confirm dialogs
+    'session.confirm.stop.title': '停止会话',
+    'session.confirm.stop.message': '确定要停止此会话？',
+    'session.confirm.stop.confirm': '停止',
+    'session.confirm.delete.title': '删除会话',
+    'session.confirm.delete.message': '确定要永久删除此会话？',
+    'session.confirm.delete.confirm': '删除',
+
+    // Session — toasts
+    'session.toast.timeoutExtended': '超时已延长 +{n}m',
+    'session.toast.cwdRequiresFilesystem': '设置工作目录需要 Agent B 为支持文件系统的本地 CLI 代理',
+
+    // Session — creation details
+    'session.creationParams': '创建参数',
+    'session.maxTurnsLabel': '最大轮次',
+    'session.approve': '审批',
+    'session.initialPrompt': '初始提示词',
+
+    // Session — live status helpers
+    'session.status.processing': '处理中…',
+    'session.status.reading': '正在读取 {file}…',
+    'session.status.modifying': '正在修改 {file}…',
+    'session.status.executing': '正在执行 {cmd}…',
+    'session.status.analyzing': '正在分析…',
+    'session.status.roundDone': '已完成本轮输出',
+
+    // New Session modal
+    'newSession.title': '新建会话',
+    'newSession.choosePreset': '选择一个场景预设。',
+    'newSession.desc': '创建一个 AI 助手协作会话。',
+    'newSession.noAgents': '暂无已配置的 API 助手。',
+    'newSession.addOneFirst': '先添加一个',
+    'newSession.templateBadge': '模板：{name}',
+    'newSession.agentA': 'Agent A',
+    'newSession.agentB': 'Agent B',
+    'newSession.agentBHint': '执行者；需要文件系统支持',
+    'newSession.mode': '模式',
+    'newSession.mode.collaborate': '协作',
+    'newSession.mode.discuss': '讨论',
+    'newSession.mode.review': '审查',
+    'newSession.mode.freeform': '自由',
+    'newSession.maxTurns': '最大轮次',
+    'newSession.systemPromptA': 'Agent A 系统提示词',
+    'newSession.systemPromptB': 'Agent B 系统提示词',
+    'newSession.workingDir': '工作目录',
+    'newSession.workingDirPlaceholder': '/path/to/project',
+    'newSession.permissionMode': '权限模式',
+    'newSession.permissionSafe': '安全',
+    'newSession.permissionTrusted': '信任 · 跳过 CLI 审批',
+    'newSession.prompt': '提示词',
+    'newSession.promptPlaceholder': '描述会话…',
+    'newSession.context': '上下文',
+    'newSession.contextRules': '规则 / 约束',
+    'newSession.contextBackground': '背景',
+    'newSession.contextFiles': '文件',
+    'newSession.contextFilesPlaceholder': 'src/web/app.js, src/web/style.css',
+    'newSession.approveMode': '审批模式',
+    'newSession.back': '返回',
+    'newSession.create': '创建',
+
+    // FormatTime relative labels
+    'time.justNow': '刚刚',
+    'time.minAgo': '{n} 分钟前',
+    'time.hrAgo': '{n} 小时前',
+    'time.dayAgo': '{n} 天前',
+    'time.daysAgo': '{n} 天前',
   },
 }
 
@@ -954,7 +1286,7 @@ function handleWsEvent(event) {
       }
       if (state.currentSessionId === event.payload.sessionId) {
         clearStreamingDelta(event.payload.sessionId)
-        setStreamStatus(event.payload.sessionId, '已完成本轮输出')
+        setStreamStatus(event.payload.sessionId, t('session.status.roundDone'))
         upsertCurrentMessage(event.payload)
         renderSessionMessages()
         scheduleSessionDetailRender()
@@ -1156,14 +1488,14 @@ function upsertCurrentMessage(message) {
 function updateHeartbeat(hb) {
   // Update progress indicators if on session page
   if (state.currentSessionId === hb.sessionId) {
-    setStreamStatus(hb.sessionId, summarizeRawStatus(hb.lastOutput || 'Processing...'))
+    setStreamStatus(hb.sessionId, summarizeRawStatus(hb.lastOutput))
     const progressAgent = document.getElementById('progress-agent')
     const progressElapsed = document.getElementById('progress-elapsed')
     const progressOutput = document.getElementById('progress-output')
 
     if (progressAgent) progressAgent.textContent = hb.agent
     if (progressElapsed) progressElapsed.textContent = `${Math.floor(hb.elapsed / 1000)}s`
-    if (progressOutput) progressOutput.textContent = hb.lastOutput || 'Processing...'
+    if (progressOutput) progressOutput.textContent = hb.lastOutput || t('session.status.processing')
   }
   if (isCurrentWorkflowSession(hb.sessionId)) {
     setStreamStatus(hb.sessionId, summarizeRawStatus(hb.lastOutput || '运行中...'))
@@ -1565,10 +1897,10 @@ function renderSessions() {
       <div class="main">
         <header class="topbar">
           <div class="topbar-left">
-            <h2>Sessions</h2>
+            <h2>${t('sessions.title')}</h2>
           </div>
           <div class="topbar-right">
-            <button class="btn btn-primary btn-sm" onclick="window.showTemplateGalleryModal()">+ New Session</button>
+            <button class="btn btn-primary btn-sm" onclick="window.showTemplateGalleryModal()">${t('sessions.newSession')}</button>
             <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
             ${renderUserMenu()}
           </div>
@@ -1577,31 +1909,31 @@ function renderSessions() {
         <div class="content">
           <div class="stats-row">
             <div class="stat-card">
-              <div class="label">Active Sessions</div>
+              <div class="label">${t('sessions.stat.active')}</div>
               <div class="stat-value grad-text" id="stat-active">0</div>
-              <div class="stat-sub">running right now</div>
+              <div class="stat-sub">${t('sessions.stat.activeSub')}</div>
             </div>
             <div class="stat-card">
-              <div class="label">Completed Today</div>
+              <div class="label">${t('sessions.stat.completed')}</div>
               <div class="stat-value" id="stat-done">0</div>
-              <div class="stat-sub">↑ vs yesterday</div>
+              <div class="stat-sub">${t('sessions.stat.completedSub')}</div>
             </div>
             <div class="stat-card">
-              <div class="label">Avg Turns</div>
+              <div class="label">${t('sessions.stat.avgTurns')}</div>
               <div class="stat-value" id="stat-rounds">0</div>
-              <div class="stat-sub">across all sessions</div>
+              <div class="stat-sub">${t('sessions.stat.avgTurnsSub')}</div>
             </div>
             <div class="stat-card">
-              <div class="label">Active Agents</div>
+              <div class="label">${t('sessions.stat.activeAgents')}</div>
               <div class="stat-value" id="stat-agents">0</div>
-              <div class="stat-sub">providers configured</div>
+              <div class="stat-sub">${t('sessions.stat.activeAgentsSub')}</div>
             </div>
           </div>
 
           <div id="view-sessions">
             <div class="flex-between mb-24">
-              <h3>Recent Sessions</h3>
-              <input type="text" class="input" placeholder="Search sessions..." style="width: 240px;">
+              <h3>${t('sessions.recentTitle')}</h3>
+              <input type="text" class="input" placeholder="${t('sessions.searchPlaceholder')}" style="width: 240px;">
             </div>
             <div id="session-cards" class="session-cards"></div>
           </div>
@@ -1850,11 +2182,11 @@ function renderOnboardingPanel() {
     return `
       <div class="onboarding-panel">
         <div class="onboarding-icon">✓</div>
-        <h3>一切就绪</h3>
-        <p>已有 <strong>${ready.length}</strong> 个可用的 Agent。开始你的第一个会话吧。</p>
+        <h3>${t('sessions.onboarding.ready')}</h3>
+        <p>${t('sessions.onboarding.readyDesc', { count: ready.length })}</p>
         <div class="onboarding-actions">
-          <button class="btn btn-primary" onclick="window.showTemplateGalleryModal()">新建会话</button>
-          <a class="btn btn-ghost" href="/settings">管理 Agent</a>
+          <button class="btn btn-primary" onclick="window.showTemplateGalleryModal()">${t('sessions.newSession')}</button>
+          <a class="btn btn-ghost" href="/settings">${t('sessions.onboarding.manageAgents')}</a>
         </div>
       </div>
     `
@@ -1864,23 +2196,23 @@ function renderOnboardingPanel() {
     return `
       <div class="onboarding-panel">
         <div class="onboarding-icon">→</div>
-        <h3>欢迎使用 Turing</h3>
-        <p>开始前需要先连接一个 AI 模型。下面两条路任选其一：</p>
+        <h3>${t('sessions.onboarding.welcome')}</h3>
+        <p>${t('sessions.onboarding.welcomeDesc')}</p>
         <div class="onboarding-tiles">
           <div class="onboarding-tile">
             <div class="onboarding-tile-icon">🔑</div>
-            <h4>用 API 模型（最快）</h4>
-            <p>填一个 Provider Key 即可，无需安装任何东西。支持 Anthropic、OpenAI、智谱、DeepSeek、Qwen、Moonshot。</p>
-            <button class="btn btn-primary btn-sm" onclick="window.navigate('/settings')">添加 API Key</button>
+            <h4>${t('sessions.onboarding.apiModel')}</h4>
+            <p>${t('sessions.onboarding.apiModelDesc')}</p>
+            <button class="btn btn-primary btn-sm" onclick="window.navigate('/settings')">${t('sessions.onboarding.addApiKey')}</button>
           </div>
           <div class="onboarding-tile">
             <div class="onboarding-tile-icon">⌨️</div>
-            <h4>用本地 CLI Agent</h4>
-            <p>已装好 Codex / Claude Code / Gemini CLI / OpenCode？确认它们在 PATH 里，系统会自动发现。</p>
-            <a class="btn btn-secondary btn-sm" href="/settings">查看已发现的 Agent</a>
+            <h4>${t('sessions.onboarding.localCli')}</h4>
+            <p>${t('sessions.onboarding.localCliDesc')}</p>
+            <a class="btn btn-secondary btn-sm" href="/settings">${t('sessions.onboarding.viewDiscovered')}</a>
           </div>
         </div>
-        <p class="onboarding-hint">在 Settings 页可以随时增删 Agent 和 Key。</p>
+        <p class="onboarding-hint">${t('sessions.onboarding.settingsHint')}</p>
       </div>
     `
   }
@@ -1893,13 +2225,13 @@ function renderOnboardingPanel() {
   return `
     <div class="onboarding-panel">
       <div class="onboarding-icon">!</div>
-      <h3>Agent 尚未验证可用</h3>
-      <p>检测到 <strong>${apiAgents.length}</strong> 个 API Agent、<strong>${cliAgents.length}</strong> 个 CLI Agent，但没有一个确认能调通模型。</p>
+      <h3>${t('sessions.onboarding.unverifiedTitle')}</h3>
+      <p>${t('sessions.onboarding.unverifiedDesc', { apiCount: apiAgents.length, cliCount: cliAgents.length })}</p>
       ${unverifiedList ? `<ul class="onboarding-agent-list">${unverifiedList}</ul>` : ''}
-      <p class="onboarding-hint">常见原因：未登录、凭证失效、订阅过期或二进制路径不对。重新检测或去 Settings 检查配置。</p>
+      <p class="onboarding-hint">${t('sessions.onboarding.unverifiedHint')}</p>
       <div class="onboarding-actions">
-        <button class="btn btn-primary" onclick="window.refreshAgentsAndRender()">重新检测</button>
-        <a class="btn btn-ghost" href="/settings">去 Settings 检查</a>
+        <button class="btn btn-primary" onclick="window.refreshAgentsAndRender()">${t('sessions.onboarding.retest')}</button>
+        <a class="btn btn-ghost" href="/settings">${t('sessions.onboarding.goToSettings')}</a>
       </div>
     </div>
   `
@@ -1951,26 +2283,28 @@ function renderSessionCards() {
     // users with existing sessions see a flash of onboarding on every load.
     container.innerHTML = state.sessionsLoaded
       ? renderOnboardingPanel()
-      : '<p style="color: var(--text-muted); text-align: center; padding: 40px;">加载中…</p>'
+      : `<p style="color: var(--text-muted); text-align: center; padding: 40px;">${t('sessions.loading')}</p>`
     return
   }
 
-  container.innerHTML = state.sessions.map(session => `
+  container.innerHTML = state.sessions.map(session => {
+    const statusDisplay = t('session.status.' + session.status)
+    return `
     <a href="/session/${session.id}" class="card session-card">
       <div class="session-card-header">
         <span class="session-card-title">${escapeHtml(sessionTitle(session))}</span>
-        <span class="badge badge-${session.status}">${session.status}</span>
+        <span class="badge badge-${session.status}">${statusDisplay}</span>
       </div>
       <div class="session-card-route">
         <span>${escapeHtml(session.mode || 'session')}</span>
         ${session.cwd ? `<span class="route-arrow">·</span><span>${escapeHtml(session.cwd)}</span>` : ''}
       </div>
       <div class="session-card-meta">
-        <span>⟳ ${session.currentRound} turns</span>
+        <span>⟳ ${t('sessions.turns', { count: session.currentRound })}</span>
         <span>⏱ ${formatTime(session.updatedAt)}</span>
       </div>
     </a>
-  `).join('')
+  `}).join('')
 }
 
 function renderWorkflows() {
@@ -3266,6 +3600,8 @@ async function renderSession(id) {
   state.autoFollowMessages = true
   invalidateSessionMarkdownCache()
 
+  const sessionStatusDisplay = t('session.status.' + session.status)
+
   document.body.innerHTML = `
     <div class="app-layout">
       ${renderSidebar('sessions')}
@@ -3273,13 +3609,13 @@ async function renderSession(id) {
       <div class="main">
         <header class="topbar">
           <div class="topbar-left">
-            <a href="/sessions" class="btn btn-ghost btn-sm">← Back</a>
+            <a href="/sessions" class="btn btn-ghost btn-sm">${t('sessions.back')}</a>
             <h2>${escapeHtml(sessionTitle(session))}</h2>
-            <span id="session-status-badge" class="badge badge-${session.status}">${session.status}</span>
+            <span id="session-status-badge" class="badge badge-${session.status}">${sessionStatusDisplay}</span>
           </div>
           <div class="topbar-right" id="session-actions">
             ${renderSessionActions(session)}
-            <button class="btn btn-ghost btn-sm" onclick="window.deleteCurrentSession()">Delete</button>
+            <button class="btn btn-ghost btn-sm" onclick="window.deleteCurrentSession()">${t('sessions.delete')}</button>
             <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
             ${renderUserMenu()}
           </div>
@@ -3289,25 +3625,25 @@ async function renderSession(id) {
           <div class="session-chat">
             <div class="session-status-line" id="session-status-line">
               <span class="status-spinner"></span>
-              <span id="session-live-status">${session.status === 'active' ? '等待输出...' : escapeHtml(session.status)}</span>
+              <span id="session-live-status">${session.status === 'active' ? t('session.waitingOutput') : sessionStatusDisplay}</span>
             </div>
             <div class="session-chat-messages" id="messages-container">
               <div class="chat-stream" id="messages"></div>
             </div>
             <div class="message-scroll-controls" aria-label="Message navigation">
-              <button class="scroll-jump-btn" onclick="window.scrollSessionMessages('top')" title="跳到开头">↑</button>
-              <button class="scroll-jump-btn" onclick="window.scrollSessionMessages('bottom')" title="跳到结尾">↓</button>
+              <button class="scroll-jump-btn" onclick="window.scrollSessionMessages('top')" title="${t('session.scrollTop')}">↑</button>
+              <button class="scroll-jump-btn" onclick="window.scrollSessionMessages('bottom')" title="${t('session.scrollBottom')}">↓</button>
             </div>
             <div class="raw-output-panel">
               <button class="raw-output-toggle" onclick="window.toggleRawOutput()">
-                <span id="raw-output-toggle-label">${state.rawOutputVisible ? '隐藏原始输出' : '显示原始输出'}</span>
+                <span id="raw-output-toggle-label">${state.rawOutputVisible ? t('session.rawToggleHide') : t('session.rawToggleShow')}</span>
               </button>
               <pre class="raw-output ${state.rawOutputVisible ? 'visible' : ''}" id="raw-output"></pre>
             </div>
             <div class="session-chat-input">
               <div class="inject-bar">
-                <input type="text" class="input" id="inject-input" placeholder="Inject a message into this session...">
-                <button class="btn btn-primary btn-sm" onclick="window.injectMessage()">Send</button>
+                <input type="text" class="input" id="inject-input" placeholder="${t('session.injectPlaceholder')}">
+                <button class="btn btn-primary btn-sm" onclick="window.injectMessage()">${t('session.send')}</button>
               </div>
             </div>
           </div>
@@ -3327,13 +3663,13 @@ async function renderSession(id) {
 
 function renderSessionActions(session) {
   return `
-    <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">Ask Ops</button>
-    <button class="btn btn-secondary btn-sm" onclick="window.exportCurrentSession()">Export</button>
-    ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.extendSessionTimeout()">+5m</button>' : ''}
-    ${session.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.pauseSession()">⏸ Pause</button>' : ''}
-    ${session.status === 'paused' ? '<button class="btn btn-primary btn-sm" onclick="window.resumeSession()">▶ Resume</button>' : ''}
-    ${session.status === 'error' ? '<button class="btn btn-primary btn-sm" onclick="window.resumeSession()">↻ Retry from Error</button>' : ''}
-    ${session.status === 'active' || session.status === 'paused' ? '<button class="btn btn-danger btn-sm" onclick="window.stopSession()">■ Stop</button>' : ''}
+    <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">${t('session.askOps')}</button>
+    <button class="btn btn-secondary btn-sm" onclick="window.exportCurrentSession()">${t('session.export')}</button>
+    ${session.status === 'active' ? `<button class="btn btn-secondary btn-sm" onclick="window.extendSessionTimeout()">${t('session.extend')}</button>` : ''}
+    ${session.status === 'active' ? `<button class="btn btn-secondary btn-sm" onclick="window.pauseSession()">${t('session.pause')}</button>` : ''}
+    ${session.status === 'paused' ? `<button class="btn btn-primary btn-sm" onclick="window.resumeSession()">${t('session.resume')}</button>` : ''}
+    ${session.status === 'error' ? `<button class="btn btn-primary btn-sm" onclick="window.resumeSession()">${t('session.retry')}</button>` : ''}
+    ${session.status === 'active' || session.status === 'paused' ? `<button class="btn btn-danger btn-sm" onclick="window.stopSession()">${t('session.stop')}</button>` : ''}
   `
 }
 
@@ -3341,14 +3677,14 @@ function renderSessionHeader(session) {
   const badge = document.getElementById('session-status-badge')
   if (badge) {
     badge.className = `badge badge-${session.status}`
-    badge.textContent = session.status
+    badge.textContent = t('session.status.' + session.status)
   }
 
   const actions = document.getElementById('session-actions')
   if (actions) {
     actions.innerHTML = `
       ${renderSessionActions(session)}
-      <button class="btn btn-ghost btn-sm" onclick="window.deleteCurrentSession()">Delete</button>
+      <button class="btn btn-ghost btn-sm" onclick="window.deleteCurrentSession()">${t('sessions.delete')}</button>
       <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
       ${renderUserMenu()}
     `
@@ -3362,42 +3698,42 @@ function renderSessionPanel(session) {
   const progress = session.maxRounds ? Math.min(100, session.currentRound / session.maxRounds * 100) : 0
   panel.innerHTML = `
     <div class="panel-section">
-      <div class="label mb-16">Session Info</div>
+      <div class="label mb-16">${t('session.info')}</div>
       <div class="panel-kv">
         <div class="panel-kv-row">
-          <span class="kv-label">Session ID</span>
+          <span class="kv-label">${t('session.idLabel')}</span>
           <span class="kv-value mono" style="font-size: 0.78rem;">${escapeHtml(session.id.slice(0, 12))}</span>
         </div>
         <div class="panel-kv-row">
-          <span class="kv-label">Agent A</span>
+          <span class="kv-label">${t('session.agentA')}</span>
           <span class="kv-value">${escapeHtml(agentLabel(session.from))}</span>
         </div>
         <div class="panel-kv-row">
-          <span class="kv-label">Agent B</span>
+          <span class="kv-label">${t('session.agentB')}</span>
           <span class="kv-value">${escapeHtml(agentLabel(session.to))}</span>
         </div>
         <div class="panel-kv-row">
-          <span class="kv-label">Mode</span>
+          <span class="kv-label">${t('session.mode')}</span>
           <span class="kv-value">${escapeHtml(session.mode)}</span>
         </div>
-        ${session.templateId ? `<div class="panel-kv-row"><span class="kv-label">Template</span><span class="kv-value">${escapeHtml(session.templateId)}</span></div>` : ''}
+        ${session.templateId ? `<div class="panel-kv-row"><span class="kv-label">${t('session.template')}</span><span class="kv-value">${escapeHtml(session.templateId)}</span></div>` : ''}
         <div class="panel-kv-row">
-          <span class="kv-label">Turns</span>
+          <span class="kv-label">${t('session.turnsLabel')}</span>
           <span class="kv-value">${session.currentRound} / ${session.maxRounds}</span>
         </div>
         <div class="panel-kv-row">
-          <span class="kv-label">Status</span>
-          <span class="badge badge-${session.status}" style="margin: 0;">${session.status}</span>
+          <span class="kv-label">${t('session.statusLabel')}</span>
+          <span class="badge badge-${session.status}" style="margin: 0;">${t('session.status.' + session.status)}</span>
         </div>
         <div class="panel-kv-row">
-          <span class="kv-label">Permission</span>
+          <span class="kv-label">${t('session.permission')}</span>
           <span class="kv-value ${session.permissionMode === 'trusted' ? 'permission-trusted' : ''}">${escapeHtml(session.permissionMode || 'safe')}</span>
         </div>
         <div class="panel-kv-row">
-          <span class="kv-label">Created</span>
+          <span class="kv-label">${t('session.created')}</span>
           <span class="kv-value">${new Date(session.createdAt).toLocaleString()}</span>
         </div>
-        ${session.cwd ? `<div class="panel-kv-row"><span class="kv-label">CWD</span><span class="kv-value mono">${escapeHtml(session.cwd)}</span></div>` : ''}
+        ${session.cwd ? `<div class="panel-kv-row"><span class="kv-label">${t('session.cwd')}</span><span class="kv-value mono">${escapeHtml(session.cwd)}</span></div>` : ''}
       </div>
       ${renderSessionCreationDetails(session)}
     </div>
@@ -3405,8 +3741,8 @@ function renderSessionPanel(session) {
     <div class="divider"></div>
 
     <div class="panel-section">
-      <div class="label mb-8">Progress</div>
-      <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 8px;">Turn ${session.currentRound} of ${session.maxRounds}</p>
+      <div class="label mb-8">${t('session.progress')}</div>
+      <p style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 8px;">${t('session.turnOf', { round: session.currentRound, max: session.maxRounds })}</p>
       <div class="progress-bar">
         <div class="progress-bar-fill" style="width: ${progress}%;"></div>
       </div>
@@ -3416,7 +3752,7 @@ function renderSessionPanel(session) {
     ${session.errorMessage ? `
       <div class="divider"></div>
       <div class="error-box">
-        <div class="error-title">${escapeHtml(session.errorType || 'Session error')}</div>
+        <div class="error-title">${escapeHtml(session.errorType || t('session.errorTitle'))}</div>
         <div class="error-detail">${escapeHtml(session.errorMessage)}</div>
       </div>
     ` : ''}
@@ -3424,7 +3760,7 @@ function renderSessionPanel(session) {
     ${session.lastAgentOutput ? `
       <div class="divider"></div>
       <div class="panel-section">
-        <div class="label mb-8">Last Agent Output</div>
+        <div class="label mb-8">${t('session.lastOutput')}</div>
         <pre class="code-block">${escapeHtml(session.lastAgentOutput)}</pre>
       </div>
     ` : ''}
@@ -3441,7 +3777,7 @@ function renderSessionMessages(options = {}) {
   const artifactHtml = renderSessionArtifacts(state.currentSession)
 
   if (state.currentMessages.length === 0 && steps.length === 0 && !artifactHtml) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No messages yet</p>'
+    container.innerHTML = `<p style="color: var(--text-muted); text-align: center; padding: 40px;">${t('session.noMessages')}</p>`
     updateSessionStatusLine()
     updateRawOutput()
     return
@@ -3456,8 +3792,8 @@ function renderSessionMessages(options = {}) {
         <div class="chat-content">
           <div class="chat-bubble">${renderMarkdownCached(msg.content)}</div>
           <div class="chat-meta">
-            <span>${escapeHtml(msg.from)} · Turn ${msg.round} · ${new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
-          <button class="msg-copy-btn" onclick='window.copyMessage(${jsString(msg.id)})' title="Copy">Copy</button>
+            <span>${escapeHtml(msg.from)} · ${t('session.turn', { round: msg.round })} · ${new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span>
+          <button class="msg-copy-btn" onclick='window.copyMessage(${jsString(msg.id)})' title="${t('session.copy')}">${t('session.copy')}</button>
           </div>
         </div>
       </div>
@@ -3491,25 +3827,25 @@ function renderSessionArtifacts(session) {
   const totalAdditions = files.reduce((sum, file) => sum + (Number(file.additions) || 0), 0)
   const totalDeletions = files.reduce((sum, file) => sum + (Number(file.deletions) || 0), 0)
   const hasGit = Boolean(artifacts.gitDiffFull || artifacts.gitDiffStat || files.length)
-  const summary = artifacts.summary || '暂无摘要'
+  const summary = artifacts.summary || t('session.artifact.noSummary')
   return `
     <section class="artifact-card">
-      <div class="artifact-title">产出</div>
+      <div class="artifact-title">${t('session.artifact.title')}</div>
       ${hasGit ? `
         <div class="artifact-section">
-          <div class="artifact-section-title">📄 文件变更 <span>(${files.length} files, +${totalAdditions} -${totalDeletions})</span></div>
+          <div class="artifact-section-title">${t('session.artifact.fileChanges')} <span>(${files.length} files, +${totalAdditions} -${totalDeletions})</span></div>
           <div class="artifact-files">
             ${files.map(file => renderArtifactFile(file, artifacts.gitDiffFull || '')).join('')}
           </div>
         </div>
       ` : ''}
       <div class="artifact-section">
-        <div class="artifact-section-title">📋 摘要</div>
+        <div class="artifact-section-title">${t('session.artifact.summary')}</div>
         <div class="artifact-summary">${escapeHtml(summary)}</div>
       </div>
       <div class="artifact-actions">
-        <button class="btn btn-secondary btn-sm" onclick="window.copyArtifactSummary()">复制摘要</button>
-        ${artifacts.gitDiffFull ? `<button class="btn btn-secondary btn-sm" onclick="window.toggleFullDiff()">${state.artifactFullDiffVisible ? '收起完整 Diff' : '查看完整 Diff'}</button>` : ''}
+        <button class="btn btn-secondary btn-sm" onclick="window.copyArtifactSummary()">${t('session.artifact.copySummary')}</button>
+        ${artifacts.gitDiffFull ? `<button class="btn btn-secondary btn-sm" onclick="window.toggleFullDiff()">${state.artifactFullDiffVisible ? t('session.artifact.collapseDiff') : t('session.artifact.viewDiff')}</button>` : ''}
       </div>
       ${state.artifactFullDiffVisible && artifacts.gitDiffFull ? `
         <pre class="artifact-diff"><code>${renderHighlightedDiff(artifacts.gitDiffFull)}</code></pre>
@@ -3564,7 +3900,7 @@ function renderStepCard(step, index, total) {
       <div class="step-body">
         <div class="step-summary">${escapeHtml(step.summary || '')}</div>
         ${step.detail ? `
-          <button type="button" class="step-detail-toggle" data-step-toggle="${escapeAttr(detailKey)}" onclick="window.toggleStepDetail(${jsString(detailKey)})">${expanded ? '收起详情' : '展开详情'}</button>
+          <button type="button" class="step-detail-toggle" data-step-toggle="${escapeAttr(detailKey)}" onclick="window.toggleStepDetail(${jsString(detailKey)})">${expanded ? t('session.step.collapse') : t('session.step.expand')}</button>
           <pre class="step-detail ${expanded ? 'visible' : ''}" data-step-detail="${escapeAttr(detailKey)}">${escapeHtml(step.detail)}</pre>
         ` : ''}
       </div>
@@ -3577,7 +3913,7 @@ function renderRoundJumpList() {
   if (!rounds.length) return ''
   return `
     <div class="round-jump-list">
-      ${rounds.map(round => `<button type="button" class="round-jump-btn" onclick="window.scrollSessionRound(${round})">${round === 0 ? 'Start' : `Turn ${round}`}</button>`).join('')}
+      ${rounds.map(round => `<button type="button" class="round-jump-btn" onclick="window.scrollSessionRound(${round})">${round === 0 ? t('session.start') : t('session.turn', { round })}</button>`).join('')}
     </div>
   `
 }
@@ -3593,13 +3929,13 @@ function stepIcon(type) {
 
 function summarizeRawStatus(content) {
   const text = (content || '').replace(/\s+/g, ' ').trim()
-  if (!text) return '处理中...'
+  if (!text) return t('session.status.processing')
   const file = extractUiFile(text)
   const command = extractUiCommand(text)
-  if (/\b(read file|read_file|reading|read|cat|sed|rg|grep)\b/i.test(text)) return `正在读取 ${file || command || '文件'}...`
-  if (/\b(write|edit|apply_patch|patch|wrote|modified|update file|create file|save)\b/i.test(text)) return `正在修改 ${file || '文件'}...`
-  if (/\b(bash|shell|exec|execute|run command|npm|pnpm|yarn|git|node|tsc|pytest|vitest|make)\b/i.test(text)) return `正在执行 ${command || text.slice(0, 50)}...`
-  if (/thinking|analysis|plan|分析|计划/i.test(text)) return '正在分析...'
+  if (/\b(read file|read_file|reading|read|cat|sed|rg|grep)\b/i.test(text)) return t('session.status.reading', { file: file || command || '' })
+  if (/\b(write|edit|apply_patch|patch|wrote|modified|update file|create file|save)\b/i.test(text)) return t('session.status.modifying', { file: file || '' })
+  if (/\b(bash|shell|exec|execute|run command|npm|pnpm|yarn|git|node|tsc|pytest|vitest|make)\b/i.test(text)) return t('session.status.executing', { cmd: command || text.slice(0, 50) })
+  if (/thinking|analysis|plan|分析|计划/i.test(text)) return t('session.status.analyzing')
   return text.slice(0, 50)
 }
 
@@ -3624,7 +3960,7 @@ function updateSessionStatusLine() {
   const line = document.getElementById('session-status-line')
   if (!text || !line) return
   const status = state.streamStatus.get(state.currentSessionId)
-    || (state.currentSession?.status === 'active' ? '等待输出...' : state.currentSession?.status || '空闲')
+    || (state.currentSession?.status === 'active' ? t('session.waitingOutput') : t('session.status.' + state.currentSession?.status) || t('session.idle'))
   text.textContent = status
   line.classList.toggle('idle', state.currentSession?.status !== 'active')
 }
@@ -3682,7 +4018,7 @@ window.toggleStepDetail = function(key) {
     if (node.dataset.stepDetail === key) node.classList.toggle('visible', expanded)
   })
   document.querySelectorAll('[data-step-toggle]').forEach(node => {
-    if (node.dataset.stepToggle === key) node.textContent = expanded ? '收起详情' : '展开详情'
+    if (node.dataset.stepToggle === key) node.textContent = expanded ? t('session.step.collapse') : t('session.step.expand')
   })
 }
 
@@ -3691,7 +4027,7 @@ window.toggleRawOutput = function() {
   const raw = document.getElementById('raw-output')
   const label = document.getElementById('raw-output-toggle-label')
   if (raw) raw.classList.toggle('visible', state.rawOutputVisible)
-  if (label) label.textContent = state.rawOutputVisible ? '隐藏原始输出' : '显示原始输出'
+  if (label) label.textContent = state.rawOutputVisible ? t('session.rawToggleHide') : t('session.rawToggleShow')
   updateRawOutput()
 }
 
@@ -3713,7 +4049,7 @@ window.copyArtifactSummary = async function() {
   const summary = state.currentSession?.artifacts?.summary || ''
   if (!summary) return
   const ok = await copyText(summary)
-  showToast(ok ? '摘要已复制' : '复制失败', ok ? 'success' : 'error')
+  showToast(ok ? t('session.toast.summaryCopied') : t('session.toast.copyFailed'), ok ? 'success' : 'error')
 }
 
 window.pauseSession = async function() {
@@ -3739,9 +4075,9 @@ window.resumeSession = async function() {
 window.stopSession = async function() {
   if (!state.currentSessionId) return
   if (!await confirmAction({
-    title: 'Stop Session',
-    message: 'Stop this session now?',
-    confirmText: 'Stop',
+    title: t('session.confirm.stop.title'),
+    message: t('session.confirm.stop.message'),
+    confirmText: t('session.confirm.stop.confirm'),
     danger: true,
   })) return
   try {
@@ -4097,7 +4433,7 @@ window.extendSessionTimeout = async function() {
   if (!state.currentSessionId) return
   try {
     const result = await api(`/api/sessions/${state.currentSessionId}/extend-timeout`, 'POST')
-    showToast(`Timeout extended +${Math.round(result.extensionMs / 60000)}m`, 'success')
+    showToast(t('session.toast.timeoutExtended', { n: Math.round(result.extensionMs / 60000) }), 'success')
   } catch (err) {
     showToast(err.message)
   }
@@ -4106,9 +4442,9 @@ window.extendSessionTimeout = async function() {
 window.deleteCurrentSession = async function() {
   if (!state.currentSessionId) return
   if (!await confirmAction({
-    title: 'Delete Session',
-    message: 'Delete this session permanently?',
-    confirmText: 'Delete',
+    title: t('session.confirm.delete.title'),
+    message: t('session.confirm.delete.message'),
+    confirmText: t('session.confirm.delete.confirm'),
     danger: true,
   })) return
   try {
@@ -4609,8 +4945,8 @@ window.showTemplateGalleryModal = async function() {
   })
   const agentNotice = state.agents.length ? '' : `
     <div class="template-empty-agents">
-      <span>No API assistants configured yet.</span>
-      <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
+      <span>${t('newSession.noAgents')}</span>
+      <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">${t('newSession.addOneFirst')}</button>
     </div>
   `
 
@@ -4618,10 +4954,10 @@ window.showTemplateGalleryModal = async function() {
     <div class="modal-card template-modal">
       <div class="modal-head">
         <div>
-          <h3>New Session</h3>
-          <p>Choose a scenario preset.</p>
+          <h3>${t('newSession.title')}</h3>
+          <p>${t('newSession.choosePreset')}</p>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
       </div>
       ${agentNotice}
       <div class="template-grid">
@@ -4653,7 +4989,7 @@ window.showNewSessionModal = async function(templateId = 'custom') {
   const maxRounds = template?.config?.maxRounds || state.config?.defaults?.maxRounds || 5
   const prompts = template?.config?.systemPrompts || { from: '', to: '' }
   const templateBadge = template && template.id !== 'custom'
-    ? `<div class="template-selected-badge">Template: ${escapeHtml(template.nameEn || template.name)}</div>`
+    ? `<div class="template-selected-badge">${t('newSession.templateBadge', { name: escapeHtml(template.nameEn || template.name) })}</div>`
     : ''
   const noAgents = state.agents.length === 0
 
@@ -4661,92 +4997,92 @@ window.showNewSessionModal = async function(templateId = 'custom') {
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>New Session</h3>
-          <p>Create an assistant collaboration session.</p>
+          <h3>${t('newSession.title')}</h3>
+          <p>${t('newSession.desc')}</p>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
       </div>
       ${templateBadge}
       ${noAgents ? `
         <div class="template-empty-agents" style="margin-bottom: 20px;">
-          <span>No API assistants configured yet.</span>
-          <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
+          <span>${t('newSession.noAgents')}</span>
+          <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">${t('newSession.addOneFirst')}</button>
         </div>
       ` : ''}
       <form onsubmit="window.createSession(event)">
         <input type="hidden" name="templateId" value="${escapeAttr(template?.id || 'custom')}">
         <div class="form-row">
           <div class="form-group">
-            <label>Agent A</label>
+            <label>${t('newSession.agentA')}</label>
             <select class="input" name="from" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultFrom)}</select>
           </div>
           <div class="form-group">
-            <label>Agent B <span class="field-hint">executor; needs filesystem for cwd</span></label>
+            <label>${t('newSession.agentB')} <span class="field-hint">${t('newSession.agentBHint')}</span></label>
             <select class="input" name="to" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultTo)}</select>
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>Mode</label>
+            <label>${t('newSession.mode')}</label>
             <select class="input" name="mode">
-              <option value="collaborate" ${mode === 'collaborate' ? 'selected' : ''}>Collaboration</option>
-              <option value="discuss" ${mode === 'discuss' ? 'selected' : ''}>Discuss</option>
-              <option value="review" ${mode === 'review' ? 'selected' : ''}>Review</option>
-              <option value="freeform" ${mode === 'freeform' ? 'selected' : ''}>Freeform</option>
+              <option value="collaborate" ${mode === 'collaborate' ? 'selected' : ''}>${t('newSession.mode.collaborate')}</option>
+              <option value="discuss" ${mode === 'discuss' ? 'selected' : ''}>${t('newSession.mode.discuss')}</option>
+              <option value="review" ${mode === 'review' ? 'selected' : ''}>${t('newSession.mode.review')}</option>
+              <option value="freeform" ${mode === 'freeform' ? 'selected' : ''}>${t('newSession.mode.freeform')}</option>
             </select>
           </div>
           <div class="form-group">
-            <label>Max Turns</label>
+            <label>${t('newSession.maxTurns')}</label>
             <input class="input" type="number" name="maxRounds" min="1" value="${maxRounds}">
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label>Agent A System Prompt</label>
+            <label>${t('newSession.systemPromptA')}</label>
             <textarea class="input" name="systemPromptFrom" rows="4">${escapeHtml(prompts.from)}</textarea>
           </div>
           <div class="form-group">
-            <label>Agent B System Prompt</label>
+            <label>${t('newSession.systemPromptB')}</label>
             <textarea class="input" name="systemPromptTo" rows="4">${escapeHtml(prompts.to)}</textarea>
           </div>
         </div>
         <div class="form-group">
-          <label>Working Directory</label>
-          <input class="input" name="cwd" placeholder="/path/to/project">
+          <label>${t('newSession.workingDir')}</label>
+          <input class="input" name="cwd" placeholder="${t('newSession.workingDirPlaceholder')}">
         </div>
         <div class="form-group">
-          <label>Permission mode</label>
+          <label>${t('newSession.permissionMode')}</label>
           <select class="input" name="permissionMode">
-            <option value="safe">Safe</option>
-            <option value="trusted">Trusted · skip CLI approvals</option>
+            <option value="safe">${t('newSession.permissionSafe')}</option>
+            <option value="trusted">${t('newSession.permissionTrusted')}</option>
           </select>
         </div>
         <div class="form-group">
-          <label>Prompt</label>
-          <textarea class="input" name="prompt" rows="5" required placeholder="Describe the session..."></textarea>
+          <label>${t('newSession.prompt')}</label>
+          <textarea class="input" name="prompt" rows="5" required placeholder="${t('newSession.promptPlaceholder')}"></textarea>
         </div>
         <details class="context-details">
-          <summary>Context</summary>
+          <summary>${t('newSession.context')}</summary>
           <div class="form-group">
-            <label>Rules / Constraints</label>
+            <label>${t('newSession.contextRules')}</label>
             <textarea class="input" name="contextRules" rows="3"></textarea>
           </div>
           <div class="form-group">
-            <label>Background</label>
+            <label>${t('newSession.contextBackground')}</label>
             <textarea class="input" name="contextText" rows="3"></textarea>
           </div>
           <div class="form-group">
-            <label>Files</label>
-            <textarea class="input" name="contextFiles" rows="2" placeholder="src/web/app.js, src/web/style.css"></textarea>
+            <label>${t('newSession.contextFiles')}</label>
+            <textarea class="input" name="contextFiles" rows="2" placeholder="${t('newSession.contextFilesPlaceholder')}"></textarea>
           </div>
         </details>
         <label class="check-row">
           <input type="checkbox" name="approveMode">
-          <span>Approve mode</span>
+          <span>${t('newSession.approveMode')}</span>
         </label>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="window.showTemplateGalleryModal()">Back</button>
-          <button type="submit" class="btn btn-primary" ${noAgents ? 'disabled' : ''}>Create</button>
+          <button type="button" class="btn btn-secondary" onclick="window.showTemplateGalleryModal()">${t('newSession.back')}</button>
+          <button type="submit" class="btn btn-primary" ${noAgents ? 'disabled' : ''}>${t('newSession.create')}</button>
         </div>
       </form>
     </div>
@@ -4762,7 +5098,7 @@ window.createSession = async function(e) {
   const cwd = String(fd.get('cwd') || '').trim()
   const toName = String(fd.get('to') || '')
   if (cwd && !agentHasFilesystem(toName)) {
-    showToast('Sessions with cwd require Agent B to be a filesystem-capable local CLI agent')
+    showToast(t('session.toast.cwdRequiresFilesystem'))
     return
   }
   const body = {
@@ -5991,20 +6327,20 @@ function renderSessionCreationDetails(session) {
   return `
     <div class="divider"></div>
     <details class="creation-details">
-      <summary>Creation Params</summary>
+      <summary>${t('session.creationParams')}</summary>
       <div class="panel-kv creation-kv">
-        <div class="panel-kv-row"><span class="kv-label">Agent A</span><span class="kv-value">${escapeHtml(agentLabel(session.from))}</span></div>
-        <div class="panel-kv-row"><span class="kv-label">Agent B</span><span class="kv-value">${escapeHtml(agentLabel(session.to))}</span></div>
-        <div class="panel-kv-row"><span class="kv-label">Mode</span><span class="kv-value">${escapeHtml(session.mode)}</span></div>
-        <div class="panel-kv-row"><span class="kv-label">Max Turns</span><span class="kv-value">${escapeHtml(session.maxRounds)}</span></div>
-        <div class="panel-kv-row"><span class="kv-label">Approve</span><span class="kv-value">${session.approveMode ? 'on' : 'off'}</span></div>
-        <div class="panel-kv-row"><span class="kv-label">Permission</span><span class="kv-value">${escapeHtml(session.permissionMode || 'safe')}</span></div>
-        ${session.templateId ? `<div class="panel-kv-row"><span class="kv-label">Template</span><span class="kv-value">${escapeHtml(session.templateId)}</span></div>` : ''}
-        ${session.cwd ? `<div class="panel-kv-row"><span class="kv-label">CWD</span><span class="kv-value mono">${escapeHtml(session.cwd)}</span></div>` : ''}
+        <div class="panel-kv-row"><span class="kv-label">${t('session.agentA')}</span><span class="kv-value">${escapeHtml(agentLabel(session.from))}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">${t('session.agentB')}</span><span class="kv-value">${escapeHtml(agentLabel(session.to))}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">${t('session.mode')}</span><span class="kv-value">${escapeHtml(session.mode)}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">${t('session.maxTurnsLabel')}</span><span class="kv-value">${escapeHtml(session.maxRounds)}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">${t('session.approve')}</span><span class="kv-value">${session.approveMode ? 'on' : 'off'}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">${t('session.permission')}</span><span class="kv-value">${escapeHtml(session.permissionMode || 'safe')}</span></div>
+        ${session.templateId ? `<div class="panel-kv-row"><span class="kv-label">${t('session.template')}</span><span class="kv-value">${escapeHtml(session.templateId)}</span></div>` : ''}
+        ${session.cwd ? `<div class="panel-kv-row"><span class="kv-label">${t('session.cwd')}</span><span class="kv-value mono">${escapeHtml(session.cwd)}</span></div>` : ''}
       </div>
-      ${renderPromptBlock('Initial Prompt', initialPrompt)}
-      ${renderPromptBlock('Agent A System Prompt', session.systemPrompts?.from)}
-      ${renderPromptBlock('Agent B System Prompt', session.systemPrompts?.to)}
+      ${renderPromptBlock(t('session.initialPrompt'), initialPrompt)}
+      ${renderPromptBlock(t('newSession.systemPromptA'), session.systemPrompts?.from)}
+      ${renderPromptBlock(t('newSession.systemPromptB'), session.systemPrompts?.to)}
       ${renderContextDetails(session.context)}
     </details>
   `
@@ -6511,10 +6847,11 @@ function formatTime(timestamp) {
   const hours = Math.floor(minutes / 60)
   const days = Math.floor(hours / 24)
 
-  if (seconds < 60) return 'just now'
-  if (minutes < 60) return `${minutes} min ago`
-  if (hours < 24) return `${hours} hr ago`
-  return `${days} day${days > 1 ? 's' : ''} ago`
+  if (seconds < 60) return t('time.justNow')
+  if (minutes < 60) return t('time.minAgo', { n: minutes })
+  if (hours < 24) return t('time.hrAgo', { n: hours })
+  if (days <= 1) return t('time.dayAgo', { n: days })
+  return t('time.daysAgo', { n: days })
 }
 
 function formatDuration(ms) {
