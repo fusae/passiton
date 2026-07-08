@@ -155,7 +155,7 @@ const MESSAGES = {
     'settings.general.save': 'Save Settings',
     'settings.general.language': 'Language',
     'settings.general.language.en': 'English',
-    'settings.general.language.zh': '中文',
+    'settings.general.language.zh': 'Chinese',
 
     // Agent diagnostics modal
     'modal.agentDiagnostics.title': 'Agent Diagnostics',
@@ -744,6 +744,42 @@ const MESSAGES = {
     'ops_action_workflow_done': 'Executed {action}, Workflow: {id}',
     'ops_action_done': 'Executed {action}.',
 
+    // Landing page
+    'landing_nav_features': 'Features',
+    'landing_nav_architecture': 'Architecture',
+    'landing_nav_sessions': 'Sessions',
+    'landing_nav_get_started': 'Get Started',
+    'landing_badge': 'Agent Sessions Platform',
+    'landing_hero_title_prefix': 'Coordinate your AI agents',
+    'landing_hero_title_highlight': 'in one workspace',
+    'landing_hero_sub': 'Turing Cloud routes work across API models and local CLI agents. Use tasks and workflows to hand off complex work with clear state and outputs.',
+    'landing_hero_get_started': 'Get Started',
+    'landing_hero_sign_in': 'Sign In',
+    'landing_arch_title': 'How it works',
+    'landing_arch_sub': 'Agent A ↔ Turing ↔ Agent B — simple routing for multi-agent work',
+    'landing_arch_center_sub': 'Routing · orchestration · billing',
+    'landing_zhipu_api': 'Zhipu API',
+    'landing_features_title': 'Why Turing Cloud',
+    'landing_features_sub': 'Three practical reasons to use agents together',
+    'landing_feature_orchestration_title': 'Agent orchestration',
+    'landing_feature_orchestration_body': 'Define how assistants talk through tasks and workflows. Support serial steps, parallel work, and conditional branches without custom glue code.',
+    'landing_feature_keys_title': 'Use your own keys',
+    'landing_feature_keys_body': 'Connect Anthropic, OpenAI, Zhipu, and other providers directly. Keep provider choice and model access under your control.',
+    'landing_feature_billing_title': 'Pay for usage',
+    'landing_feature_billing_body': 'Costs follow actual task usage with per-turn accounting. No monthly plan is required for occasional or variable work.',
+    'landing_cta_title': 'Ready to coordinate agents?',
+    'landing_cta_sub': 'Start free, scale as needed, and create your first task in a few minutes.',
+    'landing_cta_button': 'Start using Turing Cloud',
+    'landing_footer': '© 2026 Turing Cloud. All rights reserved.',
+
+    // Login page
+    'login_tagline': 'Agent Sessions Platform',
+    'login_intro': 'Sign in with your existing local account.',
+    'login_email': 'Email',
+    'login_password': 'Password',
+    'login_submit': 'Login',
+    'login_local': 'Continue as Local User',
+
     // FormatTime relative labels
     'time.justNow': 'just now',
     'time.minAgo': '{n} min ago',
@@ -1323,6 +1359,42 @@ const MESSAGES = {
     'ops_action_session_done': '已执行 {action}，Session：{id}',
     'ops_action_workflow_done': '已执行 {action}，Workflow：{id}',
     'ops_action_done': '已执行 {action}。',
+
+    // Landing page
+    'landing_nav_features': 'Features',
+    'landing_nav_architecture': 'Architecture',
+    'landing_nav_sessions': 'Sessions',
+    'landing_nav_get_started': 'Get Started',
+    'landing_badge': 'Agent Sessions Platform',
+    'landing_hero_title_prefix': '让你的 AI 助手',
+    'landing_hero_title_highlight': '协同工作',
+    'landing_hero_sub': 'Turing Cloud 是一个 AI 助手协作平台。自带 API Key，灵活路由，用任务和工作流让多个 AI 模型协作完成复杂任务。',
+    'landing_hero_get_started': 'Get Started',
+    'landing_hero_sign_in': 'Sign In',
+    'landing_arch_title': '工作原理',
+    'landing_arch_sub': 'Agent A ↔ Turing ↔ Agent B —— 简洁而强大的任务编排',
+    'landing_arch_center_sub': '路由 · 编排 · 计费',
+    'landing_zhipu_api': '智谱 API',
+    'landing_features_title': '为什么选择 Turing Cloud',
+    'landing_features_sub': '三个核心优势，让助手协作变得简单',
+    'landing_feature_orchestration_title': '助手编排',
+    'landing_feature_orchestration_body': '通过任务和工作流灵活定义助手之间的通信拓扑。支持串行、并行、条件分支 —— 像搭积木一样构建复杂工作流。',
+    'landing_feature_keys_title': '用自己的 Key',
+    'landing_feature_keys_body': '自带 API Key，直接对接 Anthropic、OpenAI、智谱等主流提供商。不锁定供应商，数据不经代理 —— 完全掌控你的 AI 资产。',
+    'landing_feature_billing_title': '按需计费',
+    'landing_feature_billing_body': '只为实际使用的任务付费。透明的按回合计费模式，没有包月、没有隐藏费用。用多少、付多少。',
+    'landing_cta_title': '准备好让助手协作了吗？',
+    'landing_cta_sub': '免费开始，按需扩展。几分钟内就能创建第一个任务。',
+    'landing_cta_button': '开始使用 Turing Cloud',
+    'landing_footer': '© 2026 Turing Cloud. All rights reserved.',
+
+    // Login page
+    'login_tagline': 'Agent Sessions Platform',
+    'login_intro': 'Sign in with your existing local account.',
+    'login_email': 'Email',
+    'login_password': 'Password',
+    'login_submit': 'Login',
+    'login_local': 'Continue as Local User',
 
     // FormatTime relative labels
     'time.justNow': '刚刚',
@@ -2305,42 +2377,41 @@ function renderLanding() {
         <span>Turing Cloud</span>
       </div>
       <div class="landing-nav-links">
-        <a href="#features">Features</a>
-        <a href="#architecture">Architecture</a>
-        <a href="/sessions">Sessions</a>
-        <a href="/sessions" class="btn btn-primary btn-sm">Get Started</a>
+        <a href="#features">${t('landing_nav_features')}</a>
+        <a href="#architecture">${t('landing_nav_architecture')}</a>
+        <a href="/sessions">${t('landing_nav_sessions')}</a>
+        <a href="/sessions" class="btn btn-primary btn-sm">${t('landing_nav_get_started')}</a>
         <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
       </div>
     </nav>
 
     <section class="hero">
       <div class="hero-badge fade-in-up">
-        <span>✦</span> Agent Sessions Platform
+        <span>✦</span> ${t('landing_badge')}
       </div>
 
       <h1 class="fade-in-up delay-1">
-        让你的 AI 助手<br><span class="grad-text">协同工作</span>
+        ${t('landing_hero_title_prefix')}<br><span class="grad-text">${t('landing_hero_title_highlight')}</span>
       </h1>
 
       <p class="hero-sub fade-in-up delay-2">
-        Turing Cloud 是一个 AI 助手协作平台。自带 API Key，灵活路由，
-        用任务和工作流让多个 AI 模型协作完成复杂任务。
+        ${t('landing_hero_sub')}
       </p>
 
       <div class="hero-cta fade-in-up delay-3">
         <a href="/sessions" class="btn btn-primary pulse-glow">
-          Get Started
+          ${t('landing_hero_get_started')}
           <span>→</span>
         </a>
         <a href="/login" class="btn btn-secondary">
-          Sign In
+          ${t('landing_hero_sign_in')}
         </a>
       </div>
     </section>
 
     <section class="arch-section" id="architecture">
-      <h2 class="fade-in-up">工作原理</h2>
-      <p class="section-sub fade-in-up delay-1">Agent A ↔ Turing ↔ Agent B —— 简洁而强大的任务编排</p>
+      <h2 class="fade-in-up">${t('landing_arch_title')}</h2>
+      <p class="section-sub fade-in-up delay-1">${t('landing_arch_sub')}</p>
 
       <div class="arch-diagram fade-in-up delay-2">
         <div class="arch-col">
@@ -2361,7 +2432,7 @@ function renderLanding() {
         <div class="arch-center">
           <div class="arch-icon">⚡</div>
           <div class="arch-label">Turing Cloud</div>
-          <div class="arch-sub" style="color: var(--text-secondary); margin-top: 4px;">路由 · 编排 · 计费</div>
+          <div class="arch-sub" style="color: var(--text-secondary); margin-top: 4px;">${t('landing_arch_center_sub')}</div>
         </div>
 
         <div class="arch-connector"></div>
@@ -2370,7 +2441,7 @@ function renderLanding() {
           <div class="arch-node">
             <div class="arch-icon" style="background: rgba(245,158,11,0.15);">💬</div>
             <div class="arch-label">GLM-4</div>
-            <div class="arch-sub">智谱 API</div>
+            <div class="arch-sub">${t('landing_zhipu_api')}</div>
           </div>
           <div class="arch-node">
             <div class="arch-icon" style="background: rgba(139,92,246,0.15);">🔮</div>
@@ -2382,18 +2453,17 @@ function renderLanding() {
     </section>
 
     <section class="features-section" id="features">
-      <h2>为什么选择 Turing Cloud</h2>
-      <p class="section-sub">三个核心优势，让助手协作变得简单</p>
+      <h2>${t('landing_features_title')}</h2>
+      <p class="section-sub">${t('landing_features_sub')}</p>
 
       <div class="features-grid">
         <div class="feature-card fade-in-up delay-1">
           <div class="feature-icon" style="background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15));">
             🔀
           </div>
-          <h3>助手编排</h3>
+          <h3>${t('landing_feature_orchestration_title')}</h3>
           <p>
-            通过任务和工作流灵活定义助手之间的通信拓扑。
-            支持串行、并行、条件分支 —— 像搭积木一样构建复杂工作流。
+            ${t('landing_feature_orchestration_body')}
           </p>
         </div>
 
@@ -2401,10 +2471,9 @@ function renderLanding() {
           <div class="feature-icon" style="background: linear-gradient(135deg, rgba(245,158,11,0.15), rgba(249,115,22,0.15));">
             🔑
           </div>
-          <h3>用自己的 Key</h3>
+          <h3>${t('landing_feature_keys_title')}</h3>
           <p>
-            自带 API Key，直接对接 Anthropic、OpenAI、智谱等主流提供商。
-            不锁定供应商，数据不经代理 —— 完全掌控你的 AI 资产。
+            ${t('landing_feature_keys_body')}
           </p>
         </div>
 
@@ -2412,10 +2481,9 @@ function renderLanding() {
           <div class="feature-icon" style="background: linear-gradient(135deg, rgba(34,197,94,0.15), rgba(16,185,129,0.15));">
             📊
           </div>
-          <h3>按需计费</h3>
+          <h3>${t('landing_feature_billing_title')}</h3>
           <p>
-            只为实际使用的任务付费。透明的按回合计费模式，
-            没有包月、没有隐藏费用。用多少、付多少。
+            ${t('landing_feature_billing_body')}
           </p>
         </div>
       </div>
@@ -2423,21 +2491,21 @@ function renderLanding() {
 
     <section class="cta-section">
       <h2 class="fade-in-up" style="margin-bottom: 16px;">
-        准备好让助手协作了吗？
+        ${t('landing_cta_title')}
       </h2>
       <p class="fade-in-up delay-1" style="color: var(--text-secondary); font-size: 1.05rem; margin-bottom: 36px;">
-        免费开始，按需扩展。几分钟内就能创建第一个任务。
+        ${t('landing_cta_sub')}
       </p>
       <div class="fade-in-up delay-2">
         <a href="/sessions" class="btn btn-primary" style="padding: 14px 36px; font-size: 1rem;">
-          开始使用 Turing Cloud
+          ${t('landing_cta_button')}
           <span>→</span>
         </a>
       </div>
     </section>
 
     <footer class="landing-footer">
-      <p>© 2026 Turing Cloud. All rights reserved.</p>
+      <p>${t('landing_footer')}</p>
     </footer>
   `
   updateThemeButton()
@@ -2452,28 +2520,28 @@ function renderLogin() {
             <div class="logo-icon" style="width: 36px; height: 36px; font-size: 1rem;">T</div>
             <h2 style="margin: 0;">Turing Cloud</h2>
           </div>
-          <p style="color: var(--text-secondary); font-size: 0.9rem;">Agent Sessions Platform</p>
+          <p style="color: var(--text-secondary); font-size: 0.9rem;">${t('login_tagline')}</p>
         </div>
 
         <div style="margin-bottom: 24px; color: var(--text-secondary); font-size: 0.9rem;">
-          Sign in with your existing local account.
+          ${t('login_intro')}
         </div>
 
         <form id="login-form" class="tab-panel active" onsubmit="window.handleLogin(event)">
           <div class="form-group">
-            <label>Email</label>
+            <label>${t('login_email')}</label>
             <input type="email" class="input" name="email" required autocomplete="email">
           </div>
           <div class="form-group">
-            <label>Password</label>
+            <label>${t('login_password')}</label>
             <input type="password" class="input" name="password" required minlength="8" autocomplete="current-password">
           </div>
           <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
-            Login
+            ${t('login_submit')}
           </button>
         </form>
         <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-top: 12px;" onclick="window.handleLocalLogin()">
-          Continue as Local User
+          ${t('login_local')}
         </button>
       </div>
     </div>

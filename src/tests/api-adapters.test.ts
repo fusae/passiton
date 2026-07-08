@@ -254,22 +254,22 @@ test('withHint adds actionable hints to common adapter failures', () => {
   // 1. Non-zero exit with empty stderr → looks like an auth/subscription issue.
   const auth = withHint('claude-code', '/bin/claude', 1, '', '[claude-code] exited with code 1: ', 60_000)
   assert.match(auth, /exited with code 1/)            // raw message preserved
-  assert.match(auth, /未登录|凭证失效|订阅过期/)        // actionable hint added
+  assert.match(auth, /not logged in|expired credentials|inactive subscription/) // actionable hint added
 
   // 2. spawn ENOENT → binary not found.
   const missing = withHint('codex', 'codex', null, '', '[codex] spawn error: ENOENT', 60_000)
   assert.match(missing, /spawn error: ENOENT/)
-  assert.match(missing, /找不到或无法执行/)
+  assert.match(missing, /Could not find or execute/)
 
   // 3. Timeout → points at the timeout knob.
   const timed = withHint('codex', 'codex', null, '', '[codex] timed out after 600000ms', 600_000)
   assert.match(timed, /timed out after 600000ms/)
-  assert.match(timed, /超过 600s|600s 仍未返回/)
+  assert.match(timed, /waited longer than 600s/)
   assert.match(timed, /`timeout`/)
 
   // 4. Explicit auth cue in stderr.
   const explicit = withHint('codex', 'codex', 1, 'Error: invalid api key', '[codex] exited with code 1: Error: invalid api key', 60_000)
-  assert.match(explicit, /未登录|凭证失效|订阅过期/)
+  assert.match(explicit, /not logged in|expired credentials|inactive subscription/)
 
   // 5. Timeout with quota details in stderr → quota/rate limit, not generic timeout.
   const limited = withHint(
@@ -280,8 +280,8 @@ test('withHint adds actionable hints to common adapter failures', () => {
     '[opencode] idle timed out after 600000ms',
     600_000
   )
-  assert.match(limited, /状态：rate_limited/)
-  assert.match(limited, /额度\/频率限制已触发/)
+  assert.match(limited, /status: rate_limited/)
+  assert.match(limited, /hit a usage or rate limit/)
   assert.match(limited, /2026-07-07 21:02:30/)
 })
 

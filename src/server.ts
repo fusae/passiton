@@ -51,7 +51,7 @@ const API_ADAPTERS = new Set(['anthropic-api', 'openai-api', 'zhipu-api', 'deeps
 const PROVIDER_BY_ADAPTER: Record<string, string> = {
   'anthropic-api': 'Anthropic',
   'openai-api': 'OpenAI',
-  'zhipu-api': '智谱',
+  'zhipu-api': 'Zhipu',
   'deepseek-api': 'DeepSeek',
   'qwen-api': 'Qwen',
   'moonshot-api': 'Moonshot',
@@ -2038,38 +2038,38 @@ async function buildOpsReport(
     if (task.status === 'running' && now - task.updatedAt > staleMs) {
       issues.push({
         severity: 'critical',
-        title: 'Task 可能卡住',
-        detail: `${task.agent.label || task.agent.adapter} 已运行 ${formatDuration(now - (task.startedAt || task.updatedAt))}，最近 ${formatDuration(now - task.updatedAt)} 没有更新。`,
-        recommendation: '先查看 last agent output 和项目 git diff；若无子进程活动，停止后用相同 prompt 重跑。',
+        title: 'Task may be stuck',
+        detail: `${task.agent.label || task.agent.adapter} has run for ${formatDuration(now - (task.startedAt || task.updatedAt))}; no updates for ${formatDuration(now - task.updatedAt)}.`,
+        recommendation: 'Check last agent output and the project diff first; if no child process is active, stop it and rerun with the same prompt.',
         target: { kind: 'task', id: task.id },
         actions: [
-          opsAction('stop_task', { kind: 'task', id: task.id }, '停止 Task', '停止这个卡住的后台任务。', 'medium'),
-          opsAction('rerun_task', { kind: 'task', id: task.id }, '重跑 Task', '用原 prompt 创建一个新的 Task。', 'medium'),
+          opsAction('stop_task', { kind: 'task', id: task.id }, 'Stop Task', 'Stop this stuck background task.', 'medium'),
+          opsAction('rerun_task', { kind: 'task', id: task.id }, 'Rerun Task', 'Create a new task with the original prompt.', 'medium'),
         ],
       })
     }
     if (task.status === 'queued' && now - task.createdAt > queuedMs) {
       issues.push({
         severity: 'warning',
-        title: 'Task 排队过久',
-        detail: `任务已排队 ${formatDuration(now - task.createdAt)}。`,
-        recommendation: '检查 task concurrency 是否被长任务占满，必要时停止卡住的 running task。',
+        title: 'Task queued too long',
+        detail: `Task has been queued for ${formatDuration(now - task.createdAt)}.`,
+        recommendation: 'Check whether task concurrency is occupied by long-running tasks; stop stuck running tasks if needed.',
         target: { kind: 'task', id: task.id },
         actions: [
-          opsAction('stop_task', { kind: 'task', id: task.id }, '取消排队', '停止这个排队中的任务。', 'low'),
+          opsAction('stop_task', { kind: 'task', id: task.id }, 'Cancel Queue', 'Stop this queued task.', 'low'),
         ],
       })
     }
     if (task.status === 'error') {
       issues.push({
         severity: classifyOpsSeverity(task.errorMessage),
-        title: 'Task 失败',
-        detail: task.errorMessage || task.lastAgentOutput || '任务失败但没有保存错误详情。',
+        title: 'Task failed',
+        detail: task.errorMessage || task.lastAgentOutput || 'Task failed without saved error details.',
         recommendation: recommendationForError(task.errorMessage || task.lastAgentOutput || ''),
         target: { kind: 'task', id: task.id },
         actions: [
-          opsAction('rerun_task', { kind: 'task', id: task.id }, '重跑 Task', '用原 prompt 创建一个新的 Task。', 'medium'),
-          opsAction('create_repair_task', { kind: 'task', id: task.id }, '创建修复 Task', '创建一个新 Task，让 agent 根据错误原因修复；不由管家直接改文件。', 'high'),
+          opsAction('rerun_task', { kind: 'task', id: task.id }, 'Rerun Task', 'Create a new task with the original prompt.', 'medium'),
+          opsAction('create_repair_task', { kind: 'task', id: task.id }, 'Create Repair Task', 'Create a new task for an agent to fix the failure; Ops will not edit files directly.', 'high'),
         ],
       })
     }
@@ -2079,36 +2079,36 @@ async function buildOpsReport(
     if (session.status === 'active' && now - session.updatedAt > staleMs) {
       issues.push({
         severity: 'critical',
-        title: 'Session 可能卡住',
-        detail: `${agentLabel(session.from)} -> ${agentLabel(session.to)} 最近 ${formatDuration(now - session.updatedAt)} 没有更新。`,
-        recommendation: '检查当前轮 agent 输出；如是额度或认证问题，切换 agent 后 resume。',
+        title: 'Session may be stuck',
+        detail: `${agentLabel(session.from)} -> ${agentLabel(session.to)} has had no updates for ${formatDuration(now - session.updatedAt)}.`,
+        recommendation: 'Check the current round output; if it is a quota or auth issue, switch agents and resume.',
         target: { kind: 'session', id: session.id },
         actions: [
-          opsAction('resume_session', { kind: 'session', id: session.id }, '继续 Session', '尝试让这个 Session 继续运行。', 'medium'),
+          opsAction('resume_session', { kind: 'session', id: session.id }, 'Resume Session', 'Try to resume this session.', 'medium'),
         ],
       })
     }
     if (session.status === 'error') {
       issues.push({
         severity: classifyOpsSeverity(session.errorMessage || session.errorType),
-        title: 'Session 失败',
-        detail: session.errorMessage || session.errorType || session.lastAgentOutput || '会话失败但没有保存错误详情。',
+        title: 'Session failed',
+        detail: session.errorMessage || session.errorType || session.lastAgentOutput || 'Session failed without saved error details.',
         recommendation: recommendationForError(session.errorMessage || session.errorType || session.lastAgentOutput || ''),
         target: { kind: 'session', id: session.id },
         actions: [
-          opsAction('resume_session', { kind: 'session', id: session.id }, '从错误继续', '从错误状态恢复这个 Session。', 'medium'),
+          opsAction('resume_session', { kind: 'session', id: session.id }, 'Resume from Error', 'Recover this session from the error state.', 'medium'),
         ],
       })
     }
     if (session.status === 'paused') {
       issues.push({
         severity: 'info',
-        title: 'Session 等待处理',
-        detail: `${agentLabel(session.from)} -> ${agentLabel(session.to)} 处于 paused。`,
-        recommendation: session.errorType ? '确认错误原因后 resume，必要时指定备用 agent。' : '如果是人工审核点，确认产物后继续。',
+        title: 'Session waiting for action',
+        detail: `${agentLabel(session.from)} -> ${agentLabel(session.to)} is paused.`,
+        recommendation: session.errorType ? 'Confirm the error cause, then resume; specify a backup agent if needed.' : 'If this is a human review point, confirm the artifact and continue.',
         target: { kind: 'session', id: session.id },
         actions: [
-          opsAction('resume_session', { kind: 'session', id: session.id }, '继续 Session', '恢复这个 paused Session。', 'low'),
+          opsAction('resume_session', { kind: 'session', id: session.id }, 'Resume Session', 'Resume this paused session.', 'low'),
         ],
       })
     }
@@ -2118,9 +2118,9 @@ async function buildOpsReport(
     if (workflow.status === 'active' && now - workflow.updatedAt > staleMs) {
       issues.push({
         severity: 'warning',
-        title: 'Workflow 长时间未更新',
-        detail: `${workflow.name} 最近 ${formatDuration(now - workflow.updatedAt)} 没有更新。`,
-        recommendation: '进入 Workflow 查看 active step；优先处理失败或等待审核的步骤。',
+        title: 'Workflow has not updated for a while',
+        detail: `${workflow.name} has had no updates for ${formatDuration(now - workflow.updatedAt)}.`,
+        recommendation: 'Open the workflow and inspect the active step; handle failed or review-waiting steps first.',
         target: { kind: 'workflow', id: workflow.id },
       })
     }
@@ -2128,8 +2128,8 @@ async function buildOpsReport(
       issues.push({
         severity: workflow.status === 'error' ? 'critical' : 'info',
         title: `Workflow ${workflow.status}`,
-        detail: `${workflow.name} 当前状态为 ${workflow.status}。`,
-        recommendation: '检查步骤时间线，定位第一个非 done 步骤。',
+        detail: `${workflow.name} is currently ${workflow.status}.`,
+        recommendation: 'Inspect the step timeline and find the first step that is not done.',
         target: { kind: 'workflow', id: workflow.id },
       })
     }
@@ -2140,9 +2140,9 @@ async function buildOpsReport(
     if (status && status !== 'ready' && status !== 'discovered') {
       issues.push({
         severity: status === 'invalid' || status === 'no_key' ? 'critical' : 'warning',
-        title: 'Agent 不可用',
-        detail: `${String((agent as { name?: unknown }).name || 'unknown')} 状态为 ${status}。`,
-        recommendation: '到 Settings 重新诊断；API agent 检查 key，CLI agent 检查登录、PATH 和订阅额度。',
+        title: 'Agent unavailable',
+        detail: `${String((agent as { name?: unknown }).name || 'unknown')} status is ${status}.`,
+        recommendation: 'Run diagnostics again in Settings; for API agents check keys, and for CLI agents check login, PATH, and subscription quota.',
       })
     }
   }
@@ -2156,7 +2156,7 @@ async function buildOpsReport(
   const modelAnswer = input.question && !directAnswer
     ? await generateOpsModelAnswer(userId, input, {
         summary,
-        policy: '只读诊断；平台动作必须用户确认；不直接写项目文件、不提交、不 push。',
+        policy: 'Read-only diagnostics; platform actions require user confirmation; do not edit project files, commit, or push.',
         issues: relevant.slice(0, 20),
         counts: {
           critical: issues.filter(issue => issue.severity === 'critical').length,
@@ -2208,22 +2208,22 @@ function directOpsAnswer(userId: string, question: string | undefined): string |
     const selected = selectCachedOpsModelAgent(userId)
     if (selected) {
       return [
-        `当前 Ops 管家接入的是 ${selected.name}。`,
+        `The current Ops steward is connected to ${selected.name}.`,
         `adapter: ${selected.config.adapter}`,
-        `model: ${selected.config.model || '未配置'}`,
-        '它只负责诊断、解释和建议；不会直接写项目文件、提交或 push。',
+        `model: ${selected.config.model || 'not configured'}`,
+        'It only diagnoses, explains, and recommends; it does not edit project files, commit, or push.',
       ].join('\n')
     }
     return [
-      '当前没有可用的 Ops LLM。',
-      '请在 Settings 添加一个 API Assistant；优先使用名字含 ops 的 Assistant，其次 DeepSeek/Qwen/OpenAI/Claude。',
+      'No Ops LLM is currently available.',
+      'Add an API Assistant in Settings. Assistants with "ops" in the name are preferred, then DeepSeek/Qwen/OpenAI/Claude.',
     ].join('\n')
   }
   if (/能做什么|职责|权限|边界/.test(value)) {
     return [
-      'Ops 管家的边界是：只读诊断 + 经你确认后执行平台动作。',
-      '它可以 stop、resume、rerun、创建修复 Task。',
-      '它不会直接写项目文件、提交代码或 push。',
+      'Ops scope: read-only diagnostics plus platform actions after your confirmation.',
+      'It can stop, resume, rerun, and create repair tasks.',
+      'It does not edit project files, commit code, or push.',
     ].join('\n')
   }
   return undefined
@@ -2232,12 +2232,12 @@ function directOpsAnswer(userId: string, question: string | undefined): string |
 function summarizeOpsIssues(issues: OpsIssue[], input: { question?: string; target?: OpsTarget }): string {
   if (issues.length === 0) {
     return input.target?.id
-      ? '当前对象没有检测到明显异常。'
-      : '当前没有检测到高优先级异常。'
+      ? 'No obvious issue was found for the current object.'
+      : 'No high-priority issue was detected.'
   }
   const first = issues[0]
-  const prefix = input.target?.id ? '这个对象' : '平台'
-  return `${prefix}检测到 ${issues.length} 个问题。最优先处理：${first.title}。${first.recommendation}`
+  const prefix = input.target?.id ? 'This object' : 'The platform'
+  return `${prefix} has ${issues.length} issue(s). Top priority: ${first.title}. ${first.recommendation}`
 }
 
 async function generateOpsModelAnswer(
@@ -2253,9 +2253,9 @@ async function generateOpsModelAnswer(
   }
 ): Promise<{ answer?: string; source?: string; error?: string }> {
   const selected = await selectOpsModelAgent(userId)
-  if (!selected) return { error: '没有真实验证通过的 API Assistant；请在 Settings 里刷新或重新配置 DeepSeek/Qwen/OpenAI API Assistant。' }
+  if (!selected) return { error: 'No verified API Assistant is available. Refresh in Settings or reconfigure a DeepSeek/Qwen/OpenAI API Assistant.' }
   const adapter = createAdapter(selected.config)
-  if (!adapter) return { error: `无法创建 ${selected.name} adapter。` }
+  if (!adapter) return { error: `Could not create the ${selected.name} adapter.` }
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), 30_000)
@@ -2267,12 +2267,12 @@ async function generateOpsModelAnswer(
     }), {
       signal: controller.signal,
       systemPrompt: [
-        '你是 Turing 平台的 Ops 管家。',
-        '你的职责：观察平台状态、解释任务/会话/工作流问题、给出下一步建议。',
-        '你的边界：不直接写项目文件、不提交、不 push；需要修复时建议创建修复 Task 或使用平台动作。',
-        '严格回答用户当前问题，不要机械复述所有诊断项。',
-        '如果 report 中没有足够证据，明确说明缺少什么。',
-        '中文回答，简短、具体。',
+        'You are the Ops steward for the Turing platform.',
+        'Your role: inspect platform state, explain task/session/workflow issues, and recommend the next step.',
+        'Your boundary: do not edit project files directly, commit, or push; when fixes are needed, recommend creating a repair task or using platform actions.',
+        'Answer the user’s current question directly. Do not mechanically restate every diagnostic item.',
+        'If the report lacks enough evidence, state what is missing.',
+        'Answer in concise, specific English.',
       ].join('\n'),
     })
     const answer = typeof result === 'string' ? result : (result as AdapterResponse).content
@@ -2364,11 +2364,11 @@ function classifyOpsSeverity(text: unknown): OpsIssue['severity'] {
 
 function recommendationForError(text: string): string {
   const value = text.toLowerCase()
-  if (/quota|usage limit|insufficient|429|rate limit/.test(value)) return '额度或限流问题；等待恢复后切换备用 agent 或手动 resume。'
-  if (/auth|login|unauthorized|forbidden|401|403/.test(value)) return '认证问题；重新登录 CLI 或更新 Provider Key。'
-  if (/timeout|timed out|idle/.test(value)) return '超时问题；检查是否已有落盘改动，必要时延长超时后重跑。'
-  if (/permission|eacces|access/.test(value)) return '权限问题；检查 cwd、文件权限和 permission mode。'
-  return '查看最后输出和日志，确认是否可重跑或需要切换 agent。'
+  if (/quota|usage limit|insufficient|429|rate limit/.test(value)) return 'Quota or rate-limit issue. Wait for recovery, then switch to a backup agent or resume manually.'
+  if (/auth|login|unauthorized|forbidden|401|403/.test(value)) return 'Authentication issue. Log in to the CLI again or update the provider key.'
+  if (/timeout|timed out|idle/.test(value)) return 'Timeout issue. Check whether files were written, then extend timeout and rerun if needed.'
+  if (/permission|eacces|access/.test(value)) return 'Permission issue. Check cwd, file permissions, and permission mode.'
+  return 'Check the last output and logs, then decide whether to rerun or switch agents.'
 }
 
 function formatDuration(ms: number): string {
@@ -2873,13 +2873,13 @@ async function executeOpsAction(
     systemPrompt: task.systemPrompt,
     permissionMode: task.permissionMode,
     prompt: [
-      '你是被 Turing Ops 创建的修复任务。请只修复下面任务失败暴露的问题。',
-      '要求：先检查当前工作区状态；只改必要文件；不要 push；不要改历史；完成后给出变更摘要。',
+      'You are a repair task created by Turing Ops. Fix only the issue exposed by the failed task below.',
+      'Requirements: check the current workspace state first; edit only necessary files; do not push; do not rewrite history; finish with a change summary.',
       '',
-      '## 原始任务',
+      '## Original Task',
       task.prompt,
       '',
-      previous ? `## 失败输出或错误\n${previous}` : '',
+      previous ? `## Failure Output or Error\n${previous}` : '',
     ].filter(Boolean).join('\n'),
   })
   return { action: actionId, task: created }
@@ -3683,9 +3683,9 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
   }
   server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
-      console.error(`[server] 端口 ${port} 已被占用。可能已有 Turing 实例在运行；请停止它，或修改 ${getConfigPath()} 中的 server.port 后重试。`)
+      console.error(`[server] Port ${port} is already in use. Another Turing instance may be running; stop it, or change server.port in ${getConfigPath()} and retry.`)
     } else {
-      console.error(`[server] 启动失败: ${err.code ?? ''} ${err.message}`)
+      console.error(`[server] Startup failed: ${err.code ?? ''} ${err.message}`)
     }
     process.exit(1)
   })

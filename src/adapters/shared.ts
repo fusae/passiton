@@ -258,7 +258,7 @@ export function withHint(adapterName: string, command: string, code: number | nu
   const lower = (stderr + ' ' + message).toLowerCase()
   // 1. Binary not found / not executable.
   if (message.includes('spawn error') && (lower.includes('enoent') || lower.includes('not found') || lower.includes('eacces'))) {
-    return `${message}\n状态：not_installed\n提示：找不到或无法执行 \`${command}\`。请在 Settings 里确认该 Agent 的 command 路径正确，或将其加入 PATH。`
+    return `${message}\nstatus: not_installed\nhint: Could not find or execute \`${command}\`. Check this agent's command path in Settings, or add it to PATH.`
   }
   // 2. Auth / credentials / subscription. CLI agents (claude-code, codex, …)
   //    commonly exit non-zero with empty or terse stderr when unauthenticated.
@@ -268,14 +268,14 @@ export function withHint(adapterName: string, command: string, code: number | nu
   if (looksLikeAuth) {
     const status = quotaCues.some((cue) => lower.includes(cue)) ? 'rate_limited' : lower.includes('api key') ? 'api_key_missing' : 'auth_required'
     const resetMatch = stripAnsi(stderr + ' ' + message).match(/reset at ([^"}\n]+)/i)
-    const resetHint = resetMatch?.[1] ? `重置时间：${resetMatch[1]}。` : ''
-    return `${message}\n状态：${status}\n提示：\`${adapterName}\` ${status === 'rate_limited' ? `额度/频率限制已触发。${resetHint}` : '启动失败，常见原因：未登录、凭证失效或订阅过期。'}请在该 Agent 的终端里手动跑一次确认，或在 Settings 检查其 env / API Key。`
+    const resetHint = resetMatch?.[1] ? ` Reset time: ${resetMatch[1]}.` : ''
+    return `${message}\nstatus: ${status}\nhint: \`${adapterName}\` ${status === 'rate_limited' ? `hit a usage or rate limit.${resetHint}` : 'failed to start. Common causes: not logged in, expired credentials, or an inactive subscription.'} Run this agent once in its own terminal to confirm, or check its env / API key in Settings.`
   }
   // 3. Timeout — point at the timeout knob.
   if (lower.includes('timed out')) {
     const seconds = Math.round(timeoutMs / 1000)
-    const mode = lower.includes('idle timed out') ? '连续无输出' : lower.includes('hard timed out') ? '总运行时长' : '等待'
-    return `${message}\n状态：timeout\n提示：该 Agent ${mode}超过 ${seconds}s。正常有持续输出时不会触发空闲超时；如任务确实很长，可在 Settings 调大该 Agent 的 \`timeout\`。`
+    const mode = lower.includes('idle timed out') ? 'produced no output for' : lower.includes('hard timed out') ? 'ran longer than' : 'waited longer than'
+    return `${message}\nstatus: timeout\nhint: This agent ${mode} ${seconds}s. Idle timeout is not triggered while output continues; if the task is genuinely long, increase this agent's \`timeout\` in Settings.`
   }
   return message
 }

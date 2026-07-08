@@ -153,7 +153,7 @@ test('ops endpoints report task failures and targeted diagnostics', async () => 
     assert.equal(status.ok, false)
     assert.equal(status.counts.critical, 1)
     assert.equal(status.issues[0]?.target?.id, 'ops-task-1')
-    assert.match(status.issues[0]?.recommendation || '', /超时/)
+    assert.match(status.issues[0]?.recommendation || '', /Timeout issue/)
 
     const fakeApi = http.createServer((_, res) => {
       res.writeHead(200, { 'content-type': 'application/json' })
@@ -1255,7 +1255,7 @@ test('EADDRINUSE prints a friendly message and exits with code 1', async () => {
       setTimeout(resolve, 2000)
     })
     assert.equal(exitCode, 1)
-    assert.match(stderrOutput, /端口.*已被占用/)
+    assert.match(stderrOutput, /Port .* is already in use/)
   } finally {
     process.exit = originalExit
     process.stderr.write = originalStderrWrite

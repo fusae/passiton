@@ -631,15 +631,15 @@ export class Router extends EventEmitter {
     this.nextRunEpoch(id)
     this.abortActiveTurn(id)
     state.clearSessionError(id)
-    this.recordMessage(id, 'human', '通过，确认保存。', session.currentRound)
+    this.recordMessage(id, 'human', 'Approved. Save as final.', session.currentRound)
 
     const videoPaths = extractVideoPaths(approvalRequest.content)
     const content = [
       '[RESULT]',
-      '成片已通过人工审核，确认为最终保存版。',
+      'The final video has passed human review and is confirmed as the final saved version.',
       '',
-      ...(videoPaths.length ? ['最终视频：', ...videoPaths.map((filePath) => `\`${filePath}\``), ''] : []),
-      '后处理事项：在剪映中完成字幕识别、字幕校对和样式微调后导出。',
+      ...(videoPaths.length ? ['Final video:', ...videoPaths.map((filePath) => `\`${filePath}\``), ''] : []),
+      'Post-processing: finish subtitle recognition, subtitle review, and style adjustments in CapCut before export.',
       '[/RESULT]',
       '[DONE]',
     ].join('\n')
@@ -667,15 +667,15 @@ export class Router extends EventEmitter {
 
     const round = Math.max(1, session.currentRound)
     this.recordMessage(id, 'human', [
-      '人工补充产物完成，回填文件：',
+      'Manual artifacts completed. Backfilled files:',
       ...resolvedPaths.map((filePath) => `- ${filePath}`),
     ].join('\n'), round)
 
     const content = [
       '[RESULT]',
-      summary || '人工补充产物已回填。',
+      summary || 'Manual artifacts have been backfilled.',
       '',
-      ...resolvedPaths.map((filePath) => `产物：\`${filePath}\``),
+      ...resolvedPaths.map((filePath) => `Artifact: \`${filePath}\``),
       '[/RESULT]',
       '[DONE]',
     ].join('\n')
@@ -757,7 +757,7 @@ export class Router extends EventEmitter {
       this.abortActiveTurn(affectedSessionId)
       state.stopExternalJobsForSession(affectedSessionId)
       if (affectedSessionId === sessionId) state.clearExternalJobsForSession(affectedSessionId)
-      this.saveSessionVersion(affectedSessionId, affectedSessionId === sessionId ? '重跑本步骤' : '上游重跑，自动重置')
+      this.saveSessionVersion(affectedSessionId, affectedSessionId === sessionId ? 'Rerun this step' : 'Upstream rerun, automatically reset')
       const reset = state.resetSessionForPipelineRerun(affectedSessionId)
       this.emit('event', { type: 'session:paused', payload: reset } satisfies WsEvent)
     }
@@ -1369,8 +1369,8 @@ export class Router extends EventEmitter {
 
   private markProviderStepError(sessionId: string, err: unknown): void {
     const session = state.getSession(sessionId)
-    this.recordMessage(sessionId, 'turing', `[RESULT]\n外部任务步骤执行失败。\n\n原因：${errorMessage(err)}\n[/RESULT]`, Math.max(1, session?.currentRound ?? 1))
-    state.updateSession(sessionId, { lastAgentOutput: `[RESULT]\n外部任务步骤执行失败。\n\n原因：${errorMessage(err)}\n[/RESULT]` })
+    this.recordMessage(sessionId, 'turing', `[RESULT]\nExternal task step failed.\n\nReason: ${errorMessage(err)}\n[/RESULT]`, Math.max(1, session?.currentRound ?? 1))
+    state.updateSession(sessionId, { lastAgentOutput: `[RESULT]\nExternal task step failed.\n\nReason: ${errorMessage(err)}\n[/RESULT]` })
     this.markError(sessionId, err)
   }
 
@@ -1415,18 +1415,18 @@ export class Router extends EventEmitter {
       '[RESULT]',
       'HOST_IMAGE_GENERATION_REQUIRED',
       '',
-      '本步骤需要 Codex 主进程内置生图工具执行。Turing 后端不会再启动 Codex 子进程，避免空转。',
+      'This step requires the image generation tool built into the Codex main process. The Turing backend will not start another Codex subprocess for it.',
       '',
-      '处理方式：',
-      '1. 在 Codex 主进程根据本步骤输出和上游 `script.md`、`prompt.txt` 生成图片。',
-      '2. 把生成图片保存到本工作流输出目录。',
-      '3. 点击“主进程补图回填”，提交图片绝对路径。',
+      'How to proceed:',
+      '1. In the Codex main process, generate images from this step output and upstream `script.md` / `prompt.txt`.',
+      '2. Save generated images into this workflow output directory.',
+      '3. Click "Backfill Images from Main Process" and submit absolute image paths.',
       '',
-      `输出目录：\`${outputDirectory}\``,
+      `Output directory: \`${outputDirectory}\``,
       '[/RESULT]',
     ].join('\n')
 
-    if (!existingHostRequest || !existingHostRequest.content.includes(`输出目录：\`${outputDirectory}\``)) {
+    if (!existingHostRequest || !existingHostRequest.content.includes(`Output directory: \`${outputDirectory}\``)) {
       this.recordMessage(sessionId, 'turing', content, round)
     }
     const updated = state.updateSession(sessionId, {
@@ -1624,11 +1624,11 @@ export class Router extends EventEmitter {
 
     const content = [
       '[RESULT]',
-      `外部任务 ${provider.name} 已完成。`,
+      `External task ${provider.name} completed.`,
       '',
       `id：\`${current.externalId}\``,
-      '状态：`success`',
-      '本地文件：',
+      'status: `success`',
+      'Local files:',
       ...paths.map((filePath) => `\`${filePath}\``),
       '[/RESULT]',
       '[DONE]',
@@ -1715,10 +1715,10 @@ export class Router extends EventEmitter {
 
     const content = [
       '[RESULT]',
-      '执行器异常退出，但步骤产物已完整生成并通过输出契约校验。',
+      'The executor exited unexpectedly, but the step artifacts were fully generated and passed output contract validation.',
       ...step.contract.outputs.map((output) => {
         const outputPath = extractExistingOutputFile(outputs, output.fileName, session.cwd, session.createdAt)
-        return outputPath ? `产物：${outputPath}` : ''
+        return outputPath ? `Artifact: ${outputPath}` : ''
       }).filter(Boolean),
       '[/RESULT]',
       '[DONE]',
@@ -2080,15 +2080,15 @@ export function detectAgentAssistanceRequest(content: string): string | undefine
 function buildPlannerAssistanceDirective(content: string, request: string): string {
   return [
     '[TURING_ASSISTANCE_REQUIRED]',
-    '执行 Agent 因能力限制无法继续。你必须立即使用自己的工具完成所需的读取、搜索、执行、写入或验证。',
-    '完成后把具体资料、命令结果或已验证文件路径回复给执行 Agent，让它继续原任务。',
-    '不要把问题转交给用户，也不要只给操作建议。',
+    'The executing agent cannot continue because of a capability limitation. Use your own tools immediately to complete the required reading, searching, execution, writing, or verification.',
+    'When done, reply to the executing agent with the concrete materials, command results, or verified file paths so it can continue the original task.',
+    'Do not hand this back to the user and do not provide only operational advice.',
     '',
-    '请求内容：',
+    'Request:',
     request,
     '[/TURING_ASSISTANCE_REQUIRED]',
     '',
-    '执行 Agent 原始回复：',
+    'Original executing agent reply:',
     content,
   ].join('\n')
 }
@@ -2103,7 +2103,7 @@ function parseStreamStep(output: string): StreamStep | undefined {
   if (/\b(read file|read_file|reading|read|cat|sed|rg|grep)\b/i.test(text)) {
     return {
       type: 'read',
-      summary: `正在读取 ${file ?? command ?? '文件'}...`,
+      summary: `Reading ${file ?? command ?? 'file'}...`,
       detail: text,
     }
   }
@@ -2111,7 +2111,7 @@ function parseStreamStep(output: string): StreamStep | undefined {
   if (/\b(write|edit|apply_patch|patch|wrote|modified|update file|create file|save)\b/i.test(text)) {
     return {
       type: 'write',
-      summary: `正在修改 ${file ?? '文件'}...`,
+      summary: `Editing ${file ?? 'file'}...`,
       detail: text,
     }
   }
@@ -2119,7 +2119,7 @@ function parseStreamStep(output: string): StreamStep | undefined {
   if (/\b(bash|shell|exec|execute|run command|npm|pnpm|yarn|git|node|tsc|pytest|vitest|make)\b/i.test(text)) {
     return {
       type: 'exec',
-      summary: `正在执行 ${command ?? text.slice(0, 60)}...`,
+      summary: `Running ${command ?? text.slice(0, 60)}...`,
       detail: text,
     }
   }
@@ -2127,7 +2127,7 @@ function parseStreamStep(output: string): StreamStep | undefined {
   if (lower.includes('thinking') || lower.includes('analysis') || lower.includes('plan') || text.includes('分析') || text.includes('计划')) {
     return {
       type: 'think',
-      summary: '正在分析...',
+      summary: 'Analyzing...',
       detail: text,
     }
   }
@@ -2138,7 +2138,7 @@ function parseStreamStep(output: string): StreamStep | undefined {
 function buildDoneStep(output: string): StreamStep {
   return {
     type: 'done',
-    summary: '已完成本轮输出',
+    summary: 'Round output complete',
     detail: normalizeStreamText(output).slice(0, 2000),
   }
 }
@@ -2424,8 +2424,8 @@ function summarizeCompletedRounds(session: Session, messages: Message[], failedR
 function formatManualPipelineOutput(output?: string): string {
   const trimmed = output?.trim()
   return [
-    '[RESULT] 本步骤已由人工确认完成，工作流从后续步骤继续。',
-    trimmed ? `\n人工补充：\n${trimmed}` : '',
+    '[RESULT] This step has been manually confirmed complete. The workflow continues from subsequent steps.',
+    trimmed ? `\nManual supplement:\n${trimmed}` : '',
     '[/RESULT]',
   ].join('\n')
 }

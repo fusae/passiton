@@ -132,7 +132,7 @@ test('routes executor capability blockers to the planner as mandatory assistance
 
     await waitFor(() => state.getSession(session.id)?.status === 'done')
     assert.match(plannerMessages[0] ?? '', /\[TURING_ASSISTANCE_REQUIRED\]/)
-    assert.match(plannerMessages[0] ?? '', /不要把问题转交给用户/)
+    assert.match(plannerMessages[0] ?? '', /Do not hand this back to the user/)
     assert.match(plannerMessages[0] ?? '', /请 codex 提供原始文案/)
   })
 })
@@ -336,7 +336,7 @@ test('pipeline step completes when adapter crashes after writing contract output
 
       await waitFor(() => state.getSession(session.id)?.status === 'done')
       assert.equal(state.getPipeline('contract-pipeline-crash')?.sessions[0].status, 'done')
-      assert.match(state.getSession(session.id)?.lastAgentOutput ?? '', /产物已完整生成/)
+      assert.match(state.getSession(session.id)?.lastAgentOutput ?? '', /artifacts were fully generated/)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
