@@ -21,3 +21,4 @@ logs/
 *.secret
 .generated-skills/
 downloads/
+.gstack/

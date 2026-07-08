@@ -752,6 +752,13 @@ textarea.input { resize: vertical; min-height: 80px; }
   overflow-x: auto;
   color: var(--text-secondary);
 }
+.task-live-output {
+  min-height: 220px;
+  max-height: 520px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 /* --- Chat bubbles --- */
 .chat-stream { display: flex; flex-direction: column; gap: 16px; padding: 24px 0; }

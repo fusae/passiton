@@ -407,7 +407,11 @@ function scheduleTaskDetailRender(forceContent) {
   scheduleCoalescedRender('task-detail', () => {
     if (state.currentTaskId && location.pathname.startsWith('/task/')) {
       renderTaskHeader(state.currentTask)
-      if (forceContent) renderTaskContent(state.currentTask)
+      if (forceContent) {
+        renderTaskContent(state.currentTask)
+      } else {
+        updateTaskLiveOutput(state.currentTask)
+      }
     }
   })
 }
@@ -734,8 +738,7 @@ function applyTaskUpdate(task) {
       task.prompt !== undefined && task.prompt !== prev.prompt ||
       task.result !== undefined && task.result !== prev.result ||
       task.output !== undefined && task.output !== prev.output ||
-      task.errorMessage !== undefined && task.errorMessage !== prev.errorMessage ||
-      task.lastAgentOutput !== undefined && task.lastAgentOutput !== prev.lastAgentOutput
+      task.errorMessage !== undefined && task.errorMessage !== prev.errorMessage
     scheduleTaskDetailRender(contentChanged)
   }
 
@@ -1740,6 +1743,7 @@ function renderTaskActions(task) {
   }
   return `
     <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">Ask Ops</button>
+    <button class="btn btn-secondary btn-sm" onclick="window.restartCurrentTask()">↻ Restart</button>
     <button class="btn btn-primary btn-sm" onclick="window.showTaskFeedbackModal()">✎ Feedback & Rerun</button>
   `
 }
@@ -1764,6 +1768,7 @@ function renderTaskHeader(task) {
 function renderTaskContent(task) {
   const container = document.getElementById('task-content')
   if (!container || !task) return
+  const showFullOutput = task.output && !sameTaskText(task.output, task.result)
   container.innerHTML = `
     <div class="task-main">
       <section class="card task-section">
@@ -1776,7 +1781,7 @@ function renderTaskContent(task) {
           <div class="task-copy">${renderMarkdownCached(task.result)}</div>
         </section>
       ` : ''}
-      ${task.output ? `
+      ${showFullOutput ? `
         <section class="card task-section">
           <div class="label mb-8">Full Output</div>
           <div class="task-copy">${renderMarkdownCached(task.output)}</div>
@@ -1803,15 +1808,31 @@ function renderTaskContent(task) {
       ${renderTaskCreationDetails(task)}
       ${task.status !== 'queued' && task.status !== 'running' ? `
         <div class="divider"></div>
-        <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="window.showTaskFeedbackModal()">✎ Feedback & Rerun</button>
+        <div style="display: grid; gap: 10px;">
+          <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="window.restartCurrentTask()">↻ Restart</button>
+          <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="window.showTaskFeedbackModal()">✎ Feedback & Rerun</button>
+        </div>
       ` : ''}
-      ${task.lastAgentOutput ? `
+      ${(task.lastAgentOutput || task.status === 'queued' || task.status === 'running') ? `
         <div class="divider"></div>
-        <div class="label mb-8">Last Agent Output</div>
-        <pre class="code-block">${escapeHtml(task.lastAgentOutput)}</pre>
+        <div class="label mb-8">Live Agent Output</div>
+        <pre id="task-live-output" class="code-block task-live-output">${escapeHtml(task.lastAgentOutput || '等待 agent 输出...')}</pre>
       ` : ''}
     </aside>
   `
+  updateTaskLiveOutput(task)
+}
+
+function updateTaskLiveOutput(task) {
+  const output = document.getElementById('task-live-output')
+  if (!output || !task) return
+  output.textContent = task.lastAgentOutput || '等待 agent 输出...'
+  output.scrollTop = output.scrollHeight
+}
+
+function sameTaskText(a, b) {
+  if (!a || !b) return false
+  return String(a).replace(/\s+/g, ' ').trim() === String(b).replace(/\s+/g, ' ').trim()
 }
 
 async function loadWorkflowsData() {
@@ -3421,21 +3442,21 @@ window.askOpsForCurrent = async function() {
   const context = currentOpsContext()
   const question = context.target
     ? `检查当前 ${context.target.kind} 是否异常`
-    : '检查当前页面是否有异常'
-  await askOpsInternal(question, context.target)
+    : `检查当前页面是否有异常：${context.page?.title || context.page?.path || '当前页面'}`
+  await askOpsInternal(question, context.target, context.page)
 }
 
 window.askOps = async function(question) {
-  await askOpsInternal(question, undefined)
+  await askOpsInternal(question, undefined, currentOpsPageContext())
 }
 
-async function askOpsInternal(question, target) {
+async function askOpsInternal(question, target, page) {
   state.opsOpen = true
   state.opsMessages.push({ from: 'user', content: question })
   state.opsBusy = true
   updateOpsPanel()
   try {
-    const report = await api('/api/ops/diagnose', 'POST', { question, target })
+    const report = await api('/api/ops/diagnose', 'POST', { question, target, page })
     state.opsLastReport = report
     state.opsMessages.push({ from: 'ops', content: formatOpsReport(report), actions: collectOpsActions(report) })
   } catch (err) {
@@ -3447,14 +3468,30 @@ async function askOpsInternal(question, target) {
 }
 
 function currentOpsContext() {
-  if (state.currentTaskId) return { target: { kind: 'task', id: state.currentTaskId } }
-  if (state.currentSessionId) return { target: { kind: 'session', id: state.currentSessionId } }
-  if (state.currentPipelineId) return { target: { kind: 'workflow', id: state.currentPipelineId } }
+  const page = currentOpsPageContext()
+  if (state.currentTaskId) return { target: { kind: 'task', id: state.currentTaskId }, page }
+  if (state.currentSessionId) return { target: { kind: 'session', id: state.currentSessionId }, page }
+  if (state.currentPipelineId) return { target: { kind: 'workflow', id: state.currentPipelineId }, page }
   const path = location.pathname
-  if (path.startsWith('/task/')) return { target: { kind: 'task', id: path.split('/')[2] } }
-  if (path.startsWith('/session/')) return { target: { kind: 'session', id: path.split('/')[2] } }
-  if (path.startsWith('/workflow/') || path.startsWith('/workflows/')) return { target: { kind: 'workflow', id: path.split('/')[2] } }
-  return {}
+  if (path.startsWith('/task/')) return { target: { kind: 'task', id: path.split('/')[2] }, page }
+  if (path.startsWith('/session/')) return { target: { kind: 'session', id: path.split('/')[2] }, page }
+  if (path.startsWith('/workflow/') || path.startsWith('/workflows/')) return { target: { kind: 'workflow', id: path.split('/')[2] }, page }
+  return { page }
+}
+
+function currentOpsPageContext() {
+  const main = document.querySelector('.main, main, #app') || document.body
+  const heading = document.querySelector('h1, .page-title, .topbar h2, .header-title')?.textContent?.trim()
+  const cards = Array.from(document.querySelectorAll('.stat-card, .metric-card, .task-card, .session-card, .workflow-card'))
+    .slice(0, 12)
+    .map((el) => el.textContent?.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+  return {
+    path: location.pathname,
+    title: heading || document.title || location.pathname,
+    summary: cards.join('\n').slice(0, 2000),
+    visibleText: main.textContent?.replace(/\s+/g, ' ').trim().slice(0, 4000),
+  }
 }
 
 function updateOpsPanel() {
@@ -3573,6 +3610,11 @@ function walkOpsTo(target) {
 }
 
 function formatOpsReport(report) {
+  if (report.directAnswer) return report.directAnswer
+  if (report.answer) {
+    const source = report.answerSource ? `\n\n_由 ${report.answerSource} 回答_` : ''
+    return `${report.answer}${source}`
+  }
   const counts = report.counts || {}
   const lines = [
     report.summary || '诊断完成。',
@@ -3589,6 +3631,9 @@ function formatOpsReport(report) {
       lines.push(`- [${issue.severity}] ${issue.title}${target}：${issue.detail}`)
       lines.push(`  建议：${issue.recommendation}`)
     }
+  }
+  if (report.answerError) {
+    lines.push('', `LLM 未接入：${report.answerError}`)
   }
   return lines.join('\n')
 }
@@ -3853,9 +3898,11 @@ function renderAgentsList() {
         <div class="agent-info">
           <div class="agent-name">${escapeHtml(agent.name)}</div>
           <div class="agent-model">${escapeHtml(agent.provider)} · ${escapeHtml(agent.model || agent.adapter)}${agent.keyMasked ? ` · ${escapeHtml(agent.keyMasked)}` : ''}</div>
+          ${agent.error ? `<div class="agent-model" style="color: var(--red);">${escapeHtml(agent.error)}</div>` : ''}
         </div>
         <span class="badge badge-${statusBadgeClass(agent.status)}">${escapeHtml(statusLabel(agent.status))}</span>
         <div class="agent-actions">
+          <button class="btn btn-ghost btn-sm" onclick='window.showAgentDiagnostics(${jsString(agent.name)})'>Verify</button>
           <button class="btn btn-ghost btn-sm" onclick='window.showAgentModal(${jsString(agent.name)})'>Edit</button>
           <button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteAgent(${jsString(agent.name)})'>Delete</button>
         </div>
@@ -3980,8 +4027,15 @@ window.refreshDiagnostics = async function() {
 }
 
 window.showLocalCliAgentDiagnostics = async function(name, preface = '') {
+  return window.showAgentDiagnostics(name, preface)
+}
+
+window.showAgentDiagnostics = async function(name, preface = '') {
   try {
     const diagnostic = await api(`/api/agents/${encodeURIComponent(name)}/diagnostics?refresh=1`)
+    await loadAgents()
+    renderAgentsList()
+    renderLocalCliAgentsList()
     showModal(`
       <div class="modal-card">
         <div class="modal-head">
@@ -4471,6 +4525,25 @@ window.rerunTaskWithFeedback = async function(e) {
       submit.disabled = false
       submit.textContent = 'Create New Task'
     }
+  }
+}
+
+window.restartCurrentTask = async function() {
+  const task = state.currentTask
+  if (!task) return
+  try {
+    const created = await api('/api/tasks', 'POST', compactObject({
+      agent: { adapter: task.agent?.adapter },
+      prompt: task.prompt,
+      context: taskRerunContext(task.context),
+      systemPrompt: task.systemPrompt,
+      cwd: task.cwd,
+      permissionMode: task.permissionMode,
+    }))
+    state.tasks.unshift(created)
+    navigate(`/task/${created.id}`)
+  } catch (err) {
+    showToast(err.message)
   }
 }
 

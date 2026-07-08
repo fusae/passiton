@@ -125,7 +125,8 @@ export function runCommand({
         settled = true
         cleanupTimers()
         signal?.removeEventListener('abort', abort)
-        reject(withLastOutput(new Error(withHint(adapterName, command, null, '', `[${adapterName}] idle timed out after ${latestIdleTimeout}ms`, latestIdleTimeout)), lastOutput))
+        const recentStderr = tailText(stderr, 12_000)
+        reject(withLastOutput(new Error(withHint(adapterName, command, null, recentStderr, `[${adapterName}] idle timed out after ${latestIdleTimeout}ms`, latestIdleTimeout)), lastOutput || lastMeaningfulLine(recentStderr)))
       }, 0)
     }
 
@@ -145,7 +146,8 @@ export function runCommand({
         settled = true
         cleanupTimers()
         signal?.removeEventListener('abort', abort)
-        reject(withLastOutput(new Error(withHint(adapterName, command, null, '', `[${adapterName}] hard timed out after ${latestHardTimeout}ms`, latestHardTimeout)), lastOutput))
+        const recentStderr = tailText(stderr, 12_000)
+        reject(withLastOutput(new Error(withHint(adapterName, command, null, recentStderr, `[${adapterName}] hard timed out after ${latestHardTimeout}ms`, latestHardTimeout)), lastOutput || lastMeaningfulLine(recentStderr)))
       }, 0)
     }
 
@@ -238,6 +240,15 @@ function withLastOutput(error: Error, lastOutput: string): Error {
   return error
 }
 
+function tailText(text: string, max: number): string {
+  return text.length > max ? text.slice(-max) : text
+}
+
+function lastMeaningfulLine(text: string): string {
+  const lines = stripAnsi(text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  return lines.at(-1) ?? ''
+}
+
 /**
  * Append a one-line, actionable hint to common adapter failures. The raw
  * message is kept (so logs/classification still work); the hint is the part a
@@ -251,11 +262,14 @@ export function withHint(adapterName: string, command: string, code: number | nu
   }
   // 2. Auth / credentials / subscription. CLI agents (claude-code, codex, …)
   //    commonly exit non-zero with empty or terse stderr when unauthenticated.
-  const authCues = ['unauthorized', 'unauthenticated', 'invalid api key', 'authentication', 'not logged in', 'login', 'no subscription', 'quota', 'rate limit', '401', '403', 'payment required']
+  const quotaCues = ['usage limit', 'usage limit reached', 'quota', 'rate limit', 'too many requests', 'statuscode":429', 'status 429', ' 429', '"code":"1308"', 'insufficient balance', '余额不足']
+  const authCues = ['unauthorized', 'unauthenticated', 'invalid api key', 'authentication', 'not logged in', 'login', 'no subscription', '401', '403', 'payment required', ...quotaCues]
   const looksLikeAuth = (code !== null && code !== 0 && stderr.trim() === '') || authCues.some((cue) => lower.includes(cue))
   if (looksLikeAuth) {
-    const status = lower.includes('rate limit') || lower.includes('quota') ? 'rate_limited' : lower.includes('api key') ? 'api_key_missing' : 'auth_required'
-    return `${message}\n状态：${status}\n提示：\`${adapterName}\` 启动失败（exit ${code ?? '?'}）。常见原因：未登录、凭证失效或订阅过期。请在该 Agent 的终端里手动跑一次（例如 \`${command} --version\` 后登录），或在 Settings 检查其 env / API Key。`
+    const status = quotaCues.some((cue) => lower.includes(cue)) ? 'rate_limited' : lower.includes('api key') ? 'api_key_missing' : 'auth_required'
+    const resetMatch = stripAnsi(stderr + ' ' + message).match(/reset at ([^"}\n]+)/i)
+    const resetHint = resetMatch?.[1] ? `重置时间：${resetMatch[1]}。` : ''
+    return `${message}\n状态：${status}\n提示：\`${adapterName}\` ${status === 'rate_limited' ? `额度/频率限制已触发。${resetHint}` : '启动失败，常见原因：未登录、凭证失效或订阅过期。'}请在该 Agent 的终端里手动跑一次确认，或在 Settings 检查其 env / API Key。`
   }
   // 3. Timeout — point at the timeout knob.
   if (lower.includes('timed out')) {

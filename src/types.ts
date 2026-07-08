@@ -447,6 +447,8 @@ export interface ApiAgentInfo {
   hasKey: boolean
   keyMasked?: string
   status: 'ready' | 'no_key' | 'invalid' | 'discovered' | 'unverified'
+  error?: string
+  checkedAt?: number
   kind?: 'api' | 'local'
   source?: 'configured' | 'discovered'
   command?: string

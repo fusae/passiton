@@ -257,6 +257,118 @@ textarea.input { resize: vertical; min-height: 80px; }
   font-size: 0.78rem; color: var(--text-muted);
 }
 
+/* --- Ops assistant --- */
+.ops-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 80;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-end));
+  color: #fff;
+  font-weight: 800;
+  box-shadow: 0 12px 36px var(--accent-glow);
+  cursor: pointer;
+}
+.ops-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 92px;
+  z-index: 81;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(680px, calc(100vh - 120px));
+  display: none;
+  flex-direction: column;
+  background: var(--bg-base);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+  overflow: hidden;
+}
+.ops-panel.open { display: flex; }
+.ops-header {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ops-kicker {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+}
+.ops-header h3 { margin-top: 2px; }
+.ops-quick-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.ops-quick-actions button {
+  flex: 1;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.ops-quick-actions button:hover {
+  color: var(--text-primary);
+  background: var(--bg-card-hover);
+}
+.ops-thread {
+  padding: 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ops-message {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+.ops-message.user {
+  background: rgba(99,102,241,0.12);
+  border-color: rgba(99,102,241,0.24);
+}
+.ops-message-role {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+.ops-message-body {
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+.ops-message-body ul { padding-left: 18px; }
+.ops-message-body li { margin: 4px 0; }
+.ops-composer {
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.ops-composer textarea {
+  flex: 1;
+  resize: none;
+  min-height: 42px;
+  max-height: 120px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.04);
+  color: var(--text-primary);
+}
+
 /* --- Layout: Main --- */
 .main {
   flex: 1; min-width: 0;

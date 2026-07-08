@@ -293,12 +293,20 @@ export class Router extends EventEmitter {
     this.emit('event', { type: 'task:updated', payload: running } satisfies WsEvent)
 
     let lastOutput = ''
+    let liveOutput = ''
+    let lastOutputEventAt = 0
     const opts: AdapterSendOpts = {
       systemPrompt: task.systemPrompt ?? generateTaskSystemPrompt(task.context),
       onOutput: (line) => {
         if (state.getTask(task.id, task.userId)?.status === 'stopped') return
         lastOutput = line
-        state.updateTask(task.id, { lastAgentOutput: line }, task.userId)
+        liveOutput = appendLiveOutput(liveOutput, line)
+        const updated = state.updateTask(task.id, { lastAgentOutput: liveOutput }, task.userId)
+        const now = Date.now()
+        if (now - lastOutputEventAt >= 500) {
+          lastOutputEventAt = now
+          this.emit('event', { type: 'task:updated', payload: updated } satisfies WsEvent)
+        }
       },
     }
     this.applyAdapterSecret(adapter, task.userId, opts)
@@ -311,7 +319,7 @@ export class Router extends EventEmitter {
         status: 'done',
         output,
         result: extractResultSummary(output),
-        lastAgentOutput: lastOutput || output,
+        lastAgentOutput: liveOutput || lastOutput || output,
         finishedAt: Date.now(),
       }, task.userId)
       this.emit('event', { type: 'task:done', payload: done } satisfies WsEvent)
@@ -320,7 +328,7 @@ export class Router extends EventEmitter {
       const failed = state.updateTask(task.id, {
         status: 'error',
         errorMessage: err instanceof Error ? err.message : String(err),
-        lastAgentOutput: readLastAgentOutput(err) || lastOutput,
+        lastAgentOutput: readLastAgentOutput(err) || liveOutput || lastOutput,
         finishedAt: Date.now(),
       }, task.userId)
       this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
@@ -1976,13 +1984,22 @@ function buildTaskSession(task: Task): Session {
 
 function extractResultSummary(content: string): string {
   const resultMatch = content.match(/\[RESULT\]([\s\S]*?)\[\/RESULT\]/i)
-  return (resultMatch?.[1] ?? content).trim()
+  if (resultMatch?.[1]) return resultMatch[1].trim()
+  const reportStart = content.lastIndexOf('\n---\n\n## ')
+  if (reportStart >= 0) return content.slice(reportStart).replace(/^\s*---\s*/, '').trim()
+  return content.trim()
 }
 
 function readLastAgentOutput(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') return undefined
   const value = (error as { lastAgentOutput?: unknown }).lastAgentOutput
   return typeof value === 'string' ? value : undefined
+}
+
+function appendLiveOutput(current: string, line: string): string {
+  const next = current ? `${current}\n${line}` : line
+  const limit = 20_000
+  return next.length > limit ? next.slice(next.length - limit) : next
 }
 
 function adapterCanUseTools(adapter: Adapter | undefined): boolean {
@@ -2094,6 +2111,9 @@ function classifyError(message: string): SessionErrorType {
     normalized.includes('quota') ||
     normalized.includes('insufficient quota') ||
     normalized.includes('usage limit') ||
+    normalized.includes('usage limit reached') ||
+    normalized.includes('"code":"1308"') ||
+    normalized.includes('statuscode":429') ||
     normalized.includes('credit balance') ||
     normalized.includes('billing') ||
     normalized.includes('余额不足') ||

@@ -270,6 +270,19 @@ test('withHint adds actionable hints to common adapter failures', () => {
   // 4. Explicit auth cue in stderr.
   const explicit = withHint('codex', 'codex', 1, 'Error: invalid api key', '[codex] exited with code 1: Error: invalid api key', 60_000)
   assert.match(explicit, /未登录|凭证失效|订阅过期/)
+
+  // 5. Timeout with quota details in stderr → quota/rate limit, not generic timeout.
+  const limited = withHint(
+    'opencode',
+    'opencode',
+    null,
+    '{"statusCode":429,"responseBody":"{\\"error\\":{\\"code\\":\\"1308\\",\\"message\\":\\"Usage limit reached for 5 hour. Your limit will reset at 2026-07-07 21:02:30\\"}}"}',
+    '[opencode] idle timed out after 600000ms',
+    600_000
+  )
+  assert.match(limited, /状态：rate_limited/)
+  assert.match(limited, /额度\/频率限制已触发/)
+  assert.match(limited, /2026-07-07 21:02:30/)
 })
 
 function mockFetch(handler: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>): void {

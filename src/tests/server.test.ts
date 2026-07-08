@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import http from 'node:http'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -12,6 +13,7 @@ import { Router } from '../router.js'
 import { createServer } from '../server.js'
 import * as state from '../state.js'
 import type { Adapter, AdapterSendOpts, Session } from '../types.js'
+import { encryptSecret } from '../keyvault.js'
 
 class StubAgentCatalog {
   async listAgents(): Promise<unknown[]> {
@@ -153,15 +155,47 @@ test('ops endpoints report task failures and targeted diagnostics', async () => 
     assert.equal(status.issues[0]?.target?.id, 'ops-task-1')
     assert.match(status.issues[0]?.recommendation || '', /超时/)
 
-    const diagnoseResponse = await fetch(`${baseUrl}/api/ops/diagnose`, {
-      method: 'POST',
-      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
-      body: JSON.stringify({ question: 'why failed', target: { kind: 'task', id: 'ops-task-1' } }),
+    const fakeApi = http.createServer((_, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({
+        choices: [{ message: { content: 'LLM answer: idle timeout' }, finish_reason: 'stop' }],
+      }))
     })
-    assert.equal(diagnoseResponse.status, 200)
-    const diagnose = await diagnoseResponse.json() as { issues: Array<{ target?: { id: string } }> }
-    assert.equal(diagnose.issues.length, 1)
-    assert.equal(diagnose.issues[0]?.target?.id, 'ops-task-1')
+    await new Promise<void>((resolve) => fakeApi.listen(0, resolve))
+    const fakeAddress = fakeApi.address()
+    if (!fakeAddress || typeof fakeAddress === 'string') throw new Error('fake API did not start')
+    try {
+      state.createUserAgent({
+        id: 'ops-assistant',
+        userId: auth.userId,
+        name: 'ops-deepseek',
+        adapter: 'custom-api',
+        model: 'deepseek-chat',
+        baseUrl: `http://127.0.0.1:${fakeAddress.port}/chat/completions`,
+        ...encryptSecret(auth.userId, 'sk-test'),
+      })
+      const diagnoseResponse = await fetch(`${baseUrl}/api/ops/diagnose`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ question: 'why failed', target: { kind: 'task', id: 'ops-task-1' } }),
+      })
+      assert.equal(diagnoseResponse.status, 200)
+      const diagnose = await diagnoseResponse.json() as { issues: Array<{ target?: { id: string } }> }
+      assert.equal(diagnose.issues.length, 1)
+      assert.equal(diagnose.issues[0]?.target?.id, 'ops-task-1')
+
+      const modelDiagnoseResponse = await fetch(`${baseUrl}/api/ops/diagnose`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '为什么失败', target: { kind: 'task', id: 'ops-task-1' } }),
+      })
+      assert.equal(modelDiagnoseResponse.status, 200)
+      const modelDiagnose = await modelDiagnoseResponse.json() as { answer?: string; answerSource?: string }
+      assert.equal(modelDiagnose.answerSource, 'ops-deepseek')
+      assert.match(modelDiagnose.answer || '', /LLM answer/)
+    } finally {
+      await new Promise<void>((resolve) => fakeApi.close(() => resolve()))
+    }
 
     const unconfirmed = await fetch(`${baseUrl}/api/ops/action`, {
       method: 'POST',
@@ -693,9 +727,28 @@ test('POST /mcp exposes tools and can create a task', async () => {
           }),
         })
         const payload = await response.json() as { result: { content: Array<{ text: string }> } }
-        const data = JSON.parse(payload.result.content[0]!.text) as { task: { status: string; result?: string } }
+        const data = JSON.parse(payload.result.content[0]!.text) as { task: { status: string; result?: string; summary?: string; hasResult?: boolean } }
+        if (data.task.status === 'done') {
+          assert.equal(data.task.summary, 'mcp ready')
+          assert.equal(data.task.hasResult, true)
+          assert.equal(data.task.result, undefined)
+        }
         return data.task.status === 'done'
       })
+
+      const fullResult = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 6,
+          method: 'tools/call',
+          params: { name: 'turing_get_task_result', arguments: { id: taskId, includeOutput: true, maxChars: 1000 } },
+        }),
+      })
+      const fullPayload = await fullResult.json() as { result: { content: Array<{ text: string }> } }
+      const fullData = JSON.parse(fullPayload.result.content[0]!.text) as { task: { result?: string } }
+      assert.equal(fullData.task.result, 'mcp ready')
     } finally {
       rmSync(projectDir, { recursive: true, force: true })
     }
@@ -867,81 +920,105 @@ async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000): Promis
 test('agent CRUD stores user API model configs', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'agents@example.com')
+    const fakeApi = http.createServer((_, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }))
+    })
+    await new Promise<void>((resolve) => fakeApi.listen(0, resolve))
+    const fakeAddress = fakeApi.address()
+    if (!fakeAddress || typeof fakeAddress === 'string') throw new Error('fake API did not start')
     const keyCreate = await fetch(`${baseUrl}/api/keys`, {
       method: 'POST',
       headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
       body: JSON.stringify({
-        provider: 'anthropic',
-        name: 'Claude Vault',
-        key: 'sk-ant-test1234',
+        provider: 'openai',
+        name: 'OpenAI Vault',
+        key: 'sk-test1234',
       }),
     })
-    assert.equal(keyCreate.status, 201)
-    const key = await keyCreate.json() as { id: string }
-    const create = await fetch(`${baseUrl}/api/agents`, {
-      method: 'POST',
-      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
-      body: JSON.stringify({
-        name: 'claude-api',
-        adapter: 'anthropic-api',
-        keyId: key.id,
-        model: 'claude-sonnet-4-20250514',
-      }),
-    })
-    assert.equal(create.status, 201)
-    const created = await create.json() as Array<{ name: string; status: string; keyMasked: string }>
-    assert.equal(created[0].name, 'claude-api')
-    assert.equal(created[0].status, 'ready')
-    assert.equal(created[0].keyMasked, 'sk-...1234')
-    assert.notEqual(state.getUserAgent(auth.userId, 'claude-api')?.encryptedKey, 'sk-ant-test1234')
+    try {
+      assert.equal(keyCreate.status, 201)
+      const key = await keyCreate.json() as { id: string }
+      const create = await fetch(`${baseUrl}/api/agents`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'ops-openai',
+          adapter: 'custom-api',
+          keyId: key.id,
+          model: 'gpt-test',
+          baseUrl: `http://127.0.0.1:${fakeAddress.port}/chat/completions`,
+        }),
+      })
+      assert.equal(create.status, 201)
+      const created = await create.json() as Array<{ name: string; status: string; keyMasked: string }>
+      assert.equal(created[0].name, 'ops-openai')
+      assert.equal(created[0].status, 'ready')
+      assert.equal(created[0].keyMasked, 'sk-...1234')
+      assert.notEqual(state.getUserAgent(auth.userId, 'ops-openai')?.encryptedKey, 'sk-test1234')
 
-    const remove = await fetch(`${baseUrl}/api/agents/claude-api`, {
-      method: 'DELETE',
-      headers: authHeaders(auth.token),
-    })
-    assert.equal(remove.status, 200)
-    assert.equal(state.getUserAgent(auth.userId, 'claude-api'), undefined)
+      const remove = await fetch(`${baseUrl}/api/agents/ops-openai`, {
+        method: 'DELETE',
+        headers: authHeaders(auth.token),
+      })
+      assert.equal(remove.status, 200)
+      assert.equal(state.getUserAgent(auth.userId, 'ops-openai'), undefined)
+    } finally {
+      await new Promise<void>((resolve) => fakeApi.close(() => resolve()))
+    }
   })
 })
 
 test('provider keys include vault keys and assistant-linked keys', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'provider-keys@example.com')
+    const fakeApi = http.createServer((_, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }))
+    })
+    await new Promise<void>((resolve) => fakeApi.listen(0, resolve))
+    const fakeAddress = fakeApi.address()
+    if (!fakeAddress || typeof fakeAddress === 'string') throw new Error('fake API did not start')
     const keyCreate = await fetch(`${baseUrl}/api/keys`, {
       method: 'POST',
       headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
       body: JSON.stringify({
-        provider: 'anthropic',
-        name: 'Claude Vault',
-        key: 'sk-ant-vault1234',
+        provider: 'openai',
+        name: 'OpenAI Vault',
+        key: 'sk-vault1234',
       }),
     })
-    assert.equal(keyCreate.status, 201)
-    const storedKey = await keyCreate.json() as { id: string }
-    const keysResponse = await fetch(`${baseUrl}/api/keys`, { headers: authHeaders(auth.token) })
-    assert.equal(keysResponse.status, 200)
-    const keys = await keysResponse.json() as Array<{ id: string; source: string; maskedKey: string }>
-    const vaultKey = keys.find((key) => key.id === storedKey.id && key.source === 'vault')
-    assert.ok(vaultKey)
+    try {
+      assert.equal(keyCreate.status, 201)
+      const storedKey = await keyCreate.json() as { id: string }
+      const keysResponse = await fetch(`${baseUrl}/api/keys`, { headers: authHeaders(auth.token) })
+      assert.equal(keysResponse.status, 200)
+      const keys = await keysResponse.json() as Array<{ id: string; source: string; maskedKey: string }>
+      const vaultKey = keys.find((key) => key.id === storedKey.id && key.source === 'vault')
+      assert.ok(vaultKey)
 
-    const createAgent = await fetch(`${baseUrl}/api/agents`, {
-      method: 'POST',
-      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
-      body: JSON.stringify({
-        name: 'claude-api',
-        adapter: 'anthropic-api',
-        keyId: vaultKey.id,
-        model: 'claude-sonnet-4-20250514',
-      }),
-    })
-    assert.equal(createAgent.status, 201)
+      const createAgent = await fetch(`${baseUrl}/api/agents`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'ops-openai',
+          adapter: 'custom-api',
+          keyId: vaultKey.id,
+          model: 'gpt-test',
+          baseUrl: `http://127.0.0.1:${fakeAddress.port}/chat/completions`,
+        }),
+      })
+      assert.equal(createAgent.status, 201)
 
-    const listed = await fetch(`${baseUrl}/api/keys`, { headers: authHeaders(auth.token) })
-    assert.equal(listed.status, 200)
-    const payload = await listed.json() as Array<{ source: string; name: string; maskedKey: string; readOnly?: boolean; usedBy?: string[] }>
-    assert.ok(payload.some((key) => key.source === 'vault' && key.name === 'Claude Vault' && key.maskedKey === '****1234'))
-    assert.ok(payload.some((key) => key.source === 'assistant' && key.name === 'claude-api key' && key.readOnly && key.usedBy?.includes('claude-api')))
-    assert.ok(!JSON.stringify(payload).includes('sk-ant-vault1234'))
+      const listed = await fetch(`${baseUrl}/api/keys`, { headers: authHeaders(auth.token) })
+      assert.equal(listed.status, 200)
+      const payload = await listed.json() as Array<{ source: string; name: string; maskedKey: string; readOnly?: boolean; usedBy?: string[] }>
+      assert.ok(payload.some((key) => key.source === 'vault' && key.name === 'OpenAI Vault' && key.maskedKey === '****1234'))
+      assert.ok(payload.some((key) => key.source === 'assistant' && key.name === 'ops-openai key' && key.readOnly && key.usedBy?.includes('ops-openai')))
+      assert.ok(!JSON.stringify(payload).includes('sk-vault1234'))
+    } finally {
+      await new Promise<void>((resolve) => fakeApi.close(() => resolve()))
+    }
   })
 })
 

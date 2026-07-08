@@ -27,7 +27,7 @@ import { activeAgents, getConfigPath, loadConfig, writeConfig } from './config.j
 import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, Pipeline, PipelineTemplateRecord, PipelineWithSessions, AgentRef, Message, Session, SessionMode, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType } from './types.js'
+import type { AdapterResponse, AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, Pipeline, PipelineTemplateRecord, PipelineWithSessions, AgentRef, Message, Session, SessionMode, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType } from './types.js'
 import { pipelineTemplates, templates } from './templates.js'
 import { resolveWorkspacePath, WorkspaceAccessError } from './workspace.js'
 
@@ -65,6 +65,8 @@ const DEFAULT_BASE_URLS: Record<string, string> = {
   'qwen-api': 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
   'moonshot-api': 'https://api.moonshot.cn/v1/chat/completions',
 }
+const API_SMOKE_TIMEOUT_MS = 15_000
+const API_SMOKE_CACHE_TTL_MS = 10 * 60_000
 const CORS_ALLOWED_METHODS = 'GET,POST,PUT,DELETE,OPTIONS'
 const CORS_ALLOWED_HEADERS = 'Content-Type, Authorization, Mcp-Session-Id, MCP-Protocol-Version'
 const CORS_EXPOSE_HEADERS = 'Mcp-Session-Id'
@@ -107,6 +109,13 @@ type OpsTarget = {
   id?: string
 }
 
+type OpsPageContext = {
+  path?: string
+  title?: string
+  summary?: string
+  visibleText?: string
+}
+
 type OpsIssue = {
   severity: 'critical' | 'warning' | 'info'
   title: string
@@ -115,6 +124,14 @@ type OpsIssue = {
   target?: Required<OpsTarget>
   actions?: OpsAction[]
 }
+
+type ApiSmokeResult = {
+  ok: boolean
+  checkedAt: number
+  error?: string
+}
+
+const apiSmokeCache = new Map<string, ApiSmokeResult>()
 
 type OpsAction = {
   id: 'stop_task' | 'rerun_task' | 'resume_session' | 'rerun_workflow_step' | 'create_repair_task'
@@ -717,10 +734,21 @@ async function listAgentModels(
 ): Promise<AgentListResponse> {
   const current = loadConfig()
   const currentAgents = current.agents
-  const globalApi = Object.entries(current.agents)
+  const globalApiEntries = Object.entries(current.agents)
     .filter(([, cfg]) => API_ADAPTERS.has(cfg.adapter))
-    .map(([name, cfg]) => apiAgentInfoFromConfig(name, cfg))
-  const userApi = state.listUserAgents(userId).map(apiAgentInfoFromRecord)
+  const userRecords = state.listUserAgents(userId)
+  const userApiEntries = userRecords.map((record) => ({
+    record,
+    cfg: state.userAgentRecordToConfig(record, decryptUserAgentKey(record)),
+  }))
+  if (opts.refresh) {
+    await Promise.all([
+      ...globalApiEntries.map(([name, cfg]) => verifyApiAgent(name, cfg, { force: true })),
+      ...userApiEntries.map(({ record, cfg }) => verifyApiAgent(record.name, cfg, { force: true })),
+    ])
+  }
+  const globalApi = globalApiEntries.map(([name, cfg]) => apiAgentInfoFromConfig(name, cfg))
+  const userApi = userApiEntries.map(({ record, cfg }) => apiAgentInfoFromRecord(record, cfg))
   const userNames = new Set(userApi.map((agent) => agent.name))
   const apiAgents = [
     ...userApi,
@@ -759,6 +787,8 @@ async function listAgentModels(
 
 function apiAgentInfoFromConfig(name: string, cfg: AgentConfig): ApiAgentInfo {
   const hasKey = Boolean(cfg.apiKey)
+  const smoke = getApiSmokeResult(name, cfg)
+  const configOk = apiConfigHealthy(cfg)
   return {
     name,
     adapter: cfg.adapter,
@@ -767,16 +797,18 @@ function apiAgentInfoFromConfig(name: string, cfg: AgentConfig): ApiAgentInfo {
     baseUrl: cfg.baseUrl ?? DEFAULT_BASE_URLS[cfg.adapter],
     hasKey,
     keyMasked: cfg.apiKey ? maskAgentKey(cfg.apiKey) : undefined,
-    status: hasKey && apiConfigHealthy(cfg) ? 'ready' : hasKey ? 'invalid' : 'no_key',
+    status: !hasKey ? 'no_key' : !configOk ? 'invalid' : smoke ? (smoke.ok ? 'ready' : 'invalid') : 'unverified',
+    error: smoke?.error,
+    checkedAt: smoke?.checkedAt,
     kind: 'api',
   }
 }
 
-function apiAgentInfoFromRecord(record: state.UserAgentRecord): ApiAgentInfo {
-  const apiKey = decryptUserAgentKey(record)
-  const cfg = state.userAgentRecordToConfig(record, apiKey)
+function apiAgentInfoFromRecord(record: state.UserAgentRecord, cfg?: AgentConfig): ApiAgentInfo {
+  const apiKey = cfg?.apiKey ?? decryptUserAgentKey(record)
+  const config = cfg ?? state.userAgentRecordToConfig(record, apiKey)
   return {
-    ...apiAgentInfoFromConfig(record.name, cfg),
+    ...apiAgentInfoFromConfig(record.name, config),
     hasKey: Boolean(apiKey),
     keyMasked: apiKey ? maskAgentKey(apiKey) : undefined,
   }
@@ -825,6 +857,77 @@ function apiConfigHealthy(cfg: AgentConfig): boolean {
   } catch {
     return false
   }
+}
+
+function getApiSmokeResult(name: string, cfg: AgentConfig): ApiSmokeResult | undefined {
+  const result = apiSmokeCache.get(apiSmokeKey(name, cfg))
+  if (!result) return undefined
+  return Date.now() - result.checkedAt <= API_SMOKE_CACHE_TTL_MS ? result : undefined
+}
+
+async function verifyApiAgent(name: string, cfg: AgentConfig, opts: { force?: boolean } = {}): Promise<ApiSmokeResult> {
+  const key = apiSmokeKey(name, cfg)
+  const cached = apiSmokeCache.get(key)
+  if (!opts.force && cached && Date.now() - cached.checkedAt <= API_SMOKE_CACHE_TTL_MS) return cached
+  const checkedAt = Date.now()
+  if (!cfg.apiKey) return cacheApiSmoke(key, { ok: false, checkedAt, error: 'Missing API key' })
+  let adapter
+  try {
+    adapter = createAdapter({ ...cfg, timeout: Math.min(cfg.timeout ?? API_SMOKE_TIMEOUT_MS, API_SMOKE_TIMEOUT_MS) })
+  } catch (err) {
+    return cacheApiSmoke(key, { ok: false, checkedAt, error: err instanceof Error ? err.message : String(err) })
+  }
+  if (!adapter) return cacheApiSmoke(key, { ok: false, checkedAt, error: 'Unsupported adapter' })
+  ;(adapter as { name: string }).name = name
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), API_SMOKE_TIMEOUT_MS)
+  try {
+    const result = await adapter.send(opsPseudoSession(name, cfg), 'Reply with exactly: OK', {
+      signal: controller.signal,
+      systemPrompt: 'This is a health check. Reply with exactly: OK',
+    })
+    const content = typeof result === 'string' ? result : result.content
+    return cacheApiSmoke(key, content.trim()
+      ? { ok: true, checkedAt }
+      : { ok: false, checkedAt, error: 'Empty API response' })
+  } catch (err) {
+    return cacheApiSmoke(key, { ok: false, checkedAt, error: err instanceof Error ? err.message : String(err) })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function cacheApiSmoke(key: string, result: ApiSmokeResult): ApiSmokeResult {
+  apiSmokeCache.set(key, result)
+  return result
+}
+
+function apiSmokeKey(name: string, cfg: AgentConfig): string {
+  return crypto.createHash('sha256').update(JSON.stringify({
+    name,
+    adapter: cfg.adapter,
+    model: cfg.model,
+    baseUrl: cfg.baseUrl,
+    apiKey: cfg.apiKey,
+  })).digest('hex')
+}
+
+async function assertApiAgentUsable(name: string, cfg: AgentConfig): Promise<void> {
+  const result = await verifyApiAgent(name, cfg, { force: true })
+  if (!result.ok) throw new HttpError(400, `API Assistant validation failed: ${result.error ?? 'unknown error'}`)
+}
+
+async function diagnoseApiAgent(userId: string, name: string, refresh: boolean): Promise<unknown | undefined> {
+  const record = state.getUserAgent(userId, name)
+  if (record) {
+    const cfg = state.userAgentRecordToConfig(record, decryptUserAgentKey(record))
+    const result = await verifyApiAgent(name, cfg, { force: refresh })
+    return { name, adapter: cfg.adapter, model: cfg.model, baseUrl: cfg.baseUrl, healthy: result.ok, verified: result.ok, checkedAt: result.checkedAt, error: result.error }
+  }
+  const cfg = activeAgents(loadConfig())[name]
+  if (!cfg || !API_ADAPTERS.has(cfg.adapter)) return undefined
+  const result = await verifyApiAgent(name, cfg, { force: refresh })
+  return { name, adapter: cfg.adapter, model: cfg.model, baseUrl: cfg.baseUrl, healthy: result.ok, verified: result.ok, checkedAt: result.checkedAt, error: result.error }
 }
 
 function providerForAdapter(adapter: string, baseUrl?: string): string {
@@ -1361,8 +1464,12 @@ function mcpTools(): McpTool[] {
     {
       name: 'turing_get_task_result',
       title: 'Get Turing task result',
-      description: 'Read a compact task status/result by id.',
-      inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
+      description: 'Read a compact task status/result by id. By default this returns a short summary to avoid client safety truncation; set includeOutput=true only when the full report is needed.',
+      inputSchema: objectSchema({
+        id: { type: 'string' },
+        includeOutput: { type: 'boolean', description: 'Include truncated result/output text. Default false.' },
+        maxChars: { type: 'integer', description: 'Maximum characters for included result/output. Default 4000, max 12000.' },
+      }, ['id']),
       annotations: { readOnlyHint: true },
     },
     {
@@ -1471,15 +1578,22 @@ async function mcpListAgents(args: unknown, ctx: McpContext): Promise<unknown> {
   const data = requireRecord(args, 'arguments')
   const refresh = optionalBoolean(data.refresh, 'refresh') ?? true
   const catalogAgents = await ctx.agentCatalog.listAgents({ refresh })
-  const assistantAgents = state.listUserAgents(ctx.authUser.userId).map((agent) => ({
-    name: agent.name,
-    adapter: agent.adapter,
-    source: 'assistant',
-    supported: true,
-    availableForSessions: true,
-    healthy: true,
-    model: agent.model,
-    baseUrl: agent.baseUrl,
+  const assistantRecords = state.listUserAgents(ctx.authUser.userId)
+  const assistantAgents = await Promise.all(assistantRecords.map(async (agent) => {
+    const cfg = state.userAgentRecordToConfig(agent, decryptUserAgentKey(agent))
+    const smoke = await verifyApiAgent(agent.name, cfg, { force: refresh })
+    return {
+      name: agent.name,
+      adapter: agent.adapter,
+      source: 'assistant',
+      supported: true,
+      availableForSessions: smoke.ok,
+      healthy: smoke.ok,
+      verified: smoke.ok,
+      model: agent.model,
+      baseUrl: agent.baseUrl,
+      error: smoke.error,
+    }
   }))
   return {
     agents: [...assistantAgents, ...catalogAgents].map((agent) => ({
@@ -1625,6 +1739,9 @@ function mcpGetTaskResult(args: unknown, ctx: McpContext): unknown {
   const data = requireRecord(args, 'arguments')
   const task = state.getTask(requireNonEmptyString(data.id, 'id'), ctx.authUser.userId)
   if (!task) throw new HttpError(404, 'Task not found')
+  const includeOutput = optionalBoolean(data.includeOutput, 'includeOutput') ?? false
+  const maxChars = Math.min(optionalPositiveInt(data.maxChars, 'maxChars') ?? 4000, 12_000)
+  const source = task.result || task.output || task.lastAgentOutput || ''
   return {
     task: {
       id: task.id,
@@ -1633,7 +1750,18 @@ function mcpGetTaskResult(args: unknown, ctx: McpContext): unknown {
       permissionMode: task.permissionMode,
       cwd: task.cwd,
       summary: compactTaskSummary(task),
-      result: truncateText(task.result, 16_000),
+      hasResult: Boolean(task.result),
+      hasOutput: Boolean(task.output),
+      hasLiveOutput: Boolean(task.lastAgentOutput),
+      resultChars: (task.result || '').length,
+      outputChars: (task.output || '').length,
+      liveOutputChars: (task.lastAgentOutput || '').length,
+      ...(includeOutput ? {
+        truncated: source.length > maxChars,
+        result: truncateText(task.result, maxChars),
+        output: task.result ? undefined : truncateText(task.output, maxChars),
+        liveOutput: (!task.result && !task.output) ? truncateText(task.lastAgentOutput, maxChars) : undefined,
+      } : {}),
       errorMessage: truncateText(task.errorMessage, 500),
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,
@@ -1847,7 +1975,7 @@ function summarizeWorkflow(workflow: Pipeline | PipelineWithSessions): Record<st
 async function buildOpsReport(
   userId: string,
   agentCatalog: AgentCatalog,
-  input: { question?: string; target?: OpsTarget } = {}
+  input: { question?: string; target?: OpsTarget; page?: OpsPageContext } = {}
 ) {
   const now = Date.now()
   const issues: OpsIssue[] = []
@@ -1976,11 +2104,39 @@ async function buildOpsReport(
     : []
   const relevant = targetIssue.length ? targetIssue : issues
   const summary = summarizeOpsIssues(relevant, input)
+  const directAnswer = directOpsAnswer(userId, input.question)
+  const modelAnswer = input.question && !directAnswer
+    ? await generateOpsModelAnswer(userId, input, {
+        summary,
+        policy: '只读诊断；平台动作必须用户确认；不直接写项目文件、不提交、不 push。',
+        issues: relevant.slice(0, 20),
+        counts: {
+          critical: issues.filter(issue => issue.severity === 'critical').length,
+          warning: issues.filter(issue => issue.severity === 'warning').length,
+          info: issues.filter(issue => issue.severity === 'info').length,
+        },
+        totals: {
+          tasks: tasks.length,
+          sessions: sessions.length,
+          workflows: workflows.length,
+          agents: agents.length,
+        },
+        page: input.page,
+      }).catch((err) => ({
+        answer: undefined,
+        source: undefined,
+        error: err instanceof Error ? err.message : String(err),
+      }))
+    : undefined
 
   return {
     ok: issues.filter(issue => issue.severity === 'critical').length === 0,
     checkedAt: now,
     summary,
+    directAnswer,
+    answer: modelAnswer?.answer,
+    answerSource: modelAnswer?.source,
+    answerError: modelAnswer?.error,
     policy: 'read_only_diagnose_with_confirmed_platform_actions',
     counts: {
       critical: issues.filter(issue => issue.severity === 'critical').length,
@@ -1997,6 +2153,34 @@ async function buildOpsReport(
   }
 }
 
+function directOpsAnswer(userId: string, question: string | undefined): string | undefined {
+  const value = String(question || '').toLowerCase()
+  if (!value) return undefined
+  if (/什么模型|用的什么模型|接.*模型|llm|deepseek|gpt|claude|qwen|模型/.test(value)) {
+    const selected = selectCachedOpsModelAgent(userId)
+    if (selected) {
+      return [
+        `当前 Ops 管家接入的是 ${selected.name}。`,
+        `adapter: ${selected.config.adapter}`,
+        `model: ${selected.config.model || '未配置'}`,
+        '它只负责诊断、解释和建议；不会直接写项目文件、提交或 push。',
+      ].join('\n')
+    }
+    return [
+      '当前没有可用的 Ops LLM。',
+      '请在 Settings 添加一个 API Assistant；优先使用名字含 ops 的 Assistant，其次 DeepSeek/Qwen/OpenAI/Claude。',
+    ].join('\n')
+  }
+  if (/能做什么|职责|权限|边界/.test(value)) {
+    return [
+      'Ops 管家的边界是：只读诊断 + 经你确认后执行平台动作。',
+      '它可以 stop、resume、rerun、创建修复 Task。',
+      '它不会直接写项目文件、提交代码或 push。',
+    ].join('\n')
+  }
+  return undefined
+}
+
 function summarizeOpsIssues(issues: OpsIssue[], input: { question?: string; target?: OpsTarget }): string {
   if (issues.length === 0) {
     return input.target?.id
@@ -2006,6 +2190,105 @@ function summarizeOpsIssues(issues: OpsIssue[], input: { question?: string; targ
   const first = issues[0]
   const prefix = input.target?.id ? '这个对象' : '平台'
   return `${prefix}检测到 ${issues.length} 个问题。最优先处理：${first.title}。${first.recommendation}`
+}
+
+async function generateOpsModelAnswer(
+  userId: string,
+  input: { question?: string; target?: OpsTarget; page?: OpsPageContext },
+  report: {
+    summary: string
+    policy: string
+    issues: OpsIssue[]
+    counts: { critical: number; warning: number; info: number }
+    totals: { tasks: number; sessions: number; workflows: number; agents: number }
+    page?: OpsPageContext
+  }
+): Promise<{ answer?: string; source?: string; error?: string }> {
+  const selected = await selectOpsModelAgent(userId)
+  if (!selected) return { error: '没有真实验证通过的 API Assistant；请在 Settings 里刷新或重新配置 DeepSeek/Qwen/OpenAI API Assistant。' }
+  const adapter = createAdapter(selected.config)
+  if (!adapter) return { error: `无法创建 ${selected.name} adapter。` }
+
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 30_000)
+  try {
+    const result = await adapter.send(opsPseudoSession(selected.name, selected.config), JSON.stringify({
+      question: input.question,
+      target: input.target,
+      report,
+    }), {
+      signal: controller.signal,
+      systemPrompt: [
+        '你是 Turing 平台的 Ops 管家。',
+        '你的职责：观察平台状态、解释任务/会话/工作流问题、给出下一步建议。',
+        '你的边界：不直接写项目文件、不提交、不 push；需要修复时建议创建修复 Task 或使用平台动作。',
+        '严格回答用户当前问题，不要机械复述所有诊断项。',
+        '如果 report 中没有足够证据，明确说明缺少什么。',
+        '中文回答，简短、具体。',
+      ].join('\n'),
+    })
+    const answer = typeof result === 'string' ? result : (result as AdapterResponse).content
+    return { answer: answer.trim(), source: selected.name }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function selectOpsModelAgent(userId: string): Promise<{ name: string; config: AgentConfig } | undefined> {
+  const candidates: Array<{ name: string; config: AgentConfig }> = []
+  for (const [name, config] of Object.entries(userAgentConfigs(userId))) {
+    if (API_ADAPTERS.has(config.adapter) && config.apiKey && apiConfigHealthy(config)) candidates.push({ name, config })
+  }
+  for (const [name, config] of Object.entries(activeAgents(loadConfig()))) {
+    if (API_ADAPTERS.has(config.adapter) && config.apiKey && apiConfigHealthy(config)) candidates.push({ name, config })
+  }
+  for (const candidate of candidates.sort((a, b) => opsModelPriority(a) - opsModelPriority(b))) {
+    const result = await verifyApiAgent(candidate.name, candidate.config)
+    if (result.ok) return candidate
+  }
+  return undefined
+}
+
+function selectCachedOpsModelAgent(userId: string): { name: string; config: AgentConfig } | undefined {
+  const candidates: Array<{ name: string; config: AgentConfig }> = []
+  for (const [name, config] of Object.entries(userAgentConfigs(userId))) {
+    if (API_ADAPTERS.has(config.adapter) && config.apiKey && apiConfigHealthy(config)) candidates.push({ name, config })
+  }
+  for (const [name, config] of Object.entries(activeAgents(loadConfig()))) {
+    if (API_ADAPTERS.has(config.adapter) && config.apiKey && apiConfigHealthy(config)) candidates.push({ name, config })
+  }
+  return candidates
+    .filter((candidate) => getApiSmokeResult(candidate.name, candidate.config)?.ok)
+    .sort((a, b) => opsModelPriority(a) - opsModelPriority(b))[0]
+}
+
+function opsModelPriority(candidate: { name: string; config: AgentConfig }): number {
+  const value = `${candidate.name} ${candidate.config.adapter} ${candidate.config.model ?? ''}`.toLowerCase()
+  if (value.includes('ops')) return 0
+  if (value.includes('deepseek')) return 1
+  if (value.includes('qwen')) return 2
+  if (value.includes('openai')) return 3
+  if (value.includes('anthropic') || value.includes('claude')) return 4
+  return 9
+}
+
+function opsPseudoSession(agentName: string, agent: AgentConfig): Session {
+  const now = Date.now()
+  return {
+    id: `ops-${crypto.randomUUID()}`,
+    from: { adapter: agentName, label: agentName },
+    to: { adapter: agent.adapter, label: agentName },
+    status: 'active',
+    mode: 'freeform',
+    nextTurn: 'from',
+    maxRounds: 1,
+    currentRound: 0,
+    approveMode: false,
+    permissionMode: 'safe',
+    resumeCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  }
 }
 
 function opsAction(
@@ -2377,7 +2660,7 @@ function parseHumanMessageBody(body: unknown): { content: string } {
   }
 }
 
-function parseOpsDiagnoseBody(body: unknown): { question?: string; target?: OpsTarget } {
+function parseOpsDiagnoseBody(body: unknown): { question?: string; target?: OpsTarget; page?: OpsPageContext } {
   const data = body && typeof body === 'object' && !Array.isArray(body)
     ? body as Record<string, unknown>
     : {}
@@ -2388,9 +2671,20 @@ function parseOpsDiagnoseBody(body: unknown): { question?: string; target?: OpsT
   const target: OpsTarget | undefined = targetData && (kind === 'task' || kind === 'session' || kind === 'workflow') && typeof targetData.id === 'string'
     ? { kind: kind as OpsTarget['kind'], id: targetData.id }
     : undefined
+  const pageData = data.page && typeof data.page === 'object' && !Array.isArray(data.page)
+    ? data.page as Record<string, unknown>
+    : undefined
   return {
     question: optionalString(data.question, 'question'),
     target,
+    page: pageData
+      ? {
+          path: optionalString(pageData.path, 'page.path'),
+          title: optionalString(pageData.title, 'page.title'),
+          summary: optionalString(pageData.summary, 'page.summary'),
+          visibleText: optionalString(pageData.visibleText, 'page.visibleText')?.slice(0, 4000),
+        }
+      : undefined,
   }
 }
 
@@ -2653,7 +2947,10 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       const agentDiagnosticsMatch = pathname.match(/^\/api\/agents\/([^/]+)\/diagnostics$/)
       if (agentDiagnosticsMatch && method === 'GET') {
         const refresh = url.searchParams.get('refresh') !== '0'
-        const diagnostic = await agentCatalog.diagnoseAgent(decodeURIComponent(agentDiagnosticsMatch[1]), refresh)
+        const agentName = decodeURIComponent(agentDiagnosticsMatch[1])
+        const apiDiagnostic = await diagnoseApiAgent(authUser!.userId, agentName, refresh)
+        if (apiDiagnostic) return json(res, 200, apiDiagnostic)
+        const diagnostic = await agentCatalog.diagnoseAgent(agentName, refresh)
         if (!diagnostic) return json(res, 404, { error: 'Not found' })
         return json(res, 200, diagnostic)
       }
@@ -2665,6 +2962,13 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           throw new HttpError(400, 'Choose a saved Provider Key before creating an Agent')
         }
         const apiKey = resolveApiKeySelection(authUser!.userId, parsed)
+        await assertApiAgentUsable(parsed.name, {
+          adapter: parsed.adapter,
+          model: parsed.model,
+          baseUrl: parsed.baseUrl,
+          timeout: parsed.timeout,
+          apiKey,
+        })
         const encrypted = apiKey ? encryptSecret(authUser!.userId, apiKey) : {}
         try {
           state.createUserAgent({
@@ -2695,7 +2999,14 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         if (parsed.adapter !== current.adapter && !parsed.keyId) {
           throw new HttpError(400, 'Choose a saved Provider Key when changing adapter')
         }
-        const apiKey = resolveApiKeySelection(authUser!.userId, parsed)
+        const apiKey = resolveApiKeySelection(authUser!.userId, parsed) ?? decryptUserAgentKey(current)
+        await assertApiAgentUsable(parsed.name, {
+          adapter: parsed.adapter,
+          model: parsed.model,
+          baseUrl: parsed.baseUrl,
+          timeout: parsed.timeout,
+          apiKey,
+        })
         const encrypted = apiKey ? encryptSecret(authUser!.userId, apiKey) : undefined
         try {
           state.updateUserAgent(authUser!.userId, current.name, {

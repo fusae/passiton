@@ -512,6 +512,78 @@ test('recoverTasks resumes queued tasks and fails interrupted running tasks', as
   })
 })
 
+test('task runner extracts final markdown report from verbose output', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('opencode', async () => [
+      '我先检查当前状态。',
+      '现在开始修复。',
+      '',
+      '---',
+      '',
+      '## 变更摘要',
+      '',
+      '已修复重复展示问题。',
+    ].join('\n')))
+
+    const task = router.startTask({
+      agent: { adapter: 'opencode' },
+      prompt: 'fix',
+    })
+
+    await waitFor(() => state.getTask(task.id)?.status === 'done')
+    const done = state.getTask(task.id)
+    assert.equal(done?.result, '## 变更摘要\n\n已修复重复展示问题。')
+    assert.match(done?.output || '', /我先检查当前状态/)
+  })
+})
+
+test('task runner still prefers explicit result markers', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('opencode', async () => [
+      'noise',
+      '[RESULT]explicit summary[/RESULT]',
+      '---',
+      '## 其他',
+    ].join('\n')))
+
+    const task = router.startTask({
+      agent: { adapter: 'opencode' },
+      prompt: 'fix',
+    })
+
+    await waitFor(() => state.getTask(task.id)?.status === 'done')
+    assert.equal(state.getTask(task.id)?.result, 'explicit summary')
+  })
+})
+
+test('task runner emits live output updates', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    const liveOutputs: string[] = []
+    router.on('event', (event: any) => {
+      if (event.type === 'task:updated' && event.payload?.lastAgentOutput) {
+        liveOutputs.push(event.payload.lastAgentOutput)
+      }
+    })
+    router.registerAdapter(new StubAdapter('opencode', async (_session, _message, opts) => {
+      opts?.onOutput?.('reading files')
+      opts?.onOutput?.('writing patch')
+      return '[RESULT]done[/RESULT]'
+    }))
+
+    const task = router.startTask({
+      agent: { adapter: 'opencode' },
+      prompt: 'fix',
+    })
+
+    await waitFor(() => state.getTask(task.id)?.status === 'done')
+    assert.match(state.getTask(task.id)?.lastAgentOutput ?? '', /reading files\nwriting patch/)
+    assert.match(liveOutputs.at(-1) ?? '', /reading files/)
+  })
+})
+
 test('recoverSessions pauses interrupted active sessions', async () => {
   await withTempDb(async () => {
     const router = new Router()
