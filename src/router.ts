@@ -2,10 +2,11 @@
 
 import { EventEmitter } from 'events'
 import { execFile, execFileSync } from 'child_process'
+import { promisify } from 'util'
 import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
-import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts, Task, ExternalJob, WorkflowNodeType, WorkflowStepContract, ExternalTaskProvider, RouterExternalTaskHooks } from './types.js'
+import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts, Task, WorkspaceDirtyState, ExternalJob, WorkflowNodeType, WorkflowStepContract, ExternalTaskProvider, RouterExternalTaskHooks } from './types.js'
 import * as state from './state.js'
 import { decryptKey } from './keyvault.js'
 import {
@@ -23,6 +24,8 @@ const DISCUSS_CONVERGENCE_ROUNDS = 2
 const DISCUSS_MESSAGES_PER_ROUND = 2
 const COLLABORATE_CONVERGENCE_MESSAGES = 4
 const GIT_DIFF_TIMEOUT_MS = 10_000
+const GIT_STATUS_DIRTY_TIMEOUT_MS = 3_000
+const MAX_DIRTY_FILES_DISPLAY = 20
 const PIPELINE_DEP_MAX_FILES = 8
 const PIPELINE_DEP_FILE_CHARS = 12_000
 const PIPELINE_DEP_TEXT_CHARS = 4_000
@@ -161,12 +164,24 @@ export class Router extends EventEmitter {
 
   recoverTasks(): void {
     for (const task of state.listTasks({ status: 'running' })) {
-      const failed = state.updateTask(task.id, {
-        status: 'error',
-        errorMessage: 'Task interrupted by server restart',
-        finishedAt: Date.now(),
-      }, task.userId)
-      this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
+      if (task.cwd) {
+        checkWorkspaceDirty(task.cwd).then((workspaceState) => {
+          const failed = state.updateTask(task.id, {
+            status: 'error',
+            errorMessage: 'Task interrupted by server restart',
+            finishedAt: Date.now(),
+            ...(workspaceState ? { workspaceState } : {}),
+          }, task.userId)
+          this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
+        }).catch(() => { /* best-effort */ })
+      } else {
+        const failed = state.updateTask(task.id, {
+          status: 'error',
+          errorMessage: 'Task interrupted by server restart',
+          finishedAt: Date.now(),
+        }, task.userId)
+        this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
+      }
     }
     // Re-enqueue any previously-queued tasks through the concurrency limiter.
     this.drainTaskQueue()
@@ -277,10 +292,12 @@ export class Router extends EventEmitter {
     const adapter = this.resolveAdapter(task.agent.adapter, task.userId)
     if (!adapter) {
       if (state.getTask(task.id, task.userId)?.status === 'stopped') return
+      const workspaceState = task.cwd ? await checkWorkspaceDirty(task.cwd) : undefined
       const failed = state.updateTask(task.id, {
         status: 'error',
         errorMessage: `Adapter not found: ${task.agent.adapter}`,
         finishedAt: Date.now(),
+        ...(workspaceState ? { workspaceState } : {}),
       }, task.userId)
       this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
       return
@@ -325,11 +342,13 @@ export class Router extends EventEmitter {
       this.emit('event', { type: 'task:done', payload: done } satisfies WsEvent)
     } catch (err) {
       if (state.getTask(task.id, task.userId)?.status === 'stopped') return
+      const workspaceState = task.cwd ? await checkWorkspaceDirty(task.cwd) : undefined
       const failed = state.updateTask(task.id, {
         status: 'error',
         errorMessage: err instanceof Error ? err.message : String(err),
         lastAgentOutput: readLastAgentOutput(err) || liveOutput || lastOutput,
         finishedAt: Date.now(),
+        ...(workspaceState ? { workspaceState } : {}),
       }, task.userId)
       this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
     }
@@ -2397,6 +2416,28 @@ function captureGitHead(cwd?: string): string | undefined {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim()
+  } catch {
+    return undefined
+  }
+}
+
+const execFileAsync = promisify(execFile)
+
+async function checkWorkspaceDirty(cwd: string): Promise<WorkspaceDirtyState | undefined> {
+  if (!fs.existsSync(path.join(cwd, '.git'))) return undefined
+  try {
+    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+      cwd,
+      timeout: GIT_STATUS_DIRTY_TIMEOUT_MS,
+      encoding: 'utf8',
+      maxBuffer: 1024 * 512,
+    })
+    const lines = stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+    return {
+      dirty: lines.length > 0,
+      changedFileCount: lines.length,
+      files: lines.slice(0, MAX_DIRTY_FILES_DISPLAY),
+    }
   } catch {
     return undefined
   }

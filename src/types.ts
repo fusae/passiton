@@ -116,6 +116,12 @@ export interface SessionWithMessages extends Session {
   versions?: SessionVersion[]
 }
 
+export interface WorkspaceDirtyState {
+  dirty: boolean
+  changedFileCount: number
+  files: string[]
+}
+
 export interface Task {
   id: string
   userId?: string
@@ -131,6 +137,7 @@ export interface Task {
   result?: string
   errorMessage?: string
   lastAgentOutput?: string
+  workspaceState?: WorkspaceDirtyState
   createdAt: number
   updatedAt: number
   startedAt?: number

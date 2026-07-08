@@ -14,6 +14,8 @@ export interface PromptCapabilities {
 
 const TURING_AWARENESS = 'You are operating inside Turing, an agent-to-agent orchestration system. If the task should be split into parallel or dependent sub-tasks, explicitly propose a Turing pipeline/session plan instead of losing scope in one thread. When your task is complete, wrap your final result or summary in [RESULT]...[/RESULT] tags.'
 
+const PROGRESS_OUTPUT_GUIDANCE = 'For long-running tasks, output brief progress as you work — one short line per completed step or file. Extended silence risks triggering an idle timeout that terminates your process.'
+
 const HUMAN_SUMMON_PROTOCOL = [
   '## Summoning the human',
   'The human overseeing this session is NOT watching continuously — they rely on you to call them. Emit a [HUMAN_NEEDED] block and stop when ANY of these are true:',
@@ -38,6 +40,7 @@ export function generateTaskSystemPrompt(context?: SessionContext): string {
     `If the workflow requires delegation, create the necessary Turing sessions or pipelines and use their outputs instead of collapsing the work into one-agent execution.`,
     `Do not assume you must do every step yourself just because this task was assigned to you.`,
     `When the task is complete, wrap your final result or summary in [RESULT]...[/RESULT] tags.`,
+    PROGRESS_OUTPUT_GUIDANCE,
     formatContextBlock(context),
   ].filter(Boolean).join('\n')
 }
@@ -121,6 +124,7 @@ export function generateSystemPrompts(
           executorNoToolWarning,
           TURING_AWARENESS,
           HUMAN_SUMMON_PROTOCOL,
+          PROGRESS_OUTPUT_GUIDANCE,
           `When you believe the task is fully complete, end your message with [DONE].`,
           contextBlock,
         ].filter(Boolean).join('\n'),

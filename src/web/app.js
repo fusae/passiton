@@ -742,7 +742,8 @@ function applyTaskUpdate(task) {
       task.prompt !== undefined && task.prompt !== prev.prompt ||
       task.result !== undefined && task.result !== prev.result ||
       task.output !== undefined && task.output !== prev.output ||
-      task.errorMessage !== undefined && task.errorMessage !== prev.errorMessage
+      task.errorMessage !== undefined && task.errorMessage !== prev.errorMessage ||
+      task.workspaceState !== undefined && task.workspaceState !== prev.workspaceState
     scheduleTaskDetailRender(contentChanged)
   }
 
@@ -1793,12 +1794,34 @@ function renderTaskHeader(task) {
   }
 }
 
+function renderWorkspaceWarning(task) {
+  const ws = task.workspaceState
+  if (ws && ws.dirty !== undefined) {
+    const fileRows = (ws.files || []).map(f => `<li>${escapeHtml(f)}</li>`).join('')
+    return `
+      <section class="workspace-warning">
+        <div class="workspace-warning-title">⚠ 该任务修改了工作区且未正常完成：${ws.changedFileCount} 个文件有改动</div>
+        <details class="workspace-warning-files">
+          <summary>查看变更文件列表</summary>
+          <ul class="workspace-warning-file-list">${fileRows}</ul>
+        </details>
+      </section>
+    `
+  }
+  return `
+    <section class="workspace-warning">
+      <div class="workspace-warning-title">该任务在 <code class="workspace-warning-cwd">${escapeHtml(task.cwd)}</code> 中执行且未正常完成，建议检查工作区状态</div>
+    </section>
+  `
+}
+
 function renderTaskContent(task) {
   const container = document.getElementById('task-content')
   if (!container || !task) return
   const showFullOutput = task.output && !sameTaskText(task.output, task.result)
   container.innerHTML = `
     <div class="task-main">
+      ${task.status === 'error' && task.cwd ? renderWorkspaceWarning(task) : ''}
       <section class="card task-section">
         <div class="label mb-8">Prompt</div>
         <div class="task-copy">${renderMarkdownCached(task.prompt || '')}</div>

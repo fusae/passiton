@@ -25,6 +25,7 @@ import type {
   AgentConfig,
   Task,
   TaskStatus,
+  WorkspaceDirtyState,
   ExternalJob,
 } from './types.js'
 
@@ -347,6 +348,9 @@ function createTables(): void {
     db.exec(`ALTER TABLE tasks ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'safe'`)
   } catch { /* column already exists */ }
   try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN workspace_state TEXT`)
+  } catch { /* column already exists */ }
+  try {
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_user_idempotency ON sessions(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL`)
   } catch { /* index already exists */ }
   try {
@@ -616,6 +620,10 @@ function rowToTask(row: Record<string, unknown>): Task {
   if (row.context) {
     try { context = JSON.parse(row.context as string) } catch { /* ignore */ }
   }
+  let workspaceState: WorkspaceDirtyState | undefined
+  if (row.workspace_state) {
+    try { workspaceState = JSON.parse(row.workspace_state as string) } catch { /* ignore */ }
+  }
   return {
     id: row.id as string,
     userId: (row.user_id as string | null) ?? undefined,
@@ -634,6 +642,7 @@ function rowToTask(row: Record<string, unknown>): Task {
     result: (row.result as string | null) ?? undefined,
     errorMessage: (row.error_message as string | null) ?? undefined,
     lastAgentOutput: (row.last_agent_output as string | null) ?? undefined,
+    ...(workspaceState ? { workspaceState } : {}),
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
     startedAt: (row.started_at as number | null) ?? undefined,
@@ -723,6 +732,7 @@ export function updateTask(id: string, updates: Partial<Pick<Task,
   'result' |
   'errorMessage' |
   'lastAgentOutput' |
+  'workspaceState' |
   'startedAt' |
   'finishedAt'
 >>, userId?: string): Task {
@@ -734,6 +744,7 @@ export function updateTask(id: string, updates: Partial<Pick<Task,
   if (updates.result !== undefined) { fields.push('result = ?'); values.push(updates.result) }
   if (updates.errorMessage !== undefined) { fields.push('error_message = ?'); values.push(updates.errorMessage) }
   if (updates.lastAgentOutput !== undefined) { fields.push('last_agent_output = ?'); values.push(updates.lastAgentOutput) }
+  if (updates.workspaceState !== undefined) { fields.push('workspace_state = ?'); values.push(JSON.stringify(updates.workspaceState)) }
   if (updates.startedAt !== undefined) { fields.push('started_at = ?'); values.push(updates.startedAt) }
   if (updates.finishedAt !== undefined) { fields.push('finished_at = ?'); values.push(updates.finishedAt) }
 

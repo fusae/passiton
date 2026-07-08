@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { activeAgents, DEFAULT_CONFIG, LOCAL_CLI_AGENT_DEFAULTS, loadConfig, getConfigPath, writeConfig } from '../config.js'
@@ -24,7 +24,10 @@ test('default config keeps local CLI agents available', () => {
 
 test('PORT environment variable overrides config port', () => {
   const savedPort = process.env.PORT
+  const savedHome = process.env.TURING_HOME
+  const tempDir = mkdtempSync(join(tmpdir(), 'turing-port-test-'))
   process.env.PORT = '9876'
+  process.env.TURING_HOME = tempDir
   try {
     const config = loadConfig()
     assert.equal(config.server.port, 9876)
@@ -34,6 +37,12 @@ test('PORT environment variable overrides config port', () => {
     } else {
       process.env.PORT = savedPort
     }
+    if (savedHome === undefined) {
+      delete process.env.TURING_HOME
+    } else {
+      process.env.TURING_HOME = savedHome
+    }
+    rmSync(tempDir, { recursive: true, force: true })
   }
 })
 
@@ -59,6 +68,48 @@ test('TURING_HOME isolates the data directory', () => {
       delete process.env.TURING_HOME
     } else {
       process.env.TURING_HOME = savedHome
+    }
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('first loadConfig persists config.json with jwtSecret before listen', () => {
+  const savedHome = process.env.TURING_HOME
+  const savedJwt = process.env.TURING_JWT_SECRET
+  const tempDir = mkdtempSync(join(tmpdir(), 'turing-persist-test-'))
+  process.env.TURING_HOME = tempDir
+  delete process.env.TURING_JWT_SECRET
+  try {
+    const configPath = join(tempDir, 'config.json')
+
+    // Before loadConfig, no config.json
+    assert.equal(existsSync(configPath), false)
+
+    // First loadConfig should create config.json with secrets
+    loadConfig()
+
+    assert.ok(existsSync(configPath), 'config.json should exist after loadConfig')
+
+    const raw = JSON.parse(readFileSync(configPath, 'utf-8'))
+    assert.ok(raw.auth?.jwtSecret, 'config.json should contain auth.jwtSecret')
+    assert.ok(raw.auth.jwtSecret.length > 0, 'jwtSecret should be non-empty')
+    assert.ok(raw.auth?.encryptionKey, 'config.json should contain auth.encryptionKey')
+
+    // Idempotent: second loadConfig must not overwrite secrets
+    const firstJwt = raw.auth.jwtSecret
+    loadConfig()
+    const raw2 = JSON.parse(readFileSync(configPath, 'utf-8'))
+    assert.equal(raw2.auth.jwtSecret, firstJwt, 'jwtSecret should not change on second loadConfig')
+  } finally {
+    if (savedHome === undefined) {
+      delete process.env.TURING_HOME
+    } else {
+      process.env.TURING_HOME = savedHome
+    }
+    if (savedJwt === undefined) {
+      delete process.env.TURING_JWT_SECRET
+    } else {
+      process.env.TURING_JWT_SECRET = savedJwt
     }
     rmSync(tempDir, { recursive: true, force: true })
   }

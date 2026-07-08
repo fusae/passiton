@@ -893,6 +893,67 @@ test('stopTask keeps stopped status when a late agent result arrives', async () 
   })
 })
 
+test('failed task with cwd captures workspace dirty state', async () => {
+  await withTempDb(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turing-dirty-'))
+    try {
+      execFileSync('git', ['init'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['config', 'user.name', 'Turing Test'], { cwd: dir, stdio: 'ignore' })
+      writeFileSync(join(dir, 'committed.txt'), 'base', 'utf-8')
+      execFileSync('git', ['add', '.'], { cwd: dir, stdio: 'ignore' })
+      execFileSync('git', ['commit', '-m', 'init'], { cwd: dir, stdio: 'ignore' })
+      writeFileSync(join(dir, 'modified.txt'), 'dirty change', 'utf-8')
+
+      const router = new Router({ retries: 0 })
+      router.registerAdapter(new StubAdapter('opencode', async () => {
+        throw new Error('intentional failure')
+      }))
+
+      const task = router.startTask({
+        agent: { adapter: 'opencode' },
+        prompt: 'modify files then fail',
+        cwd: dir,
+      })
+
+      await waitFor(() => state.getTask(task.id)?.status === 'error')
+      const failed = state.getTask(task.id)
+      assert.equal(failed?.status, 'error')
+      assert.ok(failed?.workspaceState, 'workspaceState should be present on failed task')
+      assert.equal(failed?.workspaceState?.dirty, true)
+      assert.ok((failed?.workspaceState?.changedFileCount ?? 0) > 0, 'should detect changed files')
+      assert.ok(failed?.workspaceState?.files?.some(f => f.includes('modified.txt')), 'should list modified.txt')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+test('failed task with non-git cwd has no workspace state', async () => {
+  await withTempDb(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'turing-nogit-'))
+    try {
+      const router = new Router({ retries: 0 })
+      router.registerAdapter(new StubAdapter('opencode', async () => {
+        throw new Error('intentional failure')
+      }))
+
+      const task = router.startTask({
+        agent: { adapter: 'opencode' },
+        prompt: 'fail without git',
+        cwd: dir,
+      })
+
+      await waitFor(() => state.getTask(task.id)?.status === 'error')
+      const failed = state.getTask(task.id)
+      assert.equal(failed?.status, 'error')
+      assert.equal(failed?.workspaceState, undefined)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 test('task concurrency limit queues excess tasks until a slot frees', async () => {
   await withTempDb(async () => {
     let release!: () => void

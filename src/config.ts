@@ -2,6 +2,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { delimiter, join, dirname } from 'path'
+import crypto from 'crypto'
 import type { AppConfig, SessionMode } from './types.js'
 import { defaultClaudeCodeArgs } from './adapters/claude-code.js'
 import { resolveTuringHome } from './paths.js'
@@ -65,8 +66,38 @@ export const LOCAL_CLI_AGENT_DEFAULTS: Record<string, AppConfig['agents'][string
 }
 
 export function loadConfig(): AppConfig {
+  ensureConfigFile()
   const merged = readConfig()
   return validateConfig(merged)
+}
+
+/**
+ * On first run (config.json does not exist yet), persist a base config with
+ * generated secrets so the file is on disk even if the server fails to start
+ * (e.g. port-in-use exit).  Existing config.json is never overwritten.
+ *
+ * The secrets written here are picked up later by the lazy generators in
+ * auth.ts (getJwtSecret) and keyvault.ts (getEncryptionSecret), so those
+ * functions become no-ops for persistence on a normal first run.
+ */
+function ensureConfigFile(): void {
+  const configPath = getConfigPath()
+  if (existsSync(configPath)) return
+
+  const auth: AppConfig['auth'] = { ...DEFAULT_CONFIG.auth }
+  if (!process.env.TURING_JWT_SECRET && !auth.jwtSecret) {
+    auth.jwtSecret = crypto.randomBytes(32).toString('hex')
+  }
+  if (!process.env.TURING_ENCRYPTION_KEY && !auth.encryptionKey) {
+    auth.encryptionKey = crypto.randomBytes(32).toString('hex')
+  }
+  const toWrite: AppConfig = { ...DEFAULT_CONFIG, auth }
+
+  const configDir = dirname(configPath)
+  if (!existsSync(configDir)) {
+    mkdirSync(configDir, { recursive: true })
+  }
+  writeFileSync(configPath, JSON.stringify(toWrite, null, 2), 'utf-8')
 }
 
 function readConfig(): AppConfig {
