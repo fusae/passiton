@@ -334,7 +334,7 @@ const MESSAGES = {
     'task.ws.checkWorkspace': 'Task failed. Check workspace {cwd} before rerunning.',
 
     // Tasks
-    'task_title': '任务',
+    'task_title': 'Tasks',
     'task_new': '+ New Task',
     'task_stat_running': 'Running Tasks',
     'task_stat_running_sub': 'running right now',
@@ -350,6 +350,7 @@ const MESSAGES = {
     'task_load_more': 'Load more tasks',
     'task_loading': 'Loading…',
     'task_not_found': 'Task not found',
+    'task_untitled': 'Untitled task',
     'task_back': '← Back',
     'task_ask_ops': 'Ask Ops',
     'task_stop': '■ Stop',
@@ -554,6 +555,195 @@ const MESSAGES = {
     'newSession.back': 'Back',
     'newSession.create': 'Create',
 
+    // Workflows
+    'wf_title': 'Workflows',
+    'wf_new': '+ New Workflow',
+    'wf_recent': 'Recent Workflows',
+    'wf_empty': 'No workflows yet. Create your first one!',
+    'wf_untitled': 'Untitled workflow',
+    'wf_steps': '{count} steps',
+    'wf_created': 'Created {time}',
+    'wf_loading': 'Loading…',
+    'wf_load_more': 'Load more workflows',
+    'wf_not_found': 'Workflow not found',
+    'wf_back': '← Back',
+    'wf_ask_ops': 'Ask Ops',
+    'wf_pause': '⏸ Pause',
+    'wf_resume': '▶ Resume',
+    'wf_delete': 'Delete',
+    'wf_status_pending': 'Pending',
+    'wf_status_active': 'Active',
+    'wf_status_paused': 'Paused',
+    'wf_status_done': 'Completed',
+    'wf_status_error': 'Error',
+    'wf_status_stopped': 'Stopped',
+    'wf_step': 'Step {number}',
+    'wf_step_title': 'Step {number}: {title}',
+    'wf_rounds': '{current}{max} rounds',
+    'wf_rounds_max': ' / {max}',
+    'wf_depends_on': 'Depends on Step {steps}',
+    'wf_last_output': 'Last output: {status}',
+    'wf_approve_save': '✓ Approve and save',
+    'wf_execute_step': '✓ Run Step {number}',
+    'wf_rerun_step': '↻ Rerun this step',
+    'wf_manual_artifacts': '◎ Backfill images from main process',
+    'wf_request_changes': '✎ Request upstream changes',
+    'wf_output': 'OUTPUT',
+    'wf_versions': 'Versions {count}',
+    'wf_copy': 'Copy',
+    'wf_generated_files': 'Generated Files [{count}]',
+    'wf_hide_conversation': '▾ Hide Conversation',
+    'wf_view_conversation': '▸ View Full Conversation',
+    'wf_live_status_busy': 'AI is processing...',
+    'wf_live_status_ready': 'Ready for feedback',
+    'wf_live_status_modifying': 'AI is editing...',
+    'wf_live_title': 'Keep editing the current artifact',
+    'wf_live_draft': 'Current draft',
+    'wf_history_count': '{count} historical versions',
+    'wf_live_empty_output': 'This step has no reviewable output yet.',
+    'wf_live_empty_thread': 'Say what you want changed, and AI will update the current draft.',
+    'wf_live_placeholder': 'Example: make the opening faster, and rewrite the third sentence more naturally...',
+    'wf_speech_unsupported': 'Speech recognition is not supported in this browser',
+    'wf_voice_input': 'Voice input',
+    'wf_send_modify': 'Send and edit',
+    'wf_live_footer': 'Each send saves the current version first; downstream steps reset when artifacts change.',
+    'wf_end_review': 'End review',
+    'wf_approve_current': 'Approve current version',
+    'wf_execute_current': 'Run current step',
+    'wf_terminal_copy': 'COPY',
+    'wf_generated_files_upper': 'GENERATED_FILES',
+    'wf_content_upper': 'CONTENT',
+    'wf_file_role_file': 'File',
+    'wf_file_role_storyboard': 'Storyboard image',
+    'wf_file_role_character': 'Character reference',
+    'wf_file_role_prompt': 'Generation prompt',
+    'wf_file_role_script': 'Shooting script',
+    'wf_file_role_reference': 'Reference asset',
+    'wf_file_role_command': 'Video generation command',
+    'wf_file_role_image': 'Image asset',
+    'wf_file_role_video': 'Video file',
+    'wf_file_role_text': 'Text file',
+    'wf_file_missing': 'File missing',
+    'wf_file_checking': 'Checking',
+    'wf_copied': 'Copied',
+    'wf_copy_failed': 'Copy failed',
+    'wf_versions_title': 'Version History',
+    'wf_versions_empty': 'No version history yet',
+    'wf_referenced_files': 'Referenced Files [{count}]',
+    'wf_no_messages': 'No messages yet',
+    'wf_turn': 'Turn {round}',
+    'wf_timeline': 'Timeline',
+    'wf_timeline_created': 'Created',
+    'wf_timeline_updated': 'Updated',
+    'wf_modal_title': 'New Workflow',
+    'wf_modal_desc': 'Create a multi-step agent pipeline.',
+    'wf_modal_close': 'Close',
+    'wf_modal_no_agents': 'No API assistants configured yet.',
+    'wf_modal_add_one': 'Add one first',
+    'wf_template': 'Template',
+    'wf_custom_workflow': 'Custom workflow',
+    'wf_template_mine': 'mine',
+    'wf_pipeline_name': 'Pipeline name',
+    'wf_pipeline_placeholder': 'Release workflow',
+    'wf_input': 'Workflow input',
+    'wf_input_placeholder': 'Paste the reference video notes, source copy, or brief for this run...',
+    'wf_start_from_step': 'Start from step',
+    'wf_start_from_step_hint': 'Steps before this number are kept in the workflow and marked as manually completed.',
+    'wf_steps_title': 'Steps',
+    'wf_add_step': '+ Add Step',
+    'wf_cancel': 'Cancel',
+    'wf_save_template': 'Save as Template',
+    'wf_delete_template': 'Delete Template',
+    'wf_create': 'Create',
+    'wf_remove': 'Remove',
+    'wf_step_name': 'Step name',
+    'wf_step_name_placeholder': 'Adapt copy',
+    'wf_node_type': 'Node Type',
+    'wf_primary_agent': 'Primary Agent',
+    'wf_inputs': 'Inputs',
+    'wf_output_files': 'Output Files',
+    'wf_required_sections': 'Required Sections',
+    'wf_required_sections_placeholder': 'Adapted copy, adaptation notes, self-check',
+    'wf_advanced': 'Advanced',
+    'wf_prompt': 'Prompt',
+    'wf_prompt_placeholder': 'Describe this step...',
+    'wf_working_dir': 'Working Directory',
+    'wf_output_dir': 'Output Directory',
+    'wf_pause_before_step': 'Pause before this step and require manual approval',
+    'wf_depends_on_label': 'Depends on',
+    'wf_input_prefix': 'Input for this run:',
+    'wf_pipeline_name_required': 'Pipeline name is required',
+    'wf_template_saved': 'Template saved',
+    'wf_template_deleted': 'Template deleted',
+    'wf_confirm_rerun_title': 'Rerun Step',
+    'wf_confirm_rerun_message': 'Rerun {title}? Artifacts after this step will be reset.',
+    'wf_confirm_rerun_current': 'current step',
+    'wf_confirm_rerun_confirm': 'Rerun',
+    'wf_speech_failed': 'Speech recognition failed: {error}',
+    'wf_insert_message_title': 'Insert Message: {title}',
+    'wf_current_step': 'current step',
+    'wf_message_content': 'Message content',
+    'wf_message_placeholder': 'Add instructions or change requests for this step...',
+    'wf_message_hint': 'Submitting writes a human message to this step and resumes it; downstream steps reset by dependency.',
+    'wf_send': 'Send',
+    'wf_manual_title': 'Backfill Images from Main Process: {title}',
+    'wf_local_paths': 'Local file paths',
+    'wf_manual_hint': 'After Codex main process generates images and saves them locally, paste paths here; submit validates the files, marks this step complete, and activates downstream steps.',
+    'wf_result_summary': 'Result summary',
+    'wf_result_summary_placeholder': 'Example: Codex main process generated storyboard and character turnaround images',
+    'wf_manual_submit': 'Backfill and complete this step',
+    'wf_request_changes_title': 'Request Upstream Artifact Changes',
+    'wf_target_step': 'Step to change',
+    'wf_request_changes_hint': 'You can roll back and edit any artifact before the current step; the current version is saved before submitting.',
+    'wf_change_request': 'Change request',
+    'wf_change_placeholder': 'Explain what failed and what you want changed...',
+    'wf_submit_changes': 'Submit changes',
+    'wf_confirm_delete_title': 'Delete Workflow',
+    'wf_confirm_delete_message': 'Delete this workflow permanently?',
+    'wf_confirm_delete_confirm': 'Delete',
+    'wf_node_video_parse': 'Parse video',
+    'wf_node_copy_adapt': 'Adapt copy',
+    'wf_node_storyboard_script': 'Generate storyboard script',
+    'wf_node_image_generate': 'Generate visual assets',
+    'wf_node_video_command': 'Prepare video command',
+    'wf_node_video_generate': 'Generate video',
+    'wf_node_human_review': 'Human review',
+    'wf_node_custom': 'Custom',
+    'wf_sections_video_parse': 'video copy/transcript, topic brief, reusable structure',
+    'wf_sections_copy_adapt': 'source input, adapted copy, adaptation notes, self-check',
+    'wf_sections_storyboard_script': 'storyboard',
+    'wf_sections_video_command': 'commands, input files, output path',
+
+    // Ops panel
+    'ops_intro': 'I can check platform issues, explain why tasks are stuck, and suggest fixes.',
+    'ops_title': 'Platform Steward',
+    'ops_global_check': 'Global check',
+    'ops_current_page_check': 'Check current page',
+    'ops_global_question': 'What is wrong with the platform right now?',
+    'ops_user_role': 'You',
+    'ops_diagnosing': 'Diagnosing...',
+    'ops_placeholder': 'Ask: why is this task stuck?',
+    'ops_send': 'Send',
+    'ops_current_target_question': 'Check whether the current {kind} has issues',
+    'ops_current_page_question': 'Check whether the current page has issues: {title}',
+    'ops_current_page': 'current page',
+    'ops_diagnose_failed': 'Diagnosis failed: {message}',
+    'ops_answer_source': 'Answered by {source}',
+    'ops_done': 'Diagnosis complete.',
+    'ops_critical': 'Critical: {count}',
+    'ops_warning': 'Warnings: {count}',
+    'ops_info': 'Info: {count}',
+    'ops_priority': 'Priority fixes:',
+    'ops_issue_target': '({kind} {id})',
+    'ops_recommendation': 'Recommendation: {text}',
+    'ops_llm_missing': 'LLM unavailable: {error}',
+    'ops_confirm_execute': '{label}\n\n{description}\n\nConfirm execution?',
+    'ops_action_failed': 'Action failed: {message}',
+    'ops_action_task_done': 'Executed {action}, Task: {id}',
+    'ops_action_session_done': 'Executed {action}, Session: {id}',
+    'ops_action_workflow_done': 'Executed {action}, Workflow: {id}',
+    'ops_action_done': 'Executed {action}.',
+
     // FormatTime relative labels
     'time.justNow': 'just now',
     'time.minAgo': '{n} min ago',
@@ -724,7 +914,7 @@ const MESSAGES = {
     'sessions.delete': '删除',
 
     // Tasks
-    'task_title': 'Tasks',
+    'task_title': '任务',
     'task_new': '+ 新建任务',
     'task_stat_running': '运行中的任务',
     'task_stat_running_sub': '正在运行',
@@ -740,6 +930,7 @@ const MESSAGES = {
     'task_load_more': '加载更多任务',
     'task_loading': '加载中…',
     'task_not_found': '任务未找到',
+    'task_untitled': '未命名任务',
     'task_back': '← 返回',
     'task_ask_ops': 'Ask Ops',
     'task_stop': '■ 停止',
@@ -943,6 +1134,195 @@ const MESSAGES = {
     'newSession.approveMode': '审批模式',
     'newSession.back': '返回',
     'newSession.create': '创建',
+
+    // Workflows
+    'wf_title': 'Workflows',
+    'wf_new': '+ 新建工作流',
+    'wf_recent': '最近工作流',
+    'wf_empty': '暂无工作流。创建第一个工作流吧！',
+    'wf_untitled': '未命名工作流',
+    'wf_steps': '{count} 步',
+    'wf_created': '创建于 {time}',
+    'wf_loading': '加载中…',
+    'wf_load_more': '加载更多工作流',
+    'wf_not_found': '工作流未找到',
+    'wf_back': '← 返回',
+    'wf_ask_ops': 'Ask Ops',
+    'wf_pause': '⏸ 暂停',
+    'wf_resume': '▶ 恢复',
+    'wf_delete': '删除',
+    'wf_status_pending': '待开始',
+    'wf_status_active': '进行中',
+    'wf_status_paused': '已暂停',
+    'wf_status_done': '已完成',
+    'wf_status_error': '错误',
+    'wf_status_stopped': '已停止',
+    'wf_step': 'Step {number}',
+    'wf_step_title': 'Step {number}：{title}',
+    'wf_rounds': '{current}{max} 轮',
+    'wf_rounds_max': ' / {max}',
+    'wf_depends_on': '依赖 Step {steps}',
+    'wf_last_output': '最后输出：{status}',
+    'wf_approve_save': '✓ 通过，确认保存',
+    'wf_execute_step': '✓ 执行 Step {number}',
+    'wf_rerun_step': '↻ 重跑本步骤',
+    'wf_manual_artifacts': '◎ 主进程补图回填',
+    'wf_request_changes': '✎ 要求修改上游产物',
+    'wf_output': 'OUTPUT',
+    'wf_versions': 'Versions {count}',
+    'wf_copy': 'Copy',
+    'wf_generated_files': 'Generated Files [{count}]',
+    'wf_hide_conversation': '▾ Hide Conversation',
+    'wf_view_conversation': '▸ View Full Conversation',
+    'wf_live_status_busy': 'AI 正在处理...',
+    'wf_live_status_ready': '可以继续反馈',
+    'wf_live_status_modifying': 'AI 正在修改...',
+    'wf_live_title': '围绕当前产物连续修改',
+    'wf_live_draft': '当前草稿',
+    'wf_history_count': '{count} 个历史版本',
+    'wf_live_empty_output': '本步骤还没有可审阅的输出。',
+    'wf_live_empty_thread': '说出你希望修改的地方，AI 会更新当前草稿。',
+    'wf_live_placeholder': '例如：开头再快一点，第三句换成更生活化的表达...',
+    'wf_speech_unsupported': '当前浏览器不支持语音识别',
+    'wf_voice_input': '语音输入',
+    'wf_send_modify': '发送并修改',
+    'wf_live_footer': '每次发送前会自动保存当前版本；后续步骤会在产物变化后重置。',
+    'wf_end_review': '结束审阅',
+    'wf_approve_current': '通过当前版本',
+    'wf_execute_current': '执行当前步骤',
+    'wf_terminal_copy': 'COPY',
+    'wf_generated_files_upper': 'GENERATED_FILES',
+    'wf_content_upper': 'CONTENT',
+    'wf_file_role_file': '文件',
+    'wf_file_role_storyboard': '故事板分镜图',
+    'wf_file_role_character': '角色参考图',
+    'wf_file_role_prompt': '生成提示词',
+    'wf_file_role_script': '拍摄脚本',
+    'wf_file_role_reference': '参考素材',
+    'wf_file_role_command': '视频生成命令',
+    'wf_file_role_image': '图片素材',
+    'wf_file_role_video': '视频文件',
+    'wf_file_role_text': '文本文件',
+    'wf_file_missing': '文件不存在',
+    'wf_file_checking': '正在检查',
+    'wf_copied': '已复制',
+    'wf_copy_failed': '复制失败',
+    'wf_versions_title': '版本记录',
+    'wf_versions_empty': '暂无版本记录',
+    'wf_referenced_files': 'Referenced Files [{count}]',
+    'wf_no_messages': 'No messages yet',
+    'wf_turn': 'Turn {round}',
+    'wf_timeline': 'Timeline',
+    'wf_timeline_created': 'Created',
+    'wf_timeline_updated': 'Updated',
+    'wf_modal_title': 'New Workflow',
+    'wf_modal_desc': 'Create a multi-step agent pipeline.',
+    'wf_modal_close': 'Close',
+    'wf_modal_no_agents': 'No API assistants configured yet.',
+    'wf_modal_add_one': 'Add one first',
+    'wf_template': 'Template',
+    'wf_custom_workflow': 'Custom workflow',
+    'wf_template_mine': 'mine',
+    'wf_pipeline_name': 'Pipeline name',
+    'wf_pipeline_placeholder': 'Release workflow',
+    'wf_input': 'Workflow input',
+    'wf_input_placeholder': 'Paste the reference video notes, source copy, or brief for this run...',
+    'wf_start_from_step': 'Start from step',
+    'wf_start_from_step_hint': 'Steps before this number are kept in the workflow and marked as manually completed.',
+    'wf_steps_title': 'Steps',
+    'wf_add_step': '+ Add Step',
+    'wf_cancel': 'Cancel',
+    'wf_save_template': 'Save as Template',
+    'wf_delete_template': 'Delete Template',
+    'wf_create': 'Create',
+    'wf_remove': 'Remove',
+    'wf_step_name': 'Step name',
+    'wf_step_name_placeholder': '改编文案',
+    'wf_node_type': 'Node Type',
+    'wf_primary_agent': 'Primary Agent',
+    'wf_inputs': 'Inputs',
+    'wf_output_files': 'Output Files',
+    'wf_required_sections': 'Required Sections',
+    'wf_required_sections_placeholder': '改编文案, 改编说明, 自检',
+    'wf_advanced': 'Advanced',
+    'wf_prompt': 'Prompt',
+    'wf_prompt_placeholder': 'Describe this step...',
+    'wf_working_dir': 'Working Directory',
+    'wf_output_dir': 'Output Directory',
+    'wf_pause_before_step': 'Pause before this step and require manual approval',
+    'wf_depends_on_label': 'Depends on',
+    'wf_input_prefix': '本次输入：',
+    'wf_pipeline_name_required': 'Pipeline name is required',
+    'wf_template_saved': 'Template saved',
+    'wf_template_deleted': 'Template deleted',
+    'wf_confirm_rerun_title': '重跑步骤',
+    'wf_confirm_rerun_message': '重跑 {title}？该步骤之后的产物会被重置。',
+    'wf_confirm_rerun_current': '当前步骤',
+    'wf_confirm_rerun_confirm': '重跑',
+    'wf_speech_failed': '语音识别失败：{error}',
+    'wf_insert_message_title': '插入对话：{title}',
+    'wf_current_step': '当前步骤',
+    'wf_message_content': '消息内容',
+    'wf_message_placeholder': '给这个步骤补充指令或修改意见...',
+    'wf_message_hint': '提交后会写入该步骤的人类对话，并触发该步骤继续执行；其后续步骤会按依赖重置。',
+    'wf_send': '发送',
+    'wf_manual_title': '主进程补图回填：{title}',
+    'wf_local_paths': '本地文件路径',
+    'wf_manual_hint': '在 Codex 主进程生图并保存到本地后，把图片路径粘贴到这里；提交后会校验文件存在、标记本步骤完成，并自动激活下游步骤。',
+    'wf_result_summary': '结果说明',
+    'wf_result_summary_placeholder': '例如：已由 Codex 主进程生成分镜图和角色三视图',
+    'wf_manual_submit': '回填并完成本步骤',
+    'wf_request_changes_title': '要求修改上游产物',
+    'wf_target_step': '要修改哪一步',
+    'wf_request_changes_hint': '可回退并修改当前步骤之前的任意产物；提交前会自动保存该步骤当前版本。',
+    'wf_change_request': '修改意见',
+    'wf_change_placeholder': '说明哪里不过、希望怎么改...',
+    'wf_submit_changes': '提交修改',
+    'wf_confirm_delete_title': 'Delete Workflow',
+    'wf_confirm_delete_message': 'Delete this workflow permanently?',
+    'wf_confirm_delete_confirm': 'Delete',
+    'wf_node_video_parse': '解析视频',
+    'wf_node_copy_adapt': '改编文案',
+    'wf_node_storyboard_script': '生成分镜脚本',
+    'wf_node_image_generate': '生成视觉资产',
+    'wf_node_video_command': '准备视频命令',
+    'wf_node_video_generate': '生成视频',
+    'wf_node_human_review': '人工审核',
+    'wf_node_custom': '自定义',
+    'wf_sections_video_parse': '视频文案/台词,选题 brief,可复用结构',
+    'wf_sections_copy_adapt': '输入来源,改编文案,改编说明,自检',
+    'wf_sections_storyboard_script': '分镜',
+    'wf_sections_video_command': '命令,输入文件,输出路径',
+
+    // Ops panel
+    'ops_intro': '我可以检查平台异常、解释任务卡住原因，并给出修复建议。',
+    'ops_title': '平台管家',
+    'ops_global_check': '全局检查',
+    'ops_current_page_check': '检查当前页',
+    'ops_global_question': '现在平台有什么异常？',
+    'ops_user_role': '你',
+    'ops_diagnosing': '诊断中...',
+    'ops_placeholder': '问：为什么这个任务卡住？',
+    'ops_send': '发送',
+    'ops_current_target_question': '检查当前 {kind} 是否异常',
+    'ops_current_page_question': '检查当前页面是否有异常：{title}',
+    'ops_current_page': '当前页面',
+    'ops_diagnose_failed': '诊断失败：{message}',
+    'ops_answer_source': '由 {source} 回答',
+    'ops_done': '诊断完成。',
+    'ops_critical': '严重：{count}',
+    'ops_warning': '警告：{count}',
+    'ops_info': '提示：{count}',
+    'ops_priority': '优先处理：',
+    'ops_issue_target': '（{kind} {id}）',
+    'ops_recommendation': '建议：{text}',
+    'ops_llm_missing': 'LLM 未接入：{error}',
+    'ops_confirm_execute': '{label}\n\n{description}\n\n确认执行？',
+    'ops_action_failed': '动作失败：{message}',
+    'ops_action_task_done': '已执行 {action}，Task：{id}',
+    'ops_action_session_done': '已执行 {action}，Session：{id}',
+    'ops_action_workflow_done': '已执行 {action}，Workflow：{id}',
+    'ops_action_done': '已执行 {action}。',
 
     // FormatTime relative labels
     'time.justNow': '刚刚',
@@ -1408,7 +1788,7 @@ function renderOpsWidget() {
   const alignY = pos.y < 360 ? 'drop-down' : 'drop-up'
   const messages = state.opsMessages.length
     ? state.opsMessages
-    : [{ from: 'ops', content: '我可以检查平台异常、解释任务卡住原因，并给出修复建议。' }]
+    : [{ from: 'ops', content: t('ops_intro') }]
   return `
     <div class="ops-widget ${open ? 'open' : ''} ${alignX} ${alignY}" id="ops-widget" style="--ops-x: ${pos.x}px; --ops-y: ${pos.y}px;">
       <button class="ops-fab" onpointerdown="window.beginOpsDrag(event)" title="Turing Ops">
@@ -1430,27 +1810,27 @@ function renderOpsWidget() {
         <div class="ops-header">
           <div>
             <div class="ops-kicker">TURING OPS</div>
-            <h3>平台管家</h3>
+            <h3>${t('ops_title')}</h3>
           </div>
           <button class="icon-btn" onclick="window.toggleOps()">×</button>
         </div>
         <div class="ops-quick-actions">
-          <button onclick="window.askOps('现在平台有什么异常？')">全局检查</button>
-          <button onclick="window.askOpsForCurrent()">检查当前页</button>
+          <button onclick="window.askOps(${jsString(t('ops_global_question'))})">${t('ops_global_check')}</button>
+          <button onclick="window.askOpsForCurrent()">${t('ops_current_page_check')}</button>
         </div>
         <div class="ops-thread" id="ops-thread">
           ${messages.map(message => `
           <div class="ops-message ${message.from === 'user' ? 'user' : 'ops'}">
-            <div class="ops-message-role">${message.from === 'user' ? '你' : 'Ops'}</div>
+            <div class="ops-message-role">${message.from === 'user' ? t('ops_user_role') : 'Ops'}</div>
             <div class="ops-message-body">${renderMarkdownCached(message.content || '')}</div>
             ${renderOpsMessageActions(message)}
           </div>
         `).join('')}
-          ${state.opsBusy ? '<div class="ops-message ops"><div class="ops-message-role">Ops</div><div class="ops-message-body">诊断中...</div></div>' : ''}
+          ${state.opsBusy ? `<div class="ops-message ops"><div class="ops-message-role">Ops</div><div class="ops-message-body">${t('ops_diagnosing')}</div></div>` : ''}
         </div>
         <form class="ops-composer" onsubmit="window.submitOpsQuestion(event)">
-          <textarea id="ops-input" rows="2" placeholder="问：为什么这个任务卡住？"></textarea>
-          <button class="btn btn-primary btn-sm" type="submit" ${state.opsBusy ? 'disabled' : ''}>发送</button>
+          <textarea id="ops-input" rows="2" placeholder="${escapeAttr(t('ops_placeholder'))}"></textarea>
+          <button class="btn btn-primary btn-sm" type="submit" ${state.opsBusy ? 'disabled' : ''}>${t('ops_send')}</button>
         </form>
       </section>
     </div>
@@ -2572,10 +2952,10 @@ function renderWorkflows() {
       <div class="main">
         <header class="topbar">
           <div class="topbar-left">
-            <h2>Workflows</h2>
+            <h2>${t('wf_title')}</h2>
           </div>
           <div class="topbar-right">
-            <button class="btn btn-primary btn-sm" onclick="window.showNewWorkflowModal()">+ New Workflow</button>
+            <button class="btn btn-primary btn-sm" onclick="window.showNewWorkflowModal()">${t('wf_new')}</button>
             <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
             ${renderUserMenu()}
           </div>
@@ -2583,7 +2963,7 @@ function renderWorkflows() {
 
         <div class="content">
           <div class="flex-between mb-24">
-            <h3>Recent Workflows</h3>
+            <h3>${t('wf_recent')}</h3>
           </div>
           <div id="pipeline-cards" class="session-cards workflow-cards"></div>
         </div>
@@ -2861,20 +3241,20 @@ function renderPipelineCards() {
   if (!container) return
 
   if (state.pipelines.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No workflows yet. Create your first one!</p>'
+    container.innerHTML = `<p style="color: var(--text-muted); text-align: center; padding: 40px;">${t('wf_empty')}</p>`
     return
   }
 
   const cards = state.pipelines.map(pipeline => `
     <a href="/workflow/${pipeline.id}" class="card session-card workflow-card">
       <div class="session-card-header">
-        <span class="session-card-title">${escapeHtml(pipeline.name || 'Untitled workflow')}</span>
-        <span class="badge badge-${pipeline.status}">${escapeHtml(pipeline.status)}</span>
+        <span class="session-card-title">${escapeHtml(pipeline.name || t('wf_untitled'))}</span>
+        <span class="badge badge-${pipeline.status}">${escapeHtml(workflowStatusLabel(pipeline.status))}</span>
       </div>
       ${renderStepRail(pipeline.sessions || [])}
       <div class="session-card-meta">
-        <span>${(pipeline.sessions || []).length} steps</span>
-        <span>Created ${formatTime(pipeline.createdAt)}</span>
+        <span>${t('wf_steps', { count: (pipeline.sessions || []).length })}</span>
+        <span>${t('wf_created', { time: formatTime(pipeline.createdAt) })}</span>
       </div>
     </a>
   `).join('')
@@ -2886,7 +3266,7 @@ function renderPipelineCards() {
 
 function loadMoreButtonHtml() {
   const loading = state.pipelineListLoadingMore
-  return `<button class="btn btn-ghost btn-sm" style="width: 100%; justify-content: center;" onclick="window.loadMorePipelines()" ${loading ? 'disabled' : ''}>${loading ? 'Loading…' : 'Load more workflows'}</button>`
+  return `<button class="btn btn-ghost btn-sm" style="width: 100%; justify-content: center;" onclick="window.loadMorePipelines()" ${loading ? 'disabled' : ''}>${loading ? t('wf_loading') : t('wf_load_more')}</button>`
 }
 
 function renderLoadMoreButton() {
@@ -2916,7 +3296,7 @@ async function renderWorkflow(id) {
   } catch (err) {
     if (isAbortedErr(err)) return
     if (state.viewToken !== myToken || state.currentPipelineId !== id) return
-    document.body.innerHTML = '<div>Workflow not found</div>'
+    document.body.innerHTML = `<div>${t('wf_not_found')}</div>`
     return
   }
   // Stale guard: user navigated away before the fetch resolved.
@@ -2935,9 +3315,9 @@ async function renderWorkflow(id) {
       <div class="main">
         <header class="topbar">
           <div class="topbar-left">
-            <a href="/workflows" class="btn btn-ghost btn-sm">← Back</a>
-            <h2 id="workflow-title">${escapeHtml(pipeline.name || 'Untitled workflow')}</h2>
-            <span id="workflow-status-badge" class="badge badge-${pipeline.status}">${escapeHtml(pipeline.status)}</span>
+            <a href="/workflows" class="btn btn-ghost btn-sm">${t('wf_back')}</a>
+            <h2 id="workflow-title">${escapeHtml(pipeline.name || t('wf_untitled'))}</h2>
+            <span id="workflow-status-badge" class="badge badge-${pipeline.status}">${escapeHtml(workflowStatusLabel(pipeline.status))}</span>
           </div>
           <div class="topbar-right" id="workflow-actions">
             ${renderWorkflowActions(pipeline)}
@@ -2962,21 +3342,21 @@ async function renderWorkflow(id) {
 
 function renderWorkflowActions(pipeline) {
   return `
-    <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">Ask Ops</button>
-    ${pipeline.status === 'active' ? '<button class="btn btn-secondary btn-sm" onclick="window.pauseWorkflow()">⏸ Pause</button>' : ''}
-    ${pipeline.status === 'paused' ? '<button class="btn btn-primary btn-sm" onclick="window.resumeWorkflow()">▶ Resume</button>' : ''}
-    <button class="btn btn-ghost btn-sm" onclick="window.deleteCurrentWorkflow()">Delete</button>
+    <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">${t('wf_ask_ops')}</button>
+    ${pipeline.status === 'active' ? `<button class="btn btn-secondary btn-sm" onclick="window.pauseWorkflow()">${t('wf_pause')}</button>` : ''}
+    ${pipeline.status === 'paused' ? `<button class="btn btn-primary btn-sm" onclick="window.resumeWorkflow()">${t('wf_resume')}</button>` : ''}
+    <button class="btn btn-ghost btn-sm" onclick="window.deleteCurrentWorkflow()">${t('wf_delete')}</button>
   `
 }
 
 function renderWorkflowHeader(pipeline) {
   const title = document.getElementById('workflow-title')
-  if (title) title.textContent = pipeline.name || 'Untitled workflow'
+  if (title) title.textContent = pipeline.name || t('wf_untitled')
 
   const badge = document.getElementById('workflow-status-badge')
   if (badge) {
     badge.className = `badge badge-${pipeline.status}`
-    badge.textContent = pipeline.status
+    badge.textContent = workflowStatusLabel(pipeline.status)
   }
 
   const actions = document.getElementById('workflow-actions')
@@ -2988,6 +3368,10 @@ function renderWorkflowHeader(pipeline) {
     `
     updateThemeButton()
   }
+}
+
+function workflowStatusLabel(status) {
+  return t(`wf_status_${status}`) || status
 }
 
 // ── Workflow detail: bounded memoization of per-step render ───────────────────
@@ -3106,7 +3490,7 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
   const errorDetail = status === 'error' ? (session?.errorMessage || step.errorMessage || '') : ''
   const isLast = index === totalSteps - 1
 
-  const waitingForHumanApproval = /等待人工(?:确认|审核|回复|输入)|请回复[“"'` ]*(?:OK|通过|确认保存)/i.test(cleaned)
+  const waitingForHumanApproval = /\u7b49\u5f85\u4eba\u5de5(?:\u786e\u8ba4|\u5ba1\u6838|\u56de\u590d|\u8f93\u5165)|\u8bf7\u56de\u590d[\u201c"'` ]*(?:OK|\u901a\u8fc7|\u786e\u8ba4\u4fdd\u5b58)/i.test(cleaned)
   const files = session ? workflowSessionArtifactFiles(session, cleaned, step) : cleaned ? workflowArtifactFiles(cleaned) : []
   const liveReviewOpen = state.liveReviewStep === step.sessionId
 
@@ -3123,16 +3507,16 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
         <div class="step-header">
           <div class="step-header-main">
             <h3 class="step-title">${escapeHtml(title)}</h3>
-            <span class="step-badge status-${status}">${escapeHtml(status)}</span>
+            <span class="step-badge status-${status}">${escapeHtml(workflowStatusLabel(status))}</span>
           </div>
           <div class="step-meta">
             <span class="meta-item">
               <span class="meta-icon">#</span>
-              Step ${index + 1}: ${escapeHtml(title)}
+              ${escapeHtml(t('wf_step_title', { number: index + 1, title }))}
             </span>
             <span class="meta-item">
               <span class="meta-icon">🔄</span>
-              ${currentRound}${maxRounds ? ` / ${maxRounds}` : ''} rounds
+              ${t('wf_rounds', { current: currentRound, max: maxRounds ? t('wf_rounds_max', { max: maxRounds }) : '' })}
             </span>
             <span class="meta-item ${session?.permissionMode === 'trusted' ? 'permission-trusted' : ''}">
               <span class="meta-icon">⚠</span>
@@ -3141,7 +3525,7 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
             ${step.nodeType ? `
               <span class="meta-item">
                 <span class="meta-icon">◆</span>
-                ${escapeHtml(WORKFLOW_NODE_TYPES[step.nodeType]?.label || step.nodeType)}
+                ${escapeHtml(workflowNodeTypeLabel(step.nodeType))}
               </span>
             ` : ''}
             ${step.contract?.outputs?.length ? `
@@ -3153,7 +3537,7 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
             ${dependsOn.length ? `
               <span class="meta-item">
                 <span class="meta-icon">⛓</span>
-                Depends on Step ${dependsOn.map(id => stepIndexBySessionId(id) + 1).join(', ')}
+                ${escapeHtml(t('wf_depends_on', { steps: dependsOn.map(id => stepIndexBySessionId(id) + 1).join(', ') }))}
               </span>
             ` : ''}
           </div>
@@ -3170,16 +3554,16 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
           <div class="step-error-status">
             <div class="step-error-title">⚠ ${escapeHtml(errorTitle)}</div>
             <div class="step-error-detail">${escapeHtml(errorDetail)}</div>
-            ${session?.lastAgentOutput ? `<div class="step-error-last-output">最后输出：${escapeHtml(summarizeRawStatus(session.lastAgentOutput))}</div>` : ''}
+            ${session?.lastAgentOutput ? `<div class="step-error-last-output">${escapeHtml(t('wf_last_output', { status: summarizeRawStatus(session.lastAgentOutput) }))}</div>` : ''}
           </div>
         ` : ''}
 
         ${canResumeStep || canRequestChanges || step.sessionId ? `
           <div class="step-actions">
-            ${canResumeStep ? `<button class="action-btn primary" onclick='window.approveWorkflowStep(${jsString(step.sessionId)}, ${waitingForHumanApproval})'>${waitingForHumanApproval ? '✓ 通过，确认保存' : `✓ 执行 Step ${index + 1}`}</button>` : ''}
-            <button class="action-btn secondary" onclick='window.rerunWorkflowStep(${jsString(step.sessionId)}, ${jsString(`Step ${index + 1}：${title}`)})'>↻ 重跑本步骤</button>
-            ${canManualArtifacts ? `<button class="action-btn secondary" onclick='window.openManualArtifactsModal(${jsString(step.sessionId)}, ${jsString(`Step ${index + 1}：${title}`)})'>◎ 主进程补图回填</button>` : ''}
-            ${canRequestChanges ? `<button class="action-btn secondary" onclick='window.requestWorkflowStepChanges(${jsString(step.sessionId)}, ${jsString(`Step ${index + 1}`)})'>✎ 要求修改上游产物</button>` : ''}
+            ${canResumeStep ? `<button class="action-btn primary" onclick='window.approveWorkflowStep(${jsString(step.sessionId)}, ${waitingForHumanApproval})'>${waitingForHumanApproval ? t('wf_approve_save') : t('wf_execute_step', { number: index + 1 })}</button>` : ''}
+            <button class="action-btn secondary" onclick='window.rerunWorkflowStep(${jsString(step.sessionId)}, ${jsString(t('wf_step_title', { number: index + 1, title }))})'>${t('wf_rerun_step')}</button>
+            ${canManualArtifacts ? `<button class="action-btn secondary" onclick='window.openManualArtifactsModal(${jsString(step.sessionId)}, ${jsString(t('wf_step_title', { number: index + 1, title }))})'>${t('wf_manual_artifacts')}</button>` : ''}
+            ${canRequestChanges ? `<button class="action-btn secondary" onclick='window.requestWorkflowStepChanges(${jsString(step.sessionId)}, ${jsString(t('wf_step', { number: index + 1 }))})'>${t('wf_request_changes')}</button>` : ''}
             <button class="action-btn live-review-trigger ${liveReviewOpen ? 'active' : ''}" onclick='window.toggleWorkflowLiveReview(${jsString(step.sessionId)})'>◉ Live Review</button>
           </div>
         ` : ''}
@@ -3191,19 +3575,19 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
             <div class="output-header">
               <span class="output-label">
                 <span class="output-icon">▸</span>
-                OUTPUT
+                ${t('wf_output')}
               </span>
               <div class="output-actions">
-                ${session?.versions?.length ? `<button class="output-copy" onclick='window.showWorkflowStepVersions(${jsString(session.id)})'>Versions ${session.versions.length}</button>` : ''}
+                ${session?.versions?.length ? `<button class="output-copy" onclick='window.showWorkflowStepVersions(${jsString(session.id)})'>${t('wf_versions', { count: session.versions.length })}</button>` : ''}
                 <button class="output-copy" onclick='window.copyWorkflowStepArtifact(${jsString(cleaned)})'>
-                  <span>⎘</span> Copy
+                  <span>⎘</span> ${t('wf_copy')}
                 </button>
               </div>
             </div>
 
             ${files.length ? `
               <div class="output-files">
-                <div class="files-label">Generated Files [${files.length}]</div>
+                <div class="files-label">${t('wf_generated_files', { count: files.length })}</div>
                 <div class="files-list">
                   ${files.map((file, idx) => renderWorkflowFileItem(file, session?.cwd || '', idx === files.length - 1 ? '└─' : '├─')).join('')}
                 </div>
@@ -3219,13 +3603,13 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
         ${expanded ? `
           <div class="step-messages">
             <button class="messages-toggle" onclick='window.toggleWorkflowStep(${jsString(step.sessionId)})'>
-              ▾ Hide Conversation
+              ${t('wf_hide_conversation')}
             </button>
             ${renderWorkflowStepMessages(session)}
           </div>
         ` : `
           <button class="messages-toggle collapsed" onclick='window.toggleWorkflowStep(${jsString(step.sessionId)})'>
-            ▸ View Full Conversation
+            ${t('wf_view_conversation')}
           </button>
         `}
       </div>
@@ -3243,7 +3627,7 @@ function renderWorkflowLiveReview(step, session, index, currentOutput, waitingFo
   const pending = state.liveReviewPending.has(sessionId)
   const busy = pending || session?.status === 'active'
   const stream = state.streamDeltas.get(sessionId)?.content || ''
-  const status = state.streamStatus.get(sessionId) || (busy ? 'AI 正在处理...' : '可以继续反馈')
+  const status = state.streamStatus.get(sessionId) || (busy ? t('wf_live_status_busy') : t('wf_live_status_ready'))
   const speechSupported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition)
 
   return `
@@ -3251,7 +3635,7 @@ function renderWorkflowLiveReview(step, session, index, currentOutput, waitingFo
       <div class="live-review-head">
         <div>
           <div class="live-review-kicker">LIVE REVIEW · STEP ${index + 1}</div>
-          <h4>围绕当前产物连续修改</h4>
+          <h4>${t('wf_live_title')}</h4>
         </div>
         <div class="live-review-status ${busy ? 'busy' : ''}">
           <span class="live-review-status-dot"></span>
@@ -3262,13 +3646,13 @@ function renderWorkflowLiveReview(step, session, index, currentOutput, waitingFo
       <div class="live-review-grid">
         <div class="live-review-draft">
           <div class="live-review-section-head">
-            <span>当前草稿${artifact?.path ? ` · ${escapeHtml(workflowFileName(artifact.path))}` : ''}</span>
-            ${session?.versions?.length ? `<button type="button" onclick='window.showWorkflowStepVersions(${jsString(sessionId)})'>${session.versions.length} 个历史版本</button>` : ''}
+            <span>${t('wf_live_draft')}${artifact?.path ? ` · ${escapeHtml(workflowFileName(artifact.path))}` : ''}</span>
+            ${session?.versions?.length ? `<button type="button" onclick='window.showWorkflowStepVersions(${jsString(sessionId)})'>${t('wf_history_count', { count: session.versions.length })}</button>` : ''}
           </div>
           <div class="live-review-draft-body" data-live-review-output="${escapeAttr(sessionId)}">
             ${reviewContent
               ? renderWorkflowMarkdown(reviewContent, session?.cwd || '')
-              : '<p class="live-review-empty">本步骤还没有可审阅的输出。</p>'}
+              : `<p class="live-review-empty">${t('wf_live_empty_output')}</p>`}
           </div>
         </div>
 
@@ -3276,10 +3660,10 @@ function renderWorkflowLiveReview(step, session, index, currentOutput, waitingFo
           <div class="live-review-thread">
             ${reviewMessages.length ? reviewMessages.map(message => `
               <div class="live-review-message ${message.from === 'human' ? 'human' : 'agent'}">
-                <div class="live-review-message-label">${message.from === 'human' ? '你' : escapeHtml(message.from || 'AI')}</div>
+                <div class="live-review-message-label">${message.from === 'human' ? t('ops_user_role') : escapeHtml(message.from || 'AI')}</div>
                 <div class="live-review-message-body">${renderWorkflowMarkdown(message.content || '', session?.cwd || '')}</div>
               </div>
-            `).join('') : '<p class="live-review-empty">说出你希望修改的地方，AI 会更新当前草稿。</p>'}
+            `).join('') : `<p class="live-review-empty">${t('wf_live_empty_thread')}</p>`}
             <div class="live-review-stream ${stream ? 'visible' : ''}" data-live-review-stream="${escapeAttr(sessionId)}">${escapeHtml(stream)}</div>
           </div>
 
@@ -3287,7 +3671,7 @@ function renderWorkflowLiveReview(step, session, index, currentOutput, waitingFo
             <textarea
               class="live-review-input"
               rows="3"
-              placeholder="例如：开头再快一点，第三句换成更生活化的表达..."
+              placeholder="${escapeAttr(t('wf_live_placeholder'))}"
               oninput='window.updateWorkflowLiveReviewDraft(${jsString(sessionId)}, this.value)'
               onkeydown='window.handleWorkflowLiveReviewKeydown(event, ${jsString(sessionId)})'
             >${escapeHtml(draft)}</textarea>
@@ -3296,22 +3680,22 @@ function renderWorkflowLiveReview(step, session, index, currentOutput, waitingFo
                 type="button"
                 class="live-review-voice"
                 onclick='window.toggleWorkflowVoice(${jsString(sessionId)})'
-                ${speechSupported ? '' : 'disabled title="当前浏览器不支持语音识别"'}
+                ${speechSupported ? '' : `disabled title="${escapeAttr(t('wf_speech_unsupported'))}"`}
               >
                 <span data-live-review-mic="${escapeAttr(sessionId)}">●</span>
-                语音输入
+                ${t('wf_voice_input')}
               </button>
-              <button type="submit" class="action-btn primary" ${pending ? 'disabled' : ''}>发送并修改</button>
+              <button type="submit" class="action-btn primary" ${pending ? 'disabled' : ''}>${t('wf_send_modify')}</button>
             </div>
           </form>
         </div>
       </div>
 
       <div class="live-review-footer">
-        <span>每次发送前会自动保存当前版本；后续步骤会在产物变化后重置。</span>
+        <span>${t('wf_live_footer')}</span>
         <div>
-          <button type="button" class="action-btn secondary" onclick="window.closeWorkflowLiveReview()">结束审阅</button>
-          ${canResumeStep ? `<button type="button" class="action-btn primary" onclick='window.approveWorkflowStep(${jsString(sessionId)}, ${waitingForHumanApproval})'>${waitingForHumanApproval ? '通过当前版本' : '执行当前步骤'}</button>` : ''}
+          <button type="button" class="action-btn secondary" onclick="window.closeWorkflowLiveReview()">${t('wf_end_review')}</button>
+          ${canResumeStep ? `<button type="button" class="action-btn primary" onclick='window.approveWorkflowStep(${jsString(sessionId)}, ${waitingForHumanApproval})'>${waitingForHumanApproval ? t('wf_approve_current') : t('wf_execute_current')}</button>` : ''}
         </div>
       </div>
     </section>
@@ -3322,7 +3706,7 @@ function updateWorkflowLiveReviewStream(sessionId) {
   const status = document.querySelector(`[data-live-review-status="${CSS.escape(sessionId)}"]`)
   const stream = document.querySelector(`[data-live-review-stream="${CSS.escape(sessionId)}"]`)
   const content = state.streamDeltas.get(sessionId)?.content || ''
-  if (status) status.textContent = state.streamStatus.get(sessionId) || 'AI 正在修改...'
+  if (status) status.textContent = state.streamStatus.get(sessionId) || t('wf_live_status_modifying')
   if (stream) {
     stream.textContent = content
     stream.classList.toggle('visible', Boolean(content))
@@ -3347,19 +3731,19 @@ function renderWorkflowStepArtifact(session) {
       <div class="artifact-terminal-header">
         <div class="terminal-status">
           <span class="status-dot"></span>
-          <span class="status-text">OUTPUT</span>
+          <span class="status-text">${t('wf_output')}</span>
           <span class="status-time">${timestamp}</span>
         </div>
         <button class="terminal-action" onclick='window.copyWorkflowStepArtifact(${jsString(cleaned)})'>
           <span class="action-icon">⎘</span>
-          <span class="action-label">COPY</span>
+          <span class="action-label">${t('wf_terminal_copy')}</span>
         </button>
       </div>
       ${files.length ? `
         <div class="artifact-files-panel">
           <div class="files-panel-header">
             <span class="panel-indicator">▸</span>
-            <span class="panel-title">GENERATED_FILES</span>
+            <span class="panel-title">${t('wf_generated_files_upper')}</span>
             <span class="panel-count">[${files.length}]</span>
           </div>
           <div class="files-tree">
@@ -3370,7 +3754,7 @@ function renderWorkflowStepArtifact(session) {
       <div class="artifact-content-panel">
         <div class="content-panel-header">
           <span class="panel-indicator">▸</span>
-          <span class="panel-title">CONTENT</span>
+          <span class="panel-title">${t('wf_content_upper')}</span>
         </div>
         <div class="content-display">${renderWorkflowMarkdown(cleaned, session?.cwd || '')}</div>
       </div>
@@ -3389,8 +3773,8 @@ function extractWorkflowArtifactFiles(content) {
   const fileExtensionPattern = new RegExp('\\.(' + extensions + ')$', 'i')
   const patterns = [
     new RegExp('`([^`]+\\.(' + extensions + '))`', 'gi'),
-    new RegExp('(^|[\\s(（"\\\',])(/[^\\s`\'"<>，。；：；、)）,=\\\\]+?\\.(' + extensions + '))(?=$|[\\s`\'"<>，。；：；、)）,=\\\\])', 'gim'),
-    new RegExp('(^|[\\s(（"\\\'])([\\w.\\-/\\u4e00-\\u9fa5]+/[^\\s`\'"<>，。；：；、)）]+\\.(' + extensions + '))(?=$|[\\s`\'"<>，。；：；、)）])', 'gim'),
+    new RegExp('(^|[\\s(\\uFF08"\\\',])(/[^\\s`\'"<>\\uFF0C\\u3002\\uFF1B\\uFF1A\\uFF1B\\u3001)\\uFF09,=\\\\]+?\\.(' + extensions + '))(?=$|[\\s`\'"<>\\uFF0C\\u3002\\uFF1B\\uFF1A\\uFF1B\\u3001)\\uFF09,=\\\\])', 'gim'),
+    new RegExp('(^|[\\s(\\uFF08"\\\'])([\\w.\\-/\\u4e00-\\u9fa5]+/[^\\s`\'"<>\\uFF0C\\u3002\\uFF1B\\uFF1A\\uFF1B\\u3001)\\uFF09]+\\.(' + extensions + '))(?=$|[\\s`\'"<>\\uFF0C\\u3002\\uFF1B\\uFF1A\\uFF1B\\u3001)\\uFF09])', 'gim'),
   ]
   for (const pattern of patterns) {
     for (const match of content.matchAll(pattern)) {
@@ -3399,7 +3783,7 @@ function extractWorkflowArtifactFiles(content) {
     }
   }
   const directories = []
-  for (const match of String(content || '').matchAll(/(?:目录|路径|文件夹|输出目录|保存目录)\s*[：:]\s*`?([^`\n]+\/)`?/gi)) {
+  for (const match of String(content || '').matchAll(/(?:\u76ee\u5f55|\u8def\u5f84|\u6587\u4ef6\u5939|\u8f93\u51fa\u76ee\u5f55|\u4fdd\u5b58\u76ee\u5f55)\s*[\uFF1A:]\s*`?([^`\n]+\/)`?/gi)) {
     const dir = String(match[1] || '').trim()
     if (dir && !/^https?:\/\//i.test(dir)) directories.push(dir)
   }
@@ -3600,16 +3984,16 @@ function workflowFileName(file) {
 function workflowFileMeta(file) {
   const name = workflowFileName(file)
   const ext = (name.match(/\.([^.]+)$/)?.[1] || '').toLowerCase()
-  let role = '文件'
-  if (/storyboard/i.test(name)) role = '故事板分镜图'
-  else if (/三视图|角色|同事|人物/.test(file) && /^(png|jpe?g|webp|gif)$/i.test(ext)) role = '角色参考图'
-  else if (/prompt/i.test(name)) role = '生成提示词'
-  else if (/script/i.test(name)) role = '拍摄脚本'
-  else if (/reference/i.test(name)) role = '参考素材'
-  else if (/commands?|命令/i.test(file)) role = '视频生成命令'
-  else if (/^(png|jpe?g|webp|gif|svg)$/i.test(ext)) role = '图片素材'
-  else if (/^(mp4|mov|webm)$/i.test(ext)) role = '视频文件'
-  else if (/^(md|txt|log|json|ya?ml)$/i.test(ext)) role = '文本文件'
+  let role = t('wf_file_role_file')
+  if (/storyboard/i.test(name)) role = t('wf_file_role_storyboard')
+  else if (/\u4e09\u89c6\u56fe|\u89d2\u8272|\u540c\u4e8b|\u4eba\u7269/.test(file) && /^(png|jpe?g|webp|gif)$/i.test(ext)) role = t('wf_file_role_character')
+  else if (/prompt/i.test(name)) role = t('wf_file_role_prompt')
+  else if (/script/i.test(name)) role = t('wf_file_role_script')
+  else if (/reference/i.test(name)) role = t('wf_file_role_reference')
+  else if (/commands?|\u547d\u4ee4/i.test(file)) role = t('wf_file_role_command')
+  else if (/^(png|jpe?g|webp|gif|svg)$/i.test(ext)) role = t('wf_file_role_image')
+  else if (/^(mp4|mov|webm)$/i.test(ext)) role = t('wf_file_role_video')
+  else if (/^(md|txt|log|json|ya?ml)$/i.test(ext)) role = t('wf_file_role_text')
   return { name, role }
 }
 
@@ -3639,7 +4023,7 @@ function renderWorkflowFileItem(file, cwd, prefix = '├─') {
       <span class="file-tree">${prefix}</span>
       <span class="file-info">
         <span class="file-name">${escapeHtml(meta.name)}</span>
-        <span class="file-role">${escapeHtml(clickable ? meta.role : resolution === 'missing' ? '文件不存在' : '正在检查')}</span>
+        <span class="file-role">${escapeHtml(clickable ? meta.role : resolution === 'missing' ? t('wf_file_missing') : t('wf_file_checking'))}</span>
         <span class="file-location">${escapeHtml(resolvedFile)}</span>
       </span>
       <span class="file-arrow">${clickable ? '→' : '—'}</span>
@@ -3668,7 +4052,7 @@ function sessionTitle(session) {
 
 function taskTitle(task) {
   const firstLine = String(task?.prompt || '').split('\n').map(line => line.trim()).find(Boolean)
-  if (!firstLine) return 'Untitled task'
+  if (!firstLine) return t('task_untitled')
   return firstLine.length > 72 ? `${firstLine.slice(0, 72)}...` : firstLine
 }
 
@@ -3681,7 +4065,7 @@ function taskSubtitle(task) {
 
 window.copyWorkflowStepArtifact = async function(content) {
   const ok = await copyText(content)
-  showToast(ok ? '已复制' : '复制失败', ok ? 'success' : 'error')
+  showToast(ok ? t('wf_copied') : t('wf_copy_failed'), ok ? 'success' : 'error')
 }
 
 window.showWorkflowStepVersions = function(sessionId) {
@@ -3690,7 +4074,7 @@ window.showWorkflowStepVersions = function(sessionId) {
   showModal(`
     <div class="modal-card file-preview-modal">
       <div class="modal-head">
-        <h3>版本记录</h3>
+        <h3>${t('wf_versions_title')}</h3>
         <button class="icon-btn" onclick="window.closeModal()">×</button>
       </div>
       ${versions.length ? versions.map((version, index) => `
@@ -3699,7 +4083,7 @@ window.showWorkflowStepVersions = function(sessionId) {
           <div class="version-reason">${escapeHtml(version.reason || '')}</div>
           ${version.output ? `<div class="version-output">${renderWorkflowMarkdown(String(version.output).replace(/\[DONE\]/gi, '').trim(), session?.cwd || '')}</div>` : ''}
         </div>
-      `).join('') : '<p class="muted">暂无版本记录</p>'}
+      `).join('') : `<p class="muted">${t('wf_versions_empty')}</p>`}
     </div>
   `)
 }
@@ -3730,7 +4114,7 @@ window.previewWorkflowFile = async function(filePath, cwd) {
         <div class="file-preview-path">${escapeHtml(file.path || filePath)}</div>
         ${nestedFiles.length ? `
           <div class="output-files">
-            <div class="files-label">Referenced Files [${nestedFiles.length}]</div>
+            <div class="files-label">${t('wf_referenced_files', { count: nestedFiles.length })}</div>
             <div class="files-list">
               ${nestedFiles.map((path, idx) => renderWorkflowFileItem(path, cwd || '', idx === nestedFiles.length - 1 ? '└─' : '├─')).join('')}
             </div>
@@ -3749,7 +4133,7 @@ window.previewWorkflowFile = async function(filePath, cwd) {
 function renderWorkflowStepMessages(session) {
   const messages = session?.messages || []
   if (!messages.length) {
-    return '<div class="workflow-step-messages"><p style="color: var(--text-muted); text-align: center;">No messages yet</p></div>'
+    return `<div class="workflow-step-messages"><p style="color: var(--text-muted); text-align: center;">${t('wf_no_messages')}</p></div>`
   }
   return `
     <div class="workflow-step-messages">
@@ -3763,7 +4147,7 @@ function renderWorkflowStepMessages(session) {
               <div>
                 <div class="chat-bubble">${renderWorkflowMarkdown(msg.content || '', session?.cwd || '')}</div>
                 <div class="chat-meta">
-                  <span>${escapeHtml(msg.from || '')} · Turn ${escapeHtml(msg.round ?? '')}</span>
+                  <span>${escapeHtml(msg.from || '')} · ${t('wf_turn', { round: msg.round ?? '' })}</span>
                 </div>
               </div>
             </div>
@@ -3780,13 +4164,13 @@ function renderWorkflowTimeline(pipeline) {
   const steps = pipeline.sessions || []
   container.innerHTML = `
     <div class="flex-between mb-16">
-      <h3>Timeline</h3>
-      <span class="badge badge-${pipeline.status}">${escapeHtml(pipeline.status)}</span>
+      <h3>${t('wf_timeline')}</h3>
+      <span class="badge badge-${pipeline.status}">${escapeHtml(workflowStatusLabel(pipeline.status))}</span>
     </div>
     <div class="workflow-log">
-      <div><span>Created</span><strong>${new Date(pipeline.createdAt).toLocaleString()}</strong></div>
-      <div><span>Updated</span><strong>${new Date(pipeline.updatedAt).toLocaleString()}</strong></div>
-      ${steps.map((step, index) => `<div><span>Step ${index + 1}</span><strong>${escapeHtml(step.status)}</strong></div>`).join('')}
+      <div><span>${t('wf_timeline_created')}</span><strong>${new Date(pipeline.createdAt).toLocaleString()}</strong></div>
+      <div><span>${t('wf_timeline_updated')}</span><strong>${new Date(pipeline.updatedAt).toLocaleString()}</strong></div>
+      ${steps.map((step, index) => `<div><span>${t('wf_step', { number: index + 1 })}</span><strong>${escapeHtml(workflowStatusLabel(step.status))}</strong></div>`).join('')}
     </div>
   `
 }
@@ -3796,7 +4180,7 @@ function renderStepRail(steps) {
   return `
     <div class="step-rail">
       ${items.map((step, index) => `
-        <span class="step-node step-${step.status}" title="Step ${index + 1}: ${escapeAttr(step.status)}"></span>
+        <span class="step-node step-${step.status}" title="${escapeAttr(t('wf_step_title', { number: index + 1, title: workflowStatusLabel(step.status) }))}"></span>
         ${index < items.length - 1 ? '<span class="step-arrow">→</span>' : ''}
       `).join('')}
     </div>
@@ -3811,7 +4195,7 @@ function workflowRevisionTargets(currentStepIndex) {
   const steps = state.currentPipeline?.sessions || []
   return steps
     .slice(0, Math.max(0, currentStepIndex))
-    .map((step, index) => ({ id: step.sessionId, index, title: step.title || `Step ${index + 1}` }))
+    .map((step, index) => ({ id: step.sessionId, index, title: step.title || t('wf_step', { number: index + 1 }) }))
     .filter(target => target.id)
 }
 
@@ -4186,7 +4570,7 @@ function summarizeRawStatus(content) {
   if (/\b(read file|read_file|reading|read|cat|sed|rg|grep)\b/i.test(text)) return t('task_status_reading', { file: file || command || '' })
   if (/\b(write|edit|apply_patch|patch|wrote|modified|update file|create file|save)\b/i.test(text)) return t('task_status_modifying', { file: file || '' })
   if (/\b(bash|shell|exec|execute|run command|npm|pnpm|yarn|git|node|tsc|pytest|vitest|make)\b/i.test(text)) return t('task_status_executing', { cmd: command || text.slice(0, 50) })
-  if (/thinking|analysis|plan|分析|计划/i.test(text)) return t('task_status_analyzing')
+  if (/thinking|analysis|plan|\u5206\u6790|\u8ba1\u5212/i.test(text)) return t('task_status_analyzing')
   return text.slice(0, 50)
 }
 
@@ -4200,7 +4584,7 @@ function extractUiFile(text) {
 }
 
 function extractUiCommand(text) {
-  const quoted = text.match(/(?:cmd|command|bash|exec|执行|运行)[^`'"]*[`'"]([^`'"]+)[`'"]/i)
+  const quoted = text.match(/(?:cmd|command|bash|exec|\u6267\u884c|\u8fd0\u884c)[^`'"]*[`'"]([^`'"]+)[`'"]/i)
   if (quoted?.[1]) return quoted[1].slice(0, 80)
   const match = text.match(/\b((?:npm|pnpm|yarn|git|node|npx|tsc|pytest|vitest|make|bash|sh|rg|sed|cat)\s+[^.;\n]{1,80})/i)
   return match?.[1]?.trim()
@@ -4421,8 +4805,8 @@ window.submitOpsQuestion = async function(event) {
 window.askOpsForCurrent = async function() {
   const context = currentOpsContext()
   const question = context.target
-    ? `检查当前 ${context.target.kind} 是否异常`
-    : `检查当前页面是否有异常：${context.page?.title || context.page?.path || '当前页面'}`
+    ? t('ops_current_target_question', { kind: context.target.kind })
+    : t('ops_current_page_question', { title: context.page?.title || context.page?.path || t('ops_current_page') })
   await askOpsInternal(question, context.target, context.page)
 }
 
@@ -4440,7 +4824,7 @@ async function askOpsInternal(question, target, page) {
     state.opsLastReport = report
     state.opsMessages.push({ from: 'ops', content: formatOpsReport(report), actions: collectOpsActions(report) })
   } catch (err) {
-    state.opsMessages.push({ from: 'ops', content: `诊断失败：${err.message}` })
+    state.opsMessages.push({ from: 'ops', content: t('ops_diagnose_failed', { message: err.message }) })
   } finally {
     state.opsBusy = false
     updateOpsPanel()
@@ -4600,28 +4984,28 @@ function walkOpsTo(target) {
 function formatOpsReport(report) {
   if (report.directAnswer) return report.directAnswer
   if (report.answer) {
-    const source = report.answerSource ? `\n\n_由 ${report.answerSource} 回答_` : ''
+    const source = report.answerSource ? `\n\n_${t('ops_answer_source', { source: report.answerSource })}_` : ''
     return `${report.answer}${source}`
   }
   const counts = report.counts || {}
   const lines = [
-    report.summary || '诊断完成。',
+    report.summary || t('ops_done'),
     '',
-    `- 严重：${counts.critical || 0}`,
-    `- 警告：${counts.warning || 0}`,
-    `- 提示：${counts.info || 0}`,
+    `- ${t('ops_critical', { count: counts.critical || 0 })}`,
+    `- ${t('ops_warning', { count: counts.warning || 0 })}`,
+    `- ${t('ops_info', { count: counts.info || 0 })}`,
   ]
   const issues = report.issues || []
   if (issues.length) {
-    lines.push('', '优先处理：')
+    lines.push('', t('ops_priority'))
     for (const issue of issues.slice(0, 5)) {
-      const target = issue.target ? `（${issue.target.kind} ${String(issue.target.id).slice(0, 8)}）` : ''
+      const target = issue.target ? t('ops_issue_target', { kind: issue.target.kind, id: String(issue.target.id).slice(0, 8) }) : ''
       lines.push(`- [${issue.severity}] ${issue.title}${target}：${issue.detail}`)
-      lines.push(`  建议：${issue.recommendation}`)
+      lines.push(`  ${t('ops_recommendation', { text: issue.recommendation })}`)
     }
   }
   if (report.answerError) {
-    lines.push('', `LLM 未接入：${report.answerError}`)
+    lines.push('', t('ops_llm_missing', { error: report.answerError }))
   }
   return lines.join('\n')
 }
@@ -4653,7 +5037,7 @@ function renderOpsMessageActions(message) {
 window.executeOpsAction = async function(actionJson) {
   const action = JSON.parse(actionJson)
   const label = action.label || action.id
-  if (!confirm(`${label}\n\n${action.description || ''}\n\n确认执行？`)) return
+  if (!confirm(t('ops_confirm_execute', { label, description: action.description || '' }))) return
   state.opsBusy = true
   updateOpsPanel()
   try {
@@ -4666,7 +5050,7 @@ window.executeOpsAction = async function(actionJson) {
     if (result.task?.id) navigate(`/task/${result.task.id}`)
     else if (result.session?.id) navigate(`/session/${result.session.id}`)
   } catch (err) {
-    state.opsMessages.push({ from: 'ops', content: `动作失败：${err.message}` })
+    state.opsMessages.push({ from: 'ops', content: t('ops_action_failed', { message: err.message }) })
   } finally {
     state.opsBusy = false
     updateOpsPanel()
@@ -4674,10 +5058,10 @@ window.executeOpsAction = async function(actionJson) {
 }
 
 function opsActionResultText(result) {
-  if (result.task?.id) return `已执行 ${result.action}，Task：${result.task.id}`
-  if (result.session?.id) return `已执行 ${result.action}，Session：${result.session.id}`
-  if (result.workflow?.id) return `已执行 ${result.action}，Workflow：${result.workflow.id}`
-  return `已执行 ${result.action || 'ops action'}。`
+  if (result.task?.id) return t('ops_action_task_done', { action: result.action, id: result.task.id })
+  if (result.session?.id) return t('ops_action_session_done', { action: result.action, id: result.session.id })
+  if (result.workflow?.id) return t('ops_action_workflow_done', { action: result.action, id: result.workflow.id })
+  return t('ops_action_done', { action: result.action || 'ops action' })
 }
 
 window.extendSessionTimeout = async function() {
@@ -5501,13 +5885,13 @@ window.rerunTaskWithFeedback = async function(e) {
   if (!feedback) return
   const previous = task.result || task.output || task.lastAgentOutput || task.errorMessage || ''
   const prompt = [
-    '请基于下面的原始任务、上次输出和人工反馈，重新完成任务。',
+    '\u8bf7\u57fa\u4e8e\u4e0b\u9762\u7684\u539f\u59cb\u4efb\u52a1\u3001\u4e0a\u6b21\u8f93\u51fa\u548c\u4eba\u5de5\u53cd\u9988\uff0c\u91cd\u65b0\u5b8c\u6210\u4efb\u52a1\u3002',
     '',
-    '## 原始任务',
+    '## \u539f\u59cb\u4efb\u52a1',
     task.prompt || '',
     '',
-    previous ? `## 上次输出\n${previous}\n` : '',
-    '## 人工反馈',
+    previous ? `## \u4e0a\u6b21\u8f93\u51fa\n${previous}\n` : '',
+    '## \u4eba\u5de5\u53cd\u9988',
     feedback,
   ].filter(Boolean).join('\n')
   try {
@@ -5594,55 +5978,55 @@ window.showNewWorkflowModal = async function() {
     <div class="modal-card workflow-modal">
       <div class="modal-head">
         <div>
-          <h3>New Workflow</h3>
-          <p>Create a multi-step agent pipeline.</p>
+          <h3>${t('wf_modal_title')}</h3>
+          <p>${t('wf_modal_desc')}</p>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('wf_modal_close')}</button>
       </div>
       ${noAgents ? `
         <div class="template-empty-agents" style="margin-bottom: 20px;">
-          <span>No API assistants configured yet.</span>
-          <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
+          <span>${t('wf_modal_no_agents')}</span>
+          <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">${t('wf_modal_add_one')}</button>
         </div>
       ` : ''}
       <form onsubmit="window.createWorkflow(event)">
         <div class="form-group">
-          <label>Template</label>
+          <label>${t('wf_template')}</label>
           <select class="input" name="templateId" onchange="window.applyWorkflowTemplate(this.value)">
-            <option value="">Custom workflow</option>
+            <option value="">${t('wf_custom_workflow')}</option>
             ${state.pipelineTemplates.map(template => `
-              <option value="${escapeAttr(template.id)}">${escapeHtml(template.nameEn || template.name)}${template.source === 'user' ? ' · mine' : ''}</option>
+              <option value="${escapeAttr(template.id)}">${escapeHtml(template.nameEn || template.name)}${template.source === 'user' ? ` · ${t('wf_template_mine')}` : ''}</option>
             `).join('')}
           </select>
         </div>
         <div class="form-group">
-          <label>Pipeline name</label>
-          <input class="input" name="name" required placeholder="Release workflow">
+          <label>${t('wf_pipeline_name')}</label>
+          <input class="input" name="name" required placeholder="${escapeAttr(t('wf_pipeline_placeholder'))}">
         </div>
         <div class="form-group">
-          <label>Workflow input</label>
-          <textarea class="input" name="workflowInput" rows="4" placeholder="Paste the reference video notes, source copy, or brief for this run..."></textarea>
+          <label>${t('wf_input')}</label>
+          <textarea class="input" name="workflowInput" rows="4" placeholder="${escapeAttr(t('wf_input_placeholder'))}"></textarea>
         </div>
         <div class="form-group">
-          <label>Start from step</label>
+          <label>${t('wf_start_from_step')}</label>
           <input class="input" name="startAtStep" type="number" min="1" value="1">
-          <small>Steps before this number are kept in the workflow and marked as manually completed.</small>
+          <small>${t('wf_start_from_step_hint')}</small>
         </div>
         <div class="workflow-editor-head">
-          <h3>Steps</h3>
-          <button type="button" class="btn btn-secondary btn-sm" onclick="window.addWorkflowStep()">+ Add Step</button>
+          <h3>${t('wf_steps_title')}</h3>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="window.addWorkflowStep()">${t('wf_add_step')}</button>
         </div>
         <div id="workflow-step-editor" class="workflow-step-editor" data-from="${escapeAttr(defaultFrom)}" data-to="${escapeAttr(defaultTo)}" data-count="0"></div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
-          <button type="button" class="btn btn-secondary" onclick="window.saveWorkflowTemplate()">Save as Template</button>
-          <button type="button" class="btn btn-danger" id="delete-workflow-template" style="display:none" onclick="window.deleteWorkflowTemplate()">Delete Template</button>
-          <button type="submit" class="btn btn-primary" ${noAgents ? 'disabled' : ''}>Create</button>
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('wf_cancel')}</button>
+          <button type="button" class="btn btn-secondary" onclick="window.saveWorkflowTemplate()">${t('wf_save_template')}</button>
+          <button type="button" class="btn btn-danger" id="delete-workflow-template" style="display:none" onclick="window.deleteWorkflowTemplate()">${t('wf_delete_template')}</button>
+          <button type="submit" class="btn btn-primary" ${noAgents ? 'disabled' : ''}>${t('wf_create')}</button>
         </div>
       </form>
     </div>
   `)
-  const defaultTemplate = state.pipelineTemplates.find(template => /抖音视频生成/.test(template.name))
+  const defaultTemplate = state.pipelineTemplates.find(template => /\u6296\u97f3\u89c6\u9891\u751f\u6210/.test(template.name))
   if (defaultTemplate) {
     const select = document.querySelector('select[name="templateId"]')
     if (select) select.value = defaultTemplate.id
@@ -5685,27 +6069,37 @@ window.addWorkflowStep = function(step = {}, options = {}) {
 }
 
 const WORKFLOW_NODE_TYPES = {
-  video_parse: { label: '解析视频', agent: 'codex', inputs: 'source-video', output: 'reference.md', sections: '视频文案/台词,选题 brief,可复用结构' },
-  copy_adapt: { label: '改编文案', agent: 'deepseek', inputs: 'reference.md', output: 'script-adapted.md', sections: '输入来源,改编文案,改编说明,自检' },
-  storyboard_script: { label: '生成分镜脚本', agent: 'codex', inputs: 'script-adapted.md', output: 'reference.md, script.md, prompt.txt', sections: '分镜' },
-  image_generate: { label: '生成视觉资产', agent: 'codex', inputs: 'script.md,prompt.txt', output: 'storyboard-step4.png, character-hero-turnaround.png, character-director-turnaround.png', sections: '' },
-  video_command: { label: '准备视频命令', agent: 'codex', inputs: 'storyboard-step4.png, character-hero-turnaround.png, character-director-turnaround.png, prompt.txt', output: 'video-command.md', sections: '命令,输入文件,输出路径' },
-  video_generate: { label: '生成视频', agent: 'codex', inputs: 'video-command.md', output: '*.mp4', sections: '' },
-  human_review: { label: '人工审核', agent: 'codex', inputs: '*.mp4', output: '*.mp4', sections: '' },
-  custom: { label: '自定义', agent: 'codex', inputs: '', output: '', sections: '' },
+  video_parse: { labelKey: 'wf_node_video_parse', sectionsKey: 'wf_sections_video_parse', agent: 'codex', inputs: 'source-video', output: 'reference.md' },
+  copy_adapt: { labelKey: 'wf_node_copy_adapt', sectionsKey: 'wf_sections_copy_adapt', agent: 'deepseek', inputs: 'reference.md', output: 'script-adapted.md' },
+  storyboard_script: { labelKey: 'wf_node_storyboard_script', sectionsKey: 'wf_sections_storyboard_script', agent: 'codex', inputs: 'script-adapted.md', output: 'reference.md, script.md, prompt.txt' },
+  image_generate: { labelKey: 'wf_node_image_generate', agent: 'codex', inputs: 'script.md,prompt.txt', output: 'storyboard-step4.png, character-hero-turnaround.png, character-director-turnaround.png', sections: '' },
+  video_command: { labelKey: 'wf_node_video_command', sectionsKey: 'wf_sections_video_command', agent: 'codex', inputs: 'storyboard-step4.png, character-hero-turnaround.png, character-director-turnaround.png, prompt.txt', output: 'video-command.md' },
+  video_generate: { labelKey: 'wf_node_video_generate', agent: 'codex', inputs: 'video-command.md', output: '*.mp4', sections: '' },
+  human_review: { labelKey: 'wf_node_human_review', agent: 'codex', inputs: '*.mp4', output: '*.mp4', sections: '' },
+  custom: { labelKey: 'wf_node_custom', agent: 'codex', inputs: '', output: '', sections: '' },
 }
 
 function workflowNodeTypeForStep(step) {
   if (step.nodeType) return step.nodeType
   const title = String(step.title || '')
-  if (/解析.*视频/.test(title)) return 'video_parse'
-  if (/改编文案/.test(title)) return 'copy_adapt'
-  if (/分镜与 Prompt|分镜脚本/.test(title)) return 'storyboard_script'
-  if (/视觉资产|分镜图|角色三视图/.test(title)) return 'image_generate'
-  if (/命令/.test(title)) return 'video_command'
-  if (/执行视频|生成视频/.test(title)) return 'video_generate'
-  if (/审核|保存/.test(title)) return 'human_review'
+  if (/\u89e3\u6790.*\u89c6\u9891/.test(title)) return 'video_parse'
+  if (/\u6539\u7f16\u6587\u6848/.test(title)) return 'copy_adapt'
+  if (/\u5206\u955c\u4e0e Prompt|\u5206\u955c\u811a\u672c/.test(title)) return 'storyboard_script'
+  if (/\u89c6\u89c9\u8d44\u4ea7|\u5206\u955c\u56fe|\u89d2\u8272\u4e09\u89c6\u56fe/.test(title)) return 'image_generate'
+  if (/\u547d\u4ee4/.test(title)) return 'video_command'
+  if (/\u6267\u884c\u89c6\u9891|\u751f\u6210\u89c6\u9891/.test(title)) return 'video_generate'
+  if (/\u5ba1\u6838|\u4fdd\u5b58/.test(title)) return 'human_review'
   return 'custom'
+}
+
+function workflowNodeTypeLabel(nodeType) {
+  const item = WORKFLOW_NODE_TYPES[nodeType]
+  return item?.labelKey ? t(item.labelKey) : (nodeType || '')
+}
+
+function workflowNodeTypeSections(nodeType) {
+  const item = WORKFLOW_NODE_TYPES[nodeType]
+  return item?.sectionsKey ? t(item.sectionsKey) : (item?.sections || '')
 }
 
 function preferredWorkflowAgent(nodeType, fallback = '') {
@@ -5729,26 +6123,27 @@ function renderWorkflowEditStep(index, step, defaultFrom, defaultTo) {
   const inputs = (step.contract?.inputs || (preset.inputs ? preset.inputs.split(',') : [])).join(', ')
   const firstOutput = step.contract?.outputs?.[0]
   const outputFile = step.contract?.outputs?.map(output => output.fileName).join(', ') || preset.output
-  const requiredSections = (firstOutput?.requiredSections || (preset.sections ? preset.sections.split(',') : [])).join(', ')
+  const presetSections = workflowNodeTypeSections(nodeType)
+  const requiredSections = (firstOutput?.requiredSections || (presetSections ? presetSections.split(',') : [])).join(', ')
   return `
     <div class="workflow-edit-title">
       <span class="drag-handle">↕</span>
-      <strong data-step-label>Step ${index + 1}</strong>
-      <button type="button" class="btn btn-ghost btn-sm" onclick="window.removeWorkflowStep(this)">Remove</button>
+      <strong data-step-label>${t('wf_step', { number: index + 1 })}</strong>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="window.removeWorkflowStep(this)">${t('wf_remove')}</button>
     </div>
     <div class="form-group">
-      <label>Step name</label>
-      <input class="input" name="title" required value="${escapeAttr(title)}" placeholder="改编文案">
+      <label>${t('wf_step_name')}</label>
+      <input class="input" name="title" required value="${escapeAttr(title)}" placeholder="${escapeAttr(t('wf_step_name_placeholder'))}">
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Node Type</label>
+        <label>${t('wf_node_type')}</label>
         <select class="input" name="nodeType" onchange="window.applyWorkflowNodeType(this)">
-          ${Object.entries(WORKFLOW_NODE_TYPES).map(([value, item]) => `<option value="${value}" ${value === nodeType ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
+          ${Object.entries(WORKFLOW_NODE_TYPES).map(([value]) => `<option value="${value}" ${value === nodeType ? 'selected' : ''}>${escapeHtml(workflowNodeTypeLabel(value))}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
-        <label>Primary Agent</label>
+        <label>${t('wf_primary_agent')}</label>
         <select class="input" name="agent" required>${options.replace(`value="${escapeAttr(to)}"`, `value="${escapeAttr(to)}" selected`)}</select>
       </div>
     </div>
@@ -5758,41 +6153,41 @@ function renderWorkflowEditStep(index, step, defaultFrom, defaultTo) {
     <input type="hidden" name="permissionMode" value="${escapeAttr(permissionMode)}">
     <div class="form-row">
       <div class="form-group">
-        <label>Inputs</label>
+        <label>${t('wf_inputs')}</label>
         <input class="input" name="contractInputs" value="${escapeAttr(inputs)}" placeholder="reference.md">
       </div>
       <div class="form-group">
-        <label>Output Files</label>
+        <label>${t('wf_output_files')}</label>
         <input class="input" name="contractOutput" value="${escapeAttr(outputFile)}" placeholder="script.md, prompt.txt">
       </div>
     </div>
     <div class="form-group">
-      <label>Required Sections</label>
-      <input class="input" name="contractSections" value="${escapeAttr(requiredSections)}" placeholder="改编文案, 改编说明, 自检">
+      <label>${t('wf_required_sections')}</label>
+      <input class="input" name="contractSections" value="${escapeAttr(requiredSections)}" placeholder="${escapeAttr(t('wf_required_sections_placeholder'))}">
     </div>
     <details class="workflow-step-advanced">
-      <summary>Advanced</summary>
+      <summary>${t('wf_advanced')}</summary>
       <div class="form-group">
-        <label>Prompt</label>
-        <textarea class="input" name="initialPrompt" rows="3" required placeholder="Describe this step...">${escapeHtml(prompt)}</textarea>
+        <label>${t('wf_prompt')}</label>
+        <textarea class="input" name="initialPrompt" rows="3" required placeholder="${escapeAttr(t('wf_prompt_placeholder'))}">${escapeHtml(prompt)}</textarea>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label>Working Directory</label>
+          <label>${t('wf_working_dir')}</label>
           <input class="input" name="cwd" value="${escapeAttr(cwd)}" placeholder="/path/to/project">
         </div>
         <div class="form-group">
-          <label>Output Directory</label>
+          <label>${t('wf_output_dir')}</label>
           <input class="input" name="outputDir" value="${escapeAttr(outputDir)}" placeholder="/path/to/save/outputs">
         </div>
       </div>
     </details>
     <label class="check-row">
       <input type="checkbox" name="approveMode" ${step.approveMode ? 'checked' : ''}>
-      <span>Pause before this step and require manual approval</span>
+      <span>${t('wf_pause_before_step')}</span>
     </label>
     <div class="form-group">
-      <label>Depends on</label>
+      <label>${t('wf_depends_on_label')}</label>
       <select class="input" name="dependsOn" multiple data-deps></select>
     </div>
   `
@@ -5805,8 +6200,8 @@ window.applyWorkflowNodeType = function(select) {
   if (agent) row.querySelector('[name="agent"]').value = agent
   row.querySelector('[name="contractInputs"]').value = preset.inputs
   row.querySelector('[name="contractOutput"]').value = preset.output
-  row.querySelector('[name="contractSections"]').value = preset.sections
-  if (/^Step \d+$/.test(row.querySelector('[name="title"]').value)) row.querySelector('[name="title"]').value = preset.label
+  row.querySelector('[name="contractSections"]').value = workflowNodeTypeSections(select.value)
+  if (/^Step \d+$/.test(row.querySelector('[name="title"]').value)) row.querySelector('[name="title"]').value = workflowNodeTypeLabel(select.value)
 }
 
 function resolveWorkflowAgentName(ref, preferredAdapter, fallback, avoidName) {
@@ -5853,7 +6248,7 @@ function collectWorkflowSteps(workflowInput = '') {
     const outputFiles = row.querySelector('[name="contractOutput"]').value.split(',').map(value => value.trim()).filter(Boolean)
     const requiredSections = row.querySelector('[name="contractSections"]').value.split(',').map(value => value.trim()).filter(Boolean)
     const promptWithInput = !dependsOn.length && workflowInput
-      ? `${initialPrompt}\n\n本次输入：\n${workflowInput}`
+      ? `${initialPrompt}\n\n${t('wf_input_prefix')}\n${workflowInput}`
       : initialPrompt
     return compactObject({
       from: { adapter: row.querySelector('[name="from"]').value },
@@ -5885,7 +6280,7 @@ window.saveWorkflowTemplate = async function() {
   const nameInput = document.querySelector('form [name="name"]')
   const name = nameInput?.value.trim()
   if (!name) {
-    showToast('Pipeline name is required')
+    showToast(t('wf_pipeline_name_required'))
     return
   }
   try {
@@ -5896,12 +6291,12 @@ window.saveWorkflowTemplate = async function() {
     state.pipelineTemplates.unshift(template)
     const select = document.querySelector('select[name="templateId"]')
     if (select) {
-      select.insertAdjacentHTML('beforeend', `<option value="${escapeAttr(template.id)}">${escapeHtml(template.name)} · mine</option>`)
+      select.insertAdjacentHTML('beforeend', `<option value="${escapeAttr(template.id)}">${escapeHtml(template.name)} · ${t('wf_template_mine')}</option>`)
       select.value = template.id
     }
     const deleteButton = document.getElementById('delete-workflow-template')
     if (deleteButton) deleteButton.style.display = ''
-    showToast('Template saved')
+    showToast(t('wf_template_saved'))
   } catch (err) {
     showToast(err.message)
   }
@@ -5918,7 +6313,7 @@ window.deleteWorkflowTemplate = async function() {
     select.querySelector(`option[value="${CSS.escape(id)}"]`)?.remove()
     select.value = ''
     window.applyWorkflowTemplate('')
-    showToast('Template deleted')
+    showToast(t('wf_template_deleted'))
   } catch (err) {
     showToast(err.message)
   }
@@ -5935,14 +6330,14 @@ function refreshWorkflowStepEditor() {
   if (!editor) return
   const rows = [...editor.querySelectorAll('.workflow-edit-step')]
   rows.forEach((row, index) => {
-    row.querySelector('[data-step-label]').textContent = `Step ${index + 1}`
+    row.querySelector('[data-step-label]').textContent = t('wf_step', { number: index + 1 })
     const deps = row.querySelector('[data-deps]')
     const selected = [...deps.selectedOptions].map(option => option.value)
     deps.innerHTML = rows.map((_, depIndex) => {
       if (depIndex >= index) return ''
       const shouldAutoDefault = row.dataset.autoDefaultDependency !== 'false'
       const defaultSelected = selected.includes(String(depIndex)) || (shouldAutoDefault && selected.length === 0 && depIndex === index - 1)
-      return `<option value="${depIndex}" ${defaultSelected ? 'selected' : ''}>Step ${depIndex + 1}</option>`
+      return `<option value="${depIndex}" ${defaultSelected ? 'selected' : ''}>${t('wf_step', { number: depIndex + 1 })}</option>`
     }).join('')
   })
 }
@@ -6000,9 +6395,9 @@ window.approveWorkflowStep = async function(sessionId, waitingForHumanApproval) 
 
 window.rerunWorkflowStep = async function(sessionId, title) {
   if (!await confirmAction({
-    title: '重跑步骤',
-    message: `重跑 ${title || '当前步骤'}？该步骤之后的产物会被重置。`,
-    confirmText: '重跑',
+    title: t('wf_confirm_rerun_title'),
+    message: t('wf_confirm_rerun_message', { title: title || t('wf_confirm_rerun_current') }),
+    confirmText: t('wf_confirm_rerun_confirm'),
   })) return
   try {
     const pipeline = await api(`/api/sessions/${sessionId}/rerun`, 'POST')
@@ -6091,7 +6486,7 @@ window.toggleWorkflowVoice = function(sessionId) {
   stopWorkflowSpeechRecognition()
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
   if (!SpeechRecognition) {
-    showToast('当前浏览器不支持语音识别')
+    showToast(t('wf_speech_unsupported'))
     return
   }
 
@@ -6121,7 +6516,7 @@ window.toggleWorkflowVoice = function(sessionId) {
   }
   recognition.onerror = (event) => {
     if (event.error !== 'aborted' && event.error !== 'no-speech') {
-      showToast(`语音识别失败：${event.error}`)
+      showToast(t('wf_speech_failed', { error: event.error }))
     }
   }
   recognition.onend = () => {
@@ -6156,18 +6551,18 @@ window.openWorkflowStepMessage = function(sessionId, title) {
   showModal(`
     <div class="modal-card">
       <div class="modal-head">
-        <h3>插入对话：${escapeHtml(title || '当前步骤')}</h3>
+        <h3>${escapeHtml(t('wf_insert_message_title', { title: title || t('wf_current_step') }))}</h3>
         <button class="icon-btn" onclick="window.closeModal()">×</button>
       </div>
       <form onsubmit='window.submitWorkflowStepMessage(event, ${jsString(sessionId)})'>
         <div class="form-group">
-          <label>消息内容</label>
-          <textarea class="input" name="content" rows="6" required placeholder="给这个步骤补充指令或修改意见..."></textarea>
-          <small class="form-hint">提交后会写入该步骤的人类对话，并触发该步骤继续执行；其后续步骤会按依赖重置。</small>
+          <label>${t('wf_message_content')}</label>
+          <textarea class="input" name="content" rows="6" required placeholder="${escapeAttr(t('wf_message_placeholder'))}"></textarea>
+          <small class="form-hint">${t('wf_message_hint')}</small>
         </div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">发送</button>
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('wf_cancel')}</button>
+          <button type="submit" class="btn btn-primary">${t('wf_send')}</button>
         </div>
       </form>
     </div>
@@ -6195,22 +6590,22 @@ window.openManualArtifactsModal = function(sessionId, title) {
   showModal(`
     <div class="modal-card">
       <div class="modal-head">
-        <h3>主进程补图回填：${escapeHtml(title || '当前步骤')}</h3>
+        <h3>${escapeHtml(t('wf_manual_title', { title: title || t('wf_current_step') }))}</h3>
         <button class="icon-btn" onclick="window.closeModal()">×</button>
       </div>
       <form onsubmit='window.submitManualArtifacts(event, ${jsString(sessionId)})'>
         <div class="form-group">
-          <label>本地文件路径</label>
+          <label>${t('wf_local_paths')}</label>
           <textarea class="input" name="paths" rows="5" required placeholder="/absolute/path/to/image.png&#10;/absolute/path/to/another.png"></textarea>
-          <small class="form-hint">在 Codex 主进程生图并保存到本地后，把图片路径粘贴到这里；提交后会校验文件存在、标记本步骤完成，并自动激活下游步骤。</small>
+          <small class="form-hint">${t('wf_manual_hint')}</small>
         </div>
         <div class="form-group">
-          <label>结果说明</label>
-          <input class="input" name="summary" placeholder="例如：已由 Codex 主进程生成分镜图和角色三视图">
+          <label>${t('wf_result_summary')}</label>
+          <input class="input" name="summary" placeholder="${escapeAttr(t('wf_result_summary_placeholder'))}">
         </div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">回填并完成本步骤</button>
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('wf_cancel')}</button>
+          <button type="submit" class="btn btn-primary">${t('wf_manual_submit')}</button>
         </div>
       </form>
     </div>
@@ -6242,28 +6637,28 @@ window.requestWorkflowStepChanges = function(sessionId, title) {
   showModal(`
     <div class="modal-card">
       <div class="modal-head">
-        <h3>要求修改上游产物</h3>
+        <h3>${t('wf_request_changes_title')}</h3>
         <button class="icon-btn" onclick="window.closeModal()">×</button>
       </div>
       <form onsubmit='window.submitWorkflowStepChanges(event)'>
         <div class="form-group">
-          <label>要修改哪一步</label>
+          <label>${t('wf_target_step')}</label>
           <select class="input" name="sessionId">
             ${targets.map(target => `
               <option value="${escapeAttr(target.id)}" ${target.id === defaultTarget ? 'selected' : ''}>
-                Step ${target.index + 1}：${escapeHtml(target.title)}
+                ${escapeHtml(t('wf_step_title', { number: target.index + 1, title: target.title }))}
               </option>
             `).join('')}
           </select>
-          <small class="form-hint">可回退并修改当前步骤之前的任意产物；提交前会自动保存该步骤当前版本。</small>
+          <small class="form-hint">${t('wf_request_changes_hint')}</small>
         </div>
         <div class="form-group">
-          <label>修改意见</label>
-          <textarea class="input" name="content" rows="6" required placeholder="说明哪里不过、希望怎么改..."></textarea>
+          <label>${t('wf_change_request')}</label>
+          <textarea class="input" name="content" rows="6" required placeholder="${escapeAttr(t('wf_change_placeholder'))}"></textarea>
         </div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary">提交修改</button>
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('wf_cancel')}</button>
+          <button type="submit" class="btn btn-primary">${t('wf_submit_changes')}</button>
         </div>
       </form>
     </div>
@@ -6311,9 +6706,9 @@ window.resumeWorkflow = async function() {
 window.deleteCurrentWorkflow = async function() {
   if (!state.currentPipelineId) return
   if (!await confirmAction({
-    title: 'Delete Workflow',
-    message: 'Delete this workflow permanently?',
-    confirmText: 'Delete',
+    title: t('wf_confirm_delete_title'),
+    message: t('wf_confirm_delete_message'),
+    confirmText: t('wf_confirm_delete_confirm'),
     danger: true,
   })) return
   try {
