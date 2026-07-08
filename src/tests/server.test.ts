@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import WebSocket from 'ws'
 import { Router } from '../router.js'
-import { createServer } from '../server.js'
+import { createServer, registerPersistedUserAgents } from '../server.js'
 import * as state from '../state.js'
 import type { Adapter, AdapterSendOpts, Session } from '../types.js'
 import { encryptSecret } from '../keyvault.js'
@@ -1264,4 +1264,96 @@ test('EADDRINUSE prints a friendly message and exits with code 1', async () => {
     state.closeDb()
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('registerPersistedUserAgents tolerates agents with undecryptable keys', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-decrypt-'))
+  const originalKey = process.env.TURING_ENCRYPTION_KEY
+  process.env.TURING_ENCRYPTION_KEY = 'decrypt-test-key-A'
+  state.initDb(join(dir, 'turing.db'))
+  const userId = 'user-decrypt'
+  state.createUser({ id: userId, email: 'decrypt@example.com', passwordHash: 'hash', salt: 'salt' })
+
+  // Valid agent — encrypted with the current key
+  const validEnc = encryptSecret(userId, 'sk-valid-api-key-9999')
+  state.createUserAgent({
+    id: 'agent-valid',
+    userId,
+    name: 'good-agent',
+    adapter: 'openai-api',
+    encryptedKey: validEnc.encryptedKey,
+    iv: validEnc.iv,
+    authTag: validEnc.authTag,
+    model: 'gpt-4',
+  })
+
+  // Corrupt agent — garbage ciphertext that cannot be decrypted
+  state.createUserAgent({
+    id: 'agent-corrupt',
+    userId,
+    name: 'corrupt-agent',
+    adapter: 'anthropic-api',
+    encryptedKey: 'garbage-data-not-valid-ciphertext',
+    iv: 'AAAAAAAAAAAAAAAA',
+    authTag: 'BBBBBBBBBBBBBBBB',
+    model: 'claude-3',
+  })
+
+  // Must not throw despite the corrupt record
+  const router = new Router()
+  assert.doesNotThrow(() => registerPersistedUserAgents(router))
+
+  state.closeDb()
+  rmSync(dir, { recursive: true, force: true })
+  if (originalKey === undefined) delete process.env.TURING_ENCRYPTION_KEY
+  else process.env.TURING_ENCRYPTION_KEY = originalKey
+})
+
+test('GET /api/agents shows decrypt-failed agent as invalid with error', async () => {
+  const originalKey = process.env.TURING_ENCRYPTION_KEY
+  process.env.TURING_ENCRYPTION_KEY = 'server-test-encryption-key-B'
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'agentlist@example.com')
+
+    // Valid agent
+    const validEnc = encryptSecret(auth.userId, 'sk-valid-list-key-0000')
+    state.createUserAgent({
+      id: 'list-agent-valid',
+      userId: auth.userId,
+      name: 'list-good',
+      adapter: 'openai-api',
+      encryptedKey: validEnc.encryptedKey,
+      iv: validEnc.iv,
+      authTag: validEnc.authTag,
+      model: 'gpt-4',
+    })
+
+    // Corrupt agent
+    state.createUserAgent({
+      id: 'list-agent-corrupt',
+      userId: auth.userId,
+      name: 'list-corrupt',
+      adapter: 'anthropic-api',
+      encryptedKey: 'totally-bogus-ciphertext',
+      iv: 'CCCCCCCCCCCCCCCC',
+      authTag: 'DDDDDDDDDDDDDDDD',
+      model: 'claude-3',
+    })
+
+    const res = await fetch(`${baseUrl}/api/agents`, { headers: authHeaders(auth.token) })
+    assert.equal(res.status, 200)
+    const agents = await res.json() as Array<{ name: string; status: string; error?: string; hasKey: boolean }>
+
+    const corrupt = agents.find((a) => a.name === 'list-corrupt')
+    assert.ok(corrupt, 'corrupt agent should appear in the list')
+    assert.equal(corrupt!.status, 'invalid')
+    assert.equal(corrupt!.hasKey, false)
+    assert.ok(corrupt!.error, 'corrupt agent should have an error message')
+
+    const good = agents.find((a) => a.name === 'list-good')
+    assert.ok(good, 'valid agent should also appear in the list')
+    assert.notEqual(good!.status, 'invalid')
+  })
+  if (originalKey === undefined) delete process.env.TURING_ENCRYPTION_KEY
+  else process.env.TURING_ENCRYPTION_KEY = originalKey
 })

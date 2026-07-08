@@ -99,14 +99,19 @@ export function storeKey(params: { userId: string; provider: string; key: string
 }
 
 export function listKeys(userId: string): Array<{ id: string; provider: Provider; name: string; maskedKey: string; createdAt: number }> {
-  return state.listStoredApiKeys(userId).map((record) => {
-    const key = decryptSecret(record)
-    return {
-      id: record.id,
-      provider: record.provider,
-      name: record.name,
-      maskedKey: maskKey(key),
-      createdAt: record.createdAt,
+  return state.listStoredApiKeys(userId).flatMap((record) => {
+    try {
+      const key = decryptSecret(record)
+      return [{
+        id: record.id,
+        provider: record.provider,
+        name: record.name,
+        maskedKey: maskKey(key),
+        createdAt: record.createdAt,
+      }]
+    } catch {
+      console.warn(`[warn] Skipping stored API key "${record.name}" (id ${record.id}): decryption failed — encryption key mismatch, was the database copied from another machine?`)
+      return []
     }
   })
 }

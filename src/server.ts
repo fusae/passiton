@@ -693,20 +693,30 @@ async function reloadAgents(router: Router, agentCatalog: AgentCatalog, config: 
   registerBuiltinAdapters(router)
 }
 
-function decryptUserAgentKey(record: state.UserAgentRecord): string | undefined {
-  if (!record.encryptedKey || !record.iv || !record.authTag) return undefined
-  return decryptSecret({
-    userId: record.userId,
-    encryptedKey: record.encryptedKey,
-    iv: record.iv,
-    authTag: record.authTag,
-  })
+function tryDecryptUserAgentKey(record: state.UserAgentRecord): { key?: string; error?: string } {
+  if (!record.encryptedKey || !record.iv || !record.authTag) return {}
+  try {
+    return { key: decryptSecret({ userId: record.userId, encryptedKey: record.encryptedKey, iv: record.iv, authTag: record.authTag }) }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) }
+  }
 }
+
+function decryptUserAgentKey(record: state.UserAgentRecord): string | undefined {
+  return tryDecryptUserAgentKey(record).key
+}
+
+const DECRYPT_MISMATCH_HINT = 'encryption key mismatch — was the database copied from another machine?'
 
 function userAgentConfigs(userId: string): Record<string, AgentConfig> {
   const result: Record<string, AgentConfig> = {}
   for (const record of state.listUserAgents(userId)) {
-    result[record.name] = state.userAgentRecordToConfig(record, decryptUserAgentKey(record))
+    const { key, error } = tryDecryptUserAgentKey(record)
+    if (error) {
+      console.warn(`[warn] Skipping agent "${record.name}": decryption failed — ${DECRYPT_MISMATCH_HINT}`)
+      continue
+    }
+    result[record.name] = state.userAgentRecordToConfig(record, key)
   }
   return result
 }
@@ -714,8 +724,13 @@ function userAgentConfigs(userId: string): Record<string, AgentConfig> {
 export function registerPersistedUserAgents(router: Router): void {
   const byUser = new Map<string, Record<string, AgentConfig>>()
   for (const record of state.listAllUserAgents()) {
+    const { key, error } = tryDecryptUserAgentKey(record)
+    if (error) {
+      console.warn(`[warn] Skipping persisted agent "${record.name}" (user ${record.userId}): decryption failed — ${DECRYPT_MISMATCH_HINT}. Re-configure the API key in Settings to fix.`)
+      continue
+    }
     const agents = byUser.get(record.userId) ?? {}
-    agents[record.name] = state.userAgentRecordToConfig(record, decryptUserAgentKey(record))
+    agents[record.name] = state.userAgentRecordToConfig(record, key)
     byUser.set(record.userId, agents)
   }
   for (const [userId, agents] of byUser.entries()) {
@@ -737,10 +752,14 @@ async function listAgentModels(
   const globalApiEntries = Object.entries(current.agents)
     .filter(([, cfg]) => API_ADAPTERS.has(cfg.adapter))
   const userRecords = state.listUserAgents(userId)
-  const userApiEntries = userRecords.map((record) => ({
-    record,
-    cfg: state.userAgentRecordToConfig(record, decryptUserAgentKey(record)),
-  }))
+  const userApiEntries = userRecords.map((record) => {
+    const { key, error } = tryDecryptUserAgentKey(record)
+    return {
+      record,
+      cfg: state.userAgentRecordToConfig(record, key),
+      decryptError: error,
+    }
+  })
   if (opts.refresh) {
     await Promise.all([
       ...globalApiEntries.map(([name, cfg]) => verifyApiAgent(name, cfg, { force: true })),
@@ -748,7 +767,7 @@ async function listAgentModels(
     ])
   }
   const globalApi = globalApiEntries.map(([name, cfg]) => apiAgentInfoFromConfig(name, cfg))
-  const userApi = userApiEntries.map(({ record, cfg }) => apiAgentInfoFromRecord(record, cfg))
+  const userApi = userApiEntries.map(({ record, cfg, decryptError }) => apiAgentInfoFromRecord(record, cfg, decryptError))
   const userNames = new Set(userApi.map((agent) => agent.name))
   const apiAgents = [
     ...userApi,
@@ -804,7 +823,20 @@ function apiAgentInfoFromConfig(name: string, cfg: AgentConfig): ApiAgentInfo {
   }
 }
 
-function apiAgentInfoFromRecord(record: state.UserAgentRecord, cfg?: AgentConfig): ApiAgentInfo {
+function apiAgentInfoFromRecord(record: state.UserAgentRecord, cfg?: AgentConfig, decryptError?: string): ApiAgentInfo {
+  if (decryptError) {
+    return {
+      name: record.name,
+      adapter: record.adapter,
+      model: record.model,
+      provider: providerForAdapter(record.adapter, record.baseUrl),
+      baseUrl: record.baseUrl ?? DEFAULT_BASE_URLS[record.adapter],
+      hasKey: false,
+      status: 'invalid',
+      error: `Decryption failed — ${DECRYPT_MISMATCH_HINT}`,
+      kind: 'api',
+    }
+  }
   const apiKey = cfg?.apiKey ?? decryptUserAgentKey(record)
   const config = cfg ?? state.userAgentRecordToConfig(record, apiKey)
   return {
@@ -822,8 +854,8 @@ function providerKeyList(userId: string): ProviderKeyInfo[] {
   }))
   const result: ProviderKeyInfo[] = [...keys]
   for (const record of state.listUserAgents(userId)) {
-    const apiKey = decryptUserAgentKey(record)
-    if (!apiKey) continue
+    const { key: apiKey, error } = tryDecryptUserAgentKey(record)
+    if (error || !apiKey) continue
     result.push({
       id: `assistant:${record.name}`,
       provider: providerValueForAdapter(record.adapter, record.baseUrl),
@@ -920,7 +952,11 @@ async function assertApiAgentUsable(name: string, cfg: AgentConfig): Promise<voi
 async function diagnoseApiAgent(userId: string, name: string, refresh: boolean): Promise<unknown | undefined> {
   const record = state.getUserAgent(userId, name)
   if (record) {
-    const cfg = state.userAgentRecordToConfig(record, decryptUserAgentKey(record))
+    const { key, error } = tryDecryptUserAgentKey(record)
+    if (error) {
+      return { name, adapter: record.adapter, model: record.model, baseUrl: record.baseUrl, healthy: false, verified: false, error: `Decryption failed — ${DECRYPT_MISMATCH_HINT}` }
+    }
+    const cfg = state.userAgentRecordToConfig(record, key)
     const result = await verifyApiAgent(name, cfg, { force: refresh })
     return { name, adapter: cfg.adapter, model: cfg.model, baseUrl: cfg.baseUrl, healthy: result.ok, verified: result.ok, checkedAt: result.checkedAt, error: result.error }
   }
@@ -1580,8 +1616,11 @@ async function mcpListAgents(args: unknown, ctx: McpContext): Promise<unknown> {
   const catalogAgents = await ctx.agentCatalog.listAgents({ refresh })
   const assistantRecords = state.listUserAgents(ctx.authUser.userId)
   const assistantAgents = await Promise.all(assistantRecords.map(async (agent) => {
-    const cfg = state.userAgentRecordToConfig(agent, decryptUserAgentKey(agent))
-    const smoke = await verifyApiAgent(agent.name, cfg, { force: refresh })
+    const { key, error } = tryDecryptUserAgentKey(agent)
+    const cfg = state.userAgentRecordToConfig(agent, key)
+    const smoke = error
+      ? { ok: false, checkedAt: Date.now(), error: `Decryption failed — ${DECRYPT_MISMATCH_HINT}` }
+      : await verifyApiAgent(agent.name, cfg, { force: refresh })
     return {
       name: agent.name,
       adapter: agent.adapter,
