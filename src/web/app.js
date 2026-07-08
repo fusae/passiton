@@ -256,6 +256,170 @@ const MESSAGES = {
     'sessions.turns': '{count} turns',
     'sessions.delete': 'Delete',
 
+    // Tasks — list page
+    'tasks.title': 'Tasks',
+    'tasks.newTask': '+ New Task',
+    'tasks.stat.running': 'Running Tasks',
+    'tasks.stat.runningSub': 'running right now',
+    'tasks.stat.queued': 'Queued',
+    'tasks.stat.queuedSub': 'waiting to start',
+    'tasks.stat.completed': 'Completed',
+    'tasks.stat.completedSub': 'lead-agent tasks',
+    'tasks.stat.failed': 'Failed',
+    'tasks.stat.failedSub': 'need attention',
+    'tasks.recentTitle': 'Recent Tasks',
+    'tasks.empty': 'No tasks yet. Create your first one!',
+    'tasks.loadMore': 'Load more tasks',
+    'tasks.loading': 'Loading\u2026',
+    'tasks.runningElapsed': 'running {duration}',
+
+    // Tasks — detail page
+    'task.back': '\u2190 Back',
+    'task.askOps': 'Ask Ops',
+    'task.stop': '\u25a0 Stop',
+    'task.restart': '\u21bb Restart',
+    'task.feedbackRerun': '\u270e Feedback & Rerun',
+    'task.notFound': 'Task not found',
+    'task.section.prompt': 'Prompt',
+    'task.section.result': 'Result',
+    'task.section.fullOutput': 'Full Output',
+    'task.section.errorTitle': 'Task error',
+    'task.info': 'Task Info',
+    'task.info.id': 'Task ID',
+    'task.info.agent': 'Agent',
+    'task.info.status': 'Status',
+    'task.info.created': 'Created',
+    'task.info.started': 'Started',
+    'task.info.finished': 'Finished',
+    'task.info.cwd': 'CWD',
+    'task.creationParams': 'Creation Params',
+    'task.liveOutput': 'Live Agent Output',
+    'task.liveOutputWaiting': 'Waiting for agent output\u2026',
+
+    // New Task modal
+    'newTask.title': 'New Task',
+    'newTask.desc': 'Assign one lead agent to run the workflow.',
+    'newTask.noAgents': 'No assistants configured yet.',
+    'newTask.addOneFirst': 'Add one first',
+    'newTask.agent': 'Agent',
+    'newTask.workingDir': 'Working Directory',
+    'newTask.workingDirPlaceholder': '/path/to/project',
+    'newTask.prompt': 'Prompt',
+    'newTask.promptPlaceholder': 'Describe the task\u2026',
+    'newTask.systemPrompt': 'System Prompt',
+    'newTask.systemPromptPlaceholder': 'Optional override',
+    'newTask.context': 'Context',
+    'newTask.contextRules': 'Rules / Constraints',
+    'newTask.contextBackground': 'Background',
+    'newTask.contextFiles': 'Files',
+    'newTask.contextFilesPlaceholder': 'docs/brief.md, src/index.ts',
+    'newTask.create': 'Create',
+    'newTask.cwdRequiresFilesystem': 'Tasks with cwd require a filesystem-capable local CLI agent',
+
+    // Task feedback modal
+    'taskFeedback.title': 'Feedback & Rerun',
+    'taskFeedback.desc': 'Create a new task based on the prompt and result of the current task.',
+    'taskFeedback.feedbackLabel': 'Feedback',
+    'taskFeedback.feedbackPlaceholder': 'What should the agent change or try next?',
+    'taskFeedback.createNew': 'Create New Task',
+    'taskFeedback.creating': 'Creating\u2026',
+
+    // Task — workspace warnings
+    'task.ws.preexistingOnly': 'Workspace already had uncommitted files before this task.',
+    'task.ws.viewFiles': 'View {count} preexisting file(s)',
+    'task.ws.preexistingExtra': 'Also had {count} preexisting file(s)',
+    'task.ws.changedUnfinished': 'Task changed {count} file(s) before failing.',
+    'task.ws.changedUnfinishedSimple': 'Workspace has {count} changed file(s) after this failed task.',
+    'task.ws.viewChanges': 'View changes',
+    'task.ws.checkWorkspace': 'Task failed. Check workspace {cwd} before rerunning.',
+
+    // Tasks
+    'task_title': '任务',
+    'task_new': '+ New Task',
+    'task_stat_running': 'Running Tasks',
+    'task_stat_running_sub': 'running right now',
+    'task_stat_queued': 'Queued',
+    'task_stat_queued_sub': 'waiting to start',
+    'task_stat_completed': 'Completed',
+    'task_stat_completed_sub': 'lead-agent tasks',
+    'task_stat_failed': 'Failed',
+    'task_stat_failed_sub': 'need attention',
+    'task_recent_title': 'Recent Tasks',
+    'task_empty': 'No tasks yet. Create your first one!',
+    'task_running_elapsed': 'running {duration}',
+    'task_load_more': 'Load more tasks',
+    'task_loading': 'Loading…',
+    'task_not_found': 'Task not found',
+    'task_back': '← Back',
+    'task_ask_ops': 'Ask Ops',
+    'task_stop': '■ Stop',
+    'task_restart': '↻ Restart',
+    'task_feedback_rerun': '✎ Feedback & Rerun',
+    'task_status_running': 'Running',
+    'task_status_queued': 'Queued',
+    'task_status_done': 'Completed',
+    'task_status_error': 'Failed',
+    'task_status_cancelled': 'Cancelled',
+    'task_section_prompt': 'PROMPT',
+    'task_section_result': 'RESULT',
+    'task_section_full_output': 'FULL OUTPUT',
+    'task_section_error_title': 'Task error',
+    'task_info': 'TASK INFO',
+    'task_info_id': 'Task ID',
+    'task_info_agent': 'Agent',
+    'task_info_status': 'Status',
+    'task_info_created': 'Created',
+    'task_info_started': 'Started',
+    'task_info_finished': 'Finished',
+    'task_info_cwd': 'CWD',
+    'task_live_output': 'Live Output',
+    'task_live_output_waiting': 'Waiting for output…',
+    'task_creation_params': 'Creation Params',
+    'task_agent': 'Agent',
+    'task_cwd': 'CWD',
+    'task_prompt': 'Prompt',
+    'task_system_prompt': 'System Prompt',
+    'task_context_rules': 'Rules',
+    'task_context_text': 'Text',
+    'task_context_unnamed_file': 'unnamed file',
+    'task_workspace_preexisting_only': 'Workspace already had uncommitted files before this task.',
+    'task_workspace_view_files': 'View {count} preexisting file(s)',
+    'task_workspace_preexisting_extra': 'Also had {count} preexisting file(s)',
+    'task_workspace_changed_unfinished': 'Task changed {count} file(s) before failing.',
+    'task_workspace_changed_unfinished_simple': 'Workspace has {count} changed file(s) after this failed task.',
+    'task_workspace_view_changes': 'View changes',
+    'task_workspace_check': 'Task failed. Check workspace {cwd} before rerunning.',
+    'task_status_processing': 'Processing…',
+    'task_status_reading': 'Reading {file}…',
+    'task_status_modifying': 'Modifying {file}…',
+    'task_status_executing': 'Executing {cmd}…',
+    'task_status_analyzing': 'Analyzing…',
+
+    // New Task modal
+    'task_modal_title': 'New Task',
+    'task_modal_desc': 'Assign one lead agent to run the workflow.',
+    'task_modal_no_agents': 'No assistants configured yet.',
+    'task_modal_add_one': 'Add one first',
+    'task_modal_working_dir': 'Working Directory',
+    'task_modal_working_dir_placeholder': '/path/to/project',
+    'task_modal_prompt_placeholder': 'Describe the task...',
+    'task_modal_context': 'Context',
+    'task_modal_rules': 'Rules / Constraints',
+    'task_modal_background': 'Background',
+    'task_modal_files': 'Files',
+    'task_modal_files_placeholder': 'docs/brief.md, src/index.ts',
+    'task_modal_system_prompt_placeholder': 'Optional override',
+    'task_modal_create': 'Create',
+    'task_modal_cwd_requires_filesystem': 'Tasks with cwd require a filesystem-capable local CLI agent',
+
+    // Task feedback modal
+    'task_feedback_title': 'Feedback & Rerun',
+    'task_feedback_desc': 'Create a new task from this result plus your feedback.',
+    'task_feedback_label': 'Feedback',
+    'task_feedback_placeholder': 'What should the agent change or try next?',
+    'task_feedback_create_new': 'Create New Task',
+    'task_feedback_creating': 'Creating…',
+
     // Sessions — onboarding
     'sessions.onboarding.ready': 'Ready to Go',
     'sessions.onboarding.readyDesc': 'Ready with <strong>{count}</strong> agent(s). Start your first session!',
@@ -558,6 +722,93 @@ const MESSAGES = {
     'sessions.back': '← 返回',
     'sessions.turns': '{count} 轮',
     'sessions.delete': '删除',
+
+    // Tasks
+    'task_title': 'Tasks',
+    'task_new': '+ 新建任务',
+    'task_stat_running': '运行中的任务',
+    'task_stat_running_sub': '正在运行',
+    'task_stat_queued': '排队中',
+    'task_stat_queued_sub': '等待开始',
+    'task_stat_completed': '已完成',
+    'task_stat_completed_sub': '主 Agent 任务',
+    'task_stat_failed': '失败',
+    'task_stat_failed_sub': '需要处理',
+    'task_recent_title': '最近任务',
+    'task_empty': '暂无任务。创建第一个任务吧！',
+    'task_running_elapsed': '运行 {duration}',
+    'task_load_more': '加载更多任务',
+    'task_loading': '加载中…',
+    'task_not_found': '任务未找到',
+    'task_back': '← 返回',
+    'task_ask_ops': 'Ask Ops',
+    'task_stop': '■ 停止',
+    'task_restart': '↻ 重启',
+    'task_feedback_rerun': '✎ 反馈并重跑',
+    'task_status_running': '运行中',
+    'task_status_queued': '排队中',
+    'task_status_done': '已完成',
+    'task_status_error': '失败',
+    'task_status_cancelled': '已取消',
+    'task_section_prompt': 'PROMPT',
+    'task_section_result': '结果',
+    'task_section_full_output': '完整输出',
+    'task_section_error_title': '任务错误',
+    'task_info': '任务信息',
+    'task_info_id': '任务 ID',
+    'task_info_agent': 'Agent',
+    'task_info_status': '状态',
+    'task_info_created': '创建于',
+    'task_info_started': '开始于',
+    'task_info_finished': '完成于',
+    'task_info_cwd': '工作目录',
+    'task_live_output': '实时输出',
+    'task_live_output_waiting': '等待输出…',
+    'task_creation_params': '创建参数',
+    'task_agent': 'Agent',
+    'task_cwd': '工作目录',
+    'task_prompt': '提示词',
+    'task_system_prompt': '系统提示词',
+    'task_context_rules': '规则',
+    'task_context_text': '文本',
+    'task_context_unnamed_file': '未命名文件',
+    'task_workspace_preexisting_only': '工作区在此任务开始前已有未提交文件。',
+    'task_workspace_view_files': '查看 {count} 个预先存在的文件',
+    'task_workspace_preexisting_extra': '另有 {count} 个预先存在的文件',
+    'task_workspace_changed_unfinished': '任务失败前修改了 {count} 个文件。',
+    'task_workspace_changed_unfinished_simple': '此失败任务后工作区有 {count} 个已修改文件。',
+    'task_workspace_view_changes': '查看变更',
+    'task_workspace_check': '任务失败。重跑前请检查工作区 {cwd}。',
+    'task_status_processing': '处理中…',
+    'task_status_reading': '正在读取 {file}…',
+    'task_status_modifying': '正在修改 {file}…',
+    'task_status_executing': '正在执行 {cmd}…',
+    'task_status_analyzing': '正在分析…',
+
+    // New Task modal
+    'task_modal_title': '新建任务',
+    'task_modal_desc': '分配一个主 Agent 来运行工作流。',
+    'task_modal_no_agents': '暂无已配置的助手。',
+    'task_modal_add_one': '先添加一个',
+    'task_modal_working_dir': '工作目录',
+    'task_modal_working_dir_placeholder': '/path/to/project',
+    'task_modal_prompt_placeholder': '描述任务...',
+    'task_modal_context': '上下文',
+    'task_modal_rules': '规则 / 约束',
+    'task_modal_background': '背景',
+    'task_modal_files': '文件',
+    'task_modal_files_placeholder': 'docs/brief.md, src/index.ts',
+    'task_modal_system_prompt_placeholder': '可选覆盖',
+    'task_modal_create': '创建',
+    'task_modal_cwd_requires_filesystem': '设置工作目录需要支持文件系统的本地 CLI Agent',
+
+    // Task feedback modal
+    'task_feedback_title': '反馈并重跑',
+    'task_feedback_desc': '基于这次结果和你的反馈创建一个新任务。',
+    'task_feedback_label': '反馈',
+    'task_feedback_placeholder': '希望 Agent 修改什么或下一步尝试什么？',
+    'task_feedback_create_new': '创建新任务',
+    'task_feedback_creating': '创建中…',
 
     // Sessions — onboarding
     'sessions.onboarding.ready': '一切就绪',
@@ -1498,7 +1749,7 @@ function updateHeartbeat(hb) {
     if (progressOutput) progressOutput.textContent = hb.lastOutput || t('session.status.processing')
   }
   if (isCurrentWorkflowSession(hb.sessionId)) {
-    setStreamStatus(hb.sessionId, summarizeRawStatus(hb.lastOutput || '运行中...'))
+    setStreamStatus(hb.sessionId, summarizeRawStatus(hb.lastOutput || t('task_status_processing')))
     if (state.liveReviewStep === hb.sessionId) {
       updateWorkflowLiveReviewStream(hb.sessionId)
     } else {
@@ -1960,10 +2211,10 @@ function renderTasks() {
       <div class="main">
         <header class="topbar">
           <div class="topbar-left">
-            <h2>Tasks</h2>
+            <h2>${t('task_title')}</h2>
           </div>
           <div class="topbar-right">
-            <button class="btn btn-primary btn-sm" onclick="window.showNewTaskModal()">+ New Task</button>
+            <button class="btn btn-primary btn-sm" onclick="window.showNewTaskModal()">${t('task_new')}</button>
             <button class="theme-toggle" onclick="window.toggleTheme()">🌙</button>
             ${renderUserMenu()}
           </div>
@@ -1972,29 +2223,29 @@ function renderTasks() {
         <div class="content">
           <div class="stats-row">
             <div class="stat-card">
-              <div class="label">Running Tasks</div>
+              <div class="label">${t('task_stat_running')}</div>
               <div class="stat-value grad-text" id="task-stat-running">0</div>
-              <div class="stat-sub">running right now</div>
+              <div class="stat-sub">${t('task_stat_running_sub')}</div>
             </div>
             <div class="stat-card">
-              <div class="label">Queued</div>
+              <div class="label">${t('task_stat_queued')}</div>
               <div class="stat-value" id="task-stat-queued">0</div>
-              <div class="stat-sub">waiting to start</div>
+              <div class="stat-sub">${t('task_stat_queued_sub')}</div>
             </div>
             <div class="stat-card">
-              <div class="label">Completed</div>
+              <div class="label">${t('task_stat_completed')}</div>
               <div class="stat-value" id="task-stat-done">0</div>
-              <div class="stat-sub">lead-agent tasks</div>
+              <div class="stat-sub">${t('task_stat_completed_sub')}</div>
             </div>
             <div class="stat-card">
-              <div class="label">Failed</div>
+              <div class="label">${t('task_stat_failed')}</div>
               <div class="stat-value" id="task-stat-error">0</div>
-              <div class="stat-sub">need attention</div>
+              <div class="stat-sub">${t('task_stat_failed_sub')}</div>
             </div>
           </div>
 
           <div class="flex-between mb-24">
-            <h3>Recent Tasks</h3>
+            <h3>${t('task_recent_title')}</h3>
           </div>
           <div id="task-cards" class="session-cards task-cards"></div>
         </div>
@@ -2047,7 +2298,7 @@ function renderTaskCards() {
   const container = document.getElementById('task-cards')
   if (!container) return
   if (state.tasks.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No tasks yet. Create your first one!</p>'
+    container.innerHTML = `<p style="color: var(--text-muted); text-align: center; padding: 40px;">${t('task_empty')}</p>`
     stopTaskRunningTimer()
     return
   }
@@ -2058,13 +2309,13 @@ function renderTaskCards() {
     <a href="/task/${task.id}" class="card session-card task-card">
       <div class="session-card-header">
         <span class="session-card-title">${escapeHtml(taskTitle(task))}</span>
-        <span class="badge ${taskBadgeClass(task.status)}">${escapeHtml(task.status)}</span>
+        <span class="badge ${taskBadgeClass(task.status)}">${escapeHtml(taskStatusLabel(task.status))}</span>
       </div>
       <div class="task-card-agent">${escapeHtml(agentLabel(task.agent))}</div>
       <div class="task-card-prompt">${escapeHtml(taskSubtitle(task))}</div>
       <div class="session-card-meta">
         ${isRunning
-          ? `<span class="task-running-elapsed" data-task-start="${startedMs}">运行 ${formatDuration(Date.now() - startedMs)}</span>`
+          ? `<span class="task-running-elapsed" data-task-start="${startedMs}">${t('task_running_elapsed', { duration: formatDuration(Date.now() - startedMs) })}</span>`
           : `<span>⏱ ${formatTime(task.updatedAt)}</span>`}
         ${task.cwd ? `<span>⌂ ${escapeHtml(task.cwd)}</span>` : ''}
       </div>
@@ -2080,7 +2331,7 @@ function renderTaskCards() {
 
 function tasksLoadMoreButtonHtml() {
   const loading = state.taskListLoadingMore
-  return `<button class="btn btn-ghost btn-sm" style="width: 100%; justify-content: center;" onclick="window.loadMoreTasks()" ${loading ? 'disabled' : ''}>${loading ? 'Loading…' : 'Load more tasks'}</button>`
+  return `<button class="btn btn-ghost btn-sm" style="width: 100%; justify-content: center;" onclick="window.loadMoreTasks()" ${loading ? 'disabled' : ''}>${loading ? t('task_loading') : t('task_load_more')}</button>`
 }
 
 function renderTasksLoadMoreButton() {
@@ -2363,7 +2614,7 @@ async function renderTask(id) {
   } catch (err) {
     if (isAbortedErr(err)) return
     if (state.viewToken !== myToken || state.currentTaskId !== id) return
-    document.body.innerHTML = '<div>Task not found</div>'
+    document.body.innerHTML = `<div>${t('task_not_found')}</div>`
     return
   }
   // Stale guard: user navigated away before the fetch resolved.
@@ -2377,9 +2628,9 @@ async function renderTask(id) {
       <div class="main">
         <header class="topbar">
           <div class="topbar-left">
-            <a href="/tasks" class="btn btn-ghost btn-sm">← Back</a>
+            <a href="/tasks" class="btn btn-ghost btn-sm">${t('task_back')}</a>
             <h2>${escapeHtml(taskTitle(task))}</h2>
-            <span id="task-status-badge" class="badge ${taskBadgeClass(task.status)}">${escapeHtml(task.status)}</span>
+            <span id="task-status-badge" class="badge ${taskBadgeClass(task.status)}">${escapeHtml(taskStatusLabel(task.status))}</span>
           </div>
           <div class="topbar-right" id="task-actions">
             ${renderTaskActions(task)}
@@ -2400,14 +2651,14 @@ async function renderTask(id) {
 function renderTaskActions(task) {
   if (task.status === 'queued' || task.status === 'running') {
     return `
-      <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">Ask Ops</button>
-      <button class="btn btn-danger btn-sm" onclick="window.stopCurrentTask()">■ Stop</button>
+      <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">${t('task_ask_ops')}</button>
+      <button class="btn btn-danger btn-sm" onclick="window.stopCurrentTask()">${t('task_stop')}</button>
     `
   }
   return `
-    <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">Ask Ops</button>
-    <button class="btn btn-secondary btn-sm" onclick="window.restartCurrentTask()">↻ Restart</button>
-    <button class="btn btn-primary btn-sm" onclick="window.showTaskFeedbackModal()">✎ Feedback & Rerun</button>
+    <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">${t('task_ask_ops')}</button>
+    <button class="btn btn-secondary btn-sm" onclick="window.restartCurrentTask()">${t('task_restart')}</button>
+    <button class="btn btn-primary btn-sm" onclick="window.showTaskFeedbackModal()">${t('task_feedback_rerun')}</button>
   `
 }
 
@@ -2415,7 +2666,7 @@ function renderTaskHeader(task) {
   const badge = document.getElementById('task-status-badge')
   if (badge) {
     badge.className = `badge ${taskBadgeClass(task.status)}`
-    badge.textContent = task.status
+    badge.textContent = taskStatusLabel(task.status)
   }
   const actions = document.getElementById('task-actions')
   if (actions) {
@@ -2441,9 +2692,9 @@ function renderWorkspaceWarning(task) {
         const preexistingRows = (ws.preexistingFiles || []).map(f => `<li>${escapeHtml(f)}</li>`).join('')
         return `
           <section class="workspace-warning workspace-warning-neutral">
-            <div class="workspace-warning-title">工作区有改动，但均为任务开始前已存在</div>
+            <div class="workspace-warning-title">${t('task_workspace_preexisting_only')}</div>
             <details class="workspace-warning-files">
-              <summary>查看 ${ws.preexistingFileCount} 个文件</summary>
+              <summary>${t('task_workspace_view_files', { count: ws.preexistingFileCount })}</summary>
               <ul class="workspace-warning-file-list">${preexistingRows}</ul>
             </details>
           </section>
@@ -2456,16 +2707,16 @@ function renderWorkspaceWarning(task) {
         const preexistingRows = (ws.preexistingFiles || []).map(f => `<li>${escapeHtml(f)}</li>`).join('')
         preexistingSection = `
           <details class="workspace-warning-files workspace-warning-preexisting">
-            <summary>另有 ${ws.preexistingFileCount} 个文件的改动在任务开始前已存在</summary>
+            <summary>${t('task_workspace_preexisting_extra', { count: ws.preexistingFileCount })}</summary>
             <ul class="workspace-warning-file-list">${preexistingRows}</ul>
           </details>
         `
       }
       return `
         <section class="workspace-warning">
-          <div class="workspace-warning-title">⚠ 该任务产生了 ${ws.changedFileCount} 个文件的新改动且未正常完成</div>
+          <div class="workspace-warning-title">${t('task_workspace_changed_unfinished', { count: ws.changedFileCount })}</div>
           <details class="workspace-warning-files">
-            <summary>查看变更文件列表</summary>
+            <summary>${t('task_workspace_view_changes')}</summary>
             <ul class="workspace-warning-file-list">${fileRows}</ul>
           </details>
           ${preexistingSection}
@@ -2476,9 +2727,9 @@ function renderWorkspaceWarning(task) {
     const fileRows = (ws.files || []).map(f => `<li>${escapeHtml(f)}</li>`).join('')
     return `
       <section class="workspace-warning">
-        <div class="workspace-warning-title">⚠ 该任务修改了工作区且未正常完成：${ws.changedFileCount} 个文件有改动</div>
+        <div class="workspace-warning-title">${t('task_workspace_changed_unfinished_simple', { count: ws.changedFileCount })}</div>
         <details class="workspace-warning-files">
-          <summary>查看变更文件列表</summary>
+          <summary>${t('task_workspace_view_changes')}</summary>
           <ul class="workspace-warning-file-list">${fileRows}</ul>
         </details>
       </section>
@@ -2486,7 +2737,7 @@ function renderWorkspaceWarning(task) {
   }
   return `
     <section class="workspace-warning">
-      <div class="workspace-warning-title">该任务在 <code class="workspace-warning-cwd">${escapeHtml(task.cwd)}</code> 中执行且未正常完成，建议检查工作区状态</div>
+      <div class="workspace-warning-title">${t('task_workspace_check', { cwd: `<code class="workspace-warning-cwd">${escapeHtml(task.cwd)}</code>` })}</div>
     </section>
   `
 }
@@ -2499,51 +2750,51 @@ function renderTaskContent(task) {
     <div class="task-main">
       ${task.status === 'error' && task.cwd ? renderWorkspaceWarning(task) : ''}
       <section class="card task-section">
-        <div class="label mb-8">Prompt</div>
+        <div class="label mb-8">${t('task_section_prompt')}</div>
         <div class="task-copy">${renderMarkdownCached(task.prompt || '')}</div>
       </section>
       ${task.result ? `
         <section class="card task-section">
-          <div class="label mb-8">Result</div>
+          <div class="label mb-8">${t('task_section_result')}</div>
           <div class="task-copy">${renderMarkdownCached(task.result)}</div>
         </section>
       ` : ''}
       ${showFullOutput ? `
         <section class="card task-section">
-          <div class="label mb-8">Full Output</div>
+          <div class="label mb-8">${t('task_section_full_output')}</div>
           <div class="task-copy">${renderMarkdownCached(task.output)}</div>
         </section>
       ` : ''}
       ${task.errorMessage ? `
         <section class="error-box">
-          <div class="error-title">Task error</div>
+          <div class="error-title">${t('task_section_error_title')}</div>
           <div class="error-detail">${escapeHtml(task.errorMessage)}</div>
         </section>
       ` : ''}
     </div>
     <aside class="card task-meta">
-      <div class="label mb-16">Task Info</div>
+      <div class="label mb-16">${t('task_info')}</div>
       <div class="panel-kv">
-        <div class="panel-kv-row"><span class="kv-label">Task ID</span><span class="kv-value mono">${escapeHtml(task.id.slice(0, 12))}</span></div>
-        <div class="panel-kv-row"><span class="kv-label">Agent</span><span class="kv-value">${escapeHtml(agentLabel(task.agent))}</span></div>
-        <div class="panel-kv-row"><span class="kv-label">Status</span><span class="badge ${taskBadgeClass(task.status)}">${escapeHtml(task.status)}</span></div>
-        <div class="panel-kv-row"><span class="kv-label">Created</span><span class="kv-value">${new Date(task.createdAt).toLocaleString()}</span></div>
-        ${task.startedAt ? `<div class="panel-kv-row"><span class="kv-label">Started</span><span class="kv-value">${new Date(task.startedAt).toLocaleString()}</span></div>` : ''}
-        ${task.finishedAt ? `<div class="panel-kv-row"><span class="kv-label">Finished</span><span class="kv-value">${new Date(task.finishedAt).toLocaleString()}</span></div>` : ''}
-        ${task.cwd ? `<div class="panel-kv-row"><span class="kv-label">CWD</span><span class="kv-value mono">${escapeHtml(task.cwd)}</span></div>` : ''}
+        <div class="panel-kv-row"><span class="kv-label">${t('task_info_id')}</span><span class="kv-value mono">${escapeHtml(task.id.slice(0, 12))}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">${t('task_info_agent')}</span><span class="kv-value">${escapeHtml(agentLabel(task.agent))}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">${t('task_info_status')}</span><span class="badge ${taskBadgeClass(task.status)}">${escapeHtml(taskStatusLabel(task.status))}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">${t('task_info_created')}</span><span class="kv-value">${new Date(task.createdAt).toLocaleString()}</span></div>
+        ${task.startedAt ? `<div class="panel-kv-row"><span class="kv-label">${t('task_info_started')}</span><span class="kv-value">${new Date(task.startedAt).toLocaleString()}</span></div>` : ''}
+        ${task.finishedAt ? `<div class="panel-kv-row"><span class="kv-label">${t('task_info_finished')}</span><span class="kv-value">${new Date(task.finishedAt).toLocaleString()}</span></div>` : ''}
+        ${task.cwd ? `<div class="panel-kv-row"><span class="kv-label">${t('task_info_cwd')}</span><span class="kv-value mono">${escapeHtml(task.cwd)}</span></div>` : ''}
       </div>
       ${renderTaskCreationDetails(task)}
       ${task.status !== 'queued' && task.status !== 'running' ? `
         <div class="divider"></div>
         <div style="display: grid; gap: 10px;">
-          <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="window.restartCurrentTask()">↻ Restart</button>
-          <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="window.showTaskFeedbackModal()">✎ Feedback & Rerun</button>
+          <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="window.restartCurrentTask()">${t('task_restart')}</button>
+          <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="window.showTaskFeedbackModal()">${t('task_feedback_rerun')}</button>
         </div>
       ` : ''}
       ${(task.lastAgentOutput || task.status === 'queued' || task.status === 'running') ? `
         <div class="divider"></div>
-        <div class="label mb-8">Live Agent Output</div>
-        <pre id="task-live-output" class="code-block task-live-output">${escapeHtml(task.lastAgentOutput || '等待 agent 输出...')}</pre>
+        <div class="label mb-8">${t('task_live_output')}</div>
+        <pre id="task-live-output" class="code-block task-live-output">${escapeHtml(task.lastAgentOutput || t('task_live_output_waiting'))}</pre>
       ` : ''}
     </aside>
   `
@@ -2553,7 +2804,7 @@ function renderTaskContent(task) {
 function updateTaskLiveOutput(task) {
   const output = document.getElementById('task-live-output')
   if (!output || !task) return
-  output.textContent = task.lastAgentOutput || '等待 agent 输出...'
+  output.textContent = task.lastAgentOutput || t('task_live_output_waiting')
   output.scrollTop = output.scrollHeight
 }
 
@@ -2849,7 +3100,7 @@ function renderWorkflowTimelineStep(step, session, index, totalSteps) {
   const canRequestChanges = step.status === 'active' && (session?.status === 'paused' || session?.status === 'stopped') && approvalDependencies.length > 0
   const canManualArtifacts = step.nodeType === 'image_generate' && status !== 'done'
   const runningStatus = status === 'active'
-    ? (state.streamStatus.get(step.sessionId) || summarizeRawStatus(state.heartbeats.get(step.sessionId)?.lastOutput || '运行中...'))
+    ? (state.streamStatus.get(step.sessionId) || summarizeRawStatus(state.heartbeats.get(step.sessionId)?.lastOutput || t('task_status_processing')))
     : ''
   const errorTitle = session?.errorType || (status === 'error' ? 'step_error' : '')
   const errorDetail = status === 'error' ? (session?.errorMessage || step.errorMessage || '') : ''
@@ -3929,13 +4180,13 @@ function stepIcon(type) {
 
 function summarizeRawStatus(content) {
   const text = (content || '').replace(/\s+/g, ' ').trim()
-  if (!text) return t('session.status.processing')
+  if (!text) return t('task_status_processing')
   const file = extractUiFile(text)
   const command = extractUiCommand(text)
-  if (/\b(read file|read_file|reading|read|cat|sed|rg|grep)\b/i.test(text)) return t('session.status.reading', { file: file || command || '' })
-  if (/\b(write|edit|apply_patch|patch|wrote|modified|update file|create file|save)\b/i.test(text)) return t('session.status.modifying', { file: file || '' })
-  if (/\b(bash|shell|exec|execute|run command|npm|pnpm|yarn|git|node|tsc|pytest|vitest|make)\b/i.test(text)) return t('session.status.executing', { cmd: command || text.slice(0, 50) })
-  if (/thinking|analysis|plan|分析|计划/i.test(text)) return t('session.status.analyzing')
+  if (/\b(read file|read_file|reading|read|cat|sed|rg|grep)\b/i.test(text)) return t('task_status_reading', { file: file || command || '' })
+  if (/\b(write|edit|apply_patch|patch|wrote|modified|update file|create file|save)\b/i.test(text)) return t('task_status_modifying', { file: file || '' })
+  if (/\b(bash|shell|exec|execute|run command|npm|pnpm|yarn|git|node|tsc|pytest|vitest|make)\b/i.test(text)) return t('task_status_executing', { cmd: command || text.slice(0, 50) })
+  if (/thinking|analysis|plan|分析|计划/i.test(text)) return t('task_status_analyzing')
   return text.slice(0, 50)
 }
 
@@ -5137,52 +5388,52 @@ window.showNewTaskModal = async function() {
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>New Task</h3>
-          <p>Assign one lead agent to run the workflow.</p>
+          <h3>${t('task_modal_title')}</h3>
+          <p>${t('task_modal_desc')}</p>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
       </div>
       ${noAgents ? `
         <div class="template-empty-agents" style="margin-bottom: 20px;">
-          <span>No assistants configured yet.</span>
-          <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">Add one first</button>
+          <span>${t('task_modal_no_agents')}</span>
+          <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">${t('task_modal_add_one')}</button>
         </div>
       ` : ''}
       <form onsubmit="window.createTask(event)">
         <div class="form-group">
-          <label>Agent</label>
+          <label>${t('task_agent')}</label>
           <select class="input" name="agent" required ${noAgents ? 'disabled' : ''}>${options}</select>
         </div>
         <div class="form-group">
-          <label>Working Directory</label>
-          <input class="input" name="cwd" placeholder="/path/to/project">
+          <label>${t('task_modal_working_dir')}</label>
+          <input class="input" name="cwd" placeholder="${t('task_modal_working_dir_placeholder')}">
         </div>
         <div class="form-group">
-          <label>Prompt</label>
-          <textarea class="input" name="prompt" rows="6" required placeholder="Describe the task..."></textarea>
+          <label>${t('task_prompt')}</label>
+          <textarea class="input" name="prompt" rows="6" required placeholder="${t('task_modal_prompt_placeholder')}"></textarea>
         </div>
         <details class="context-details">
-          <summary>Context</summary>
+          <summary>${t('task_modal_context')}</summary>
           <div class="form-group">
-            <label>Rules / Constraints</label>
+            <label>${t('task_modal_rules')}</label>
             <textarea class="input" name="contextRules" rows="3"></textarea>
           </div>
           <div class="form-group">
-            <label>Background</label>
+            <label>${t('task_modal_background')}</label>
             <textarea class="input" name="contextText" rows="3"></textarea>
           </div>
           <div class="form-group">
-            <label>Files</label>
-            <textarea class="input" name="contextFiles" rows="2" placeholder="docs/brief.md, src/index.ts"></textarea>
+            <label>${t('task_modal_files')}</label>
+            <textarea class="input" name="contextFiles" rows="2" placeholder="${t('task_modal_files_placeholder')}"></textarea>
           </div>
         </details>
         <div class="form-group">
-          <label>System Prompt</label>
-          <textarea class="input" name="systemPrompt" rows="4" placeholder="Optional override"></textarea>
+          <label>${t('task_system_prompt')}</label>
+          <textarea class="input" name="systemPrompt" rows="4" placeholder="${t('task_modal_system_prompt_placeholder')}"></textarea>
         </div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary" ${noAgents ? 'disabled' : ''}>Create</button>
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('common.cancel')}</button>
+          <button type="submit" class="btn btn-primary" ${noAgents ? 'disabled' : ''}>${t('task_modal_create')}</button>
         </div>
       </form>
     </div>
@@ -5195,7 +5446,7 @@ window.createTask = async function(e) {
   const cwd = String(fd.get('cwd') || '').trim()
   const agentName = String(fd.get('agent') || '')
   if (cwd && !agentHasFilesystem(agentName)) {
-    showToast('Tasks with cwd require a filesystem-capable local CLI agent')
+    showToast(t('task_modal_cwd_requires_filesystem'))
     return
   }
   const body = {
@@ -5221,19 +5472,19 @@ window.showTaskFeedbackModal = function() {
     <div class="modal-card">
       <div class="modal-head">
         <div>
-          <h3>Feedback & Rerun</h3>
-          <p>基于当前 Task 的 prompt 和结果创建一个新 Task。</p>
+          <h3>${t('task_feedback_title')}</h3>
+          <p>${t('task_feedback_desc')}</p>
         </div>
-        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">Close</button>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
       </div>
       <form onsubmit="window.rerunTaskWithFeedback(event)">
         <div class="form-group">
-          <label>反馈意见</label>
-          <textarea class="input" name="feedback" rows="7" required placeholder="哪里不满意？希望怎么改？"></textarea>
+          <label>${t('task_feedback_label')}</label>
+          <textarea class="input" name="feedback" rows="7" required placeholder="${t('task_feedback_placeholder')}"></textarea>
         </div>
         <div class="modal-actions">
-          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">Cancel</button>
-          <button type="submit" class="btn btn-primary" data-submit>Create New Task</button>
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('common.cancel')}</button>
+          <button type="submit" class="btn btn-primary" data-submit>${t('task_feedback_create_new')}</button>
         </div>
       </form>
     </div>
@@ -5262,7 +5513,7 @@ window.rerunTaskWithFeedback = async function(e) {
   try {
     if (submit) {
       submit.disabled = true
-      submit.textContent = 'Creating...'
+      submit.textContent = t('task_feedback_creating')
     }
     const created = await api('/api/tasks', 'POST', compactObject({
       agent: { adapter: task.agent?.adapter },
@@ -5278,7 +5529,7 @@ window.rerunTaskWithFeedback = async function(e) {
     showToast(err.message)
     if (submit) {
       submit.disabled = false
-      submit.textContent = 'Create New Task'
+      submit.textContent = t('task_feedback_create_new')
     }
   }
 }
@@ -6350,13 +6601,13 @@ function renderTaskCreationDetails(task) {
   return `
     <div class="divider"></div>
     <details class="creation-details">
-      <summary>Creation Params</summary>
+      <summary>${t('task_creation_params')}</summary>
       <div class="panel-kv creation-kv">
-        <div class="panel-kv-row"><span class="kv-label">Agent</span><span class="kv-value">${escapeHtml(agentLabel(task.agent))}</span></div>
-        ${task.cwd ? `<div class="panel-kv-row"><span class="kv-label">CWD</span><span class="kv-value mono">${escapeHtml(task.cwd)}</span></div>` : ''}
+        <div class="panel-kv-row"><span class="kv-label">${t('task_agent')}</span><span class="kv-value">${escapeHtml(agentLabel(task.agent))}</span></div>
+        ${task.cwd ? `<div class="panel-kv-row"><span class="kv-label">${t('task_cwd')}</span><span class="kv-value mono">${escapeHtml(task.cwd)}</span></div>` : ''}
       </div>
-      ${renderPromptBlock('Prompt', task.prompt)}
-      ${renderPromptBlock('System Prompt', task.systemPrompt)}
+      ${renderPromptBlock(t('task_prompt'), task.prompt)}
+      ${renderPromptBlock(t('task_system_prompt'), task.systemPrompt)}
       ${renderContextDetails(task.context)}
     </details>
   `
@@ -6381,22 +6632,22 @@ function renderContextDetails(context) {
   const files = Array.isArray(context.files) ? context.files : []
   return `
     <details class="context-view" open>
-      <summary>Context</summary>
+      <summary>${t('task_modal_context')}</summary>
       ${context.rules ? `
         <div class="context-view-block">
-          <div class="label mb-8">Rules</div>
+          <div class="label mb-8">${t('task_context_rules')}</div>
           <div class="context-view-copy">${renderMarkdown(context.rules)}</div>
         </div>
       ` : ''}
       ${context.text ? `
         <div class="context-view-block">
-          <div class="label mb-8">Text</div>
+          <div class="label mb-8">${t('task_context_text')}</div>
           <div class="context-view-copy">${renderMarkdown(context.text)}</div>
         </div>
       ` : ''}
       ${files.length ? `
         <div class="context-view-block">
-          <div class="label mb-8">Files</div>
+          <div class="label mb-8">${t('task_modal_files')}</div>
           <div class="context-file-list">
             ${files.map(file => renderContextFile(file)).join('')}
           </div>
@@ -6411,7 +6662,7 @@ function renderContextFile(file) {
   const content = typeof file === 'object' && file?.content ? String(file.content) : ''
   return `
     <details class="context-file-item">
-      <summary class="mono">${escapeHtml(path || 'unnamed file')}</summary>
+      <summary class="mono">${escapeHtml(path || t('task_context_unnamed_file'))}</summary>
       ${content ? `<pre class="context-file-preview">${escapeHtml(content.slice(0, 2000))}${content.length > 2000 ? '\n...' : ''}</pre>` : ''}
     </details>
   `
@@ -6812,6 +7063,10 @@ function taskBadgeClass(status) {
   return `badge-${status}`
 }
 
+function taskStatusLabel(status) {
+  return t(`task_status_${status}`) || status
+}
+
 function providerIcon(provider) {
   return ({ anthropic: 'A', openai: 'O', deepseek: 'D', zhipu: 'Z' })[provider] || '?'
 }
@@ -6872,7 +7127,7 @@ function syncTaskRunningTimer() {
         if (location.pathname !== '/tasks') { stopTaskRunningTimer(); return }
         document.querySelectorAll('[data-task-start]').forEach(el => {
           const start = Number(el.dataset.taskStart)
-          if (start) el.textContent = `运行 ${formatDuration(Date.now() - start)}`
+          if (start) el.textContent = t('task_running_elapsed', { duration: formatDuration(Date.now() - start) })
         })
       }, 1000)
     }
