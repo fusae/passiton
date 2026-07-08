@@ -1103,7 +1103,7 @@ export class Router extends EventEmitter {
    * `perspective` determines which agent we're building for.
    */
   private buildSendOpts(session: Session, perspective: 'from' | 'to', adapter: Adapter): AdapterSendOpts {
-    const systemPrompt = session.systemPrompts?.[perspective]
+    const systemPrompt = this.resolveSystemPrompts(session)?.[perspective]
     const messages = state.getMessages(session.id).slice(-MAX_HISTORY_MESSAGES)
 
     // Build history from the perspective of this agent
@@ -1138,6 +1138,44 @@ export class Router extends EventEmitter {
       if (adapter) return adapter
     }
     return this.adapters.get(name)
+  }
+
+  /**
+   * Resolve the effective system prompts for a session.
+   *
+   * If the session has persisted prompts (user-provided via API, or legacy
+   * data from before this refactor), they are returned as-is — giving exact
+   * reproducibility for those sessions.
+   *
+   * Otherwise, prompts are reconstructed at runtime from the session's
+   * mode / from / to / context / initial-task.  Reconstruction is a pure
+   * function of session state, so persisting generated copies was pure waste
+   * (they embedded the full context and inflated the DB).
+   *
+   * Design trade-off: when an old session is resumed after a Turing upgrade,
+   * the reconstructed prompts may differ from what the session originally
+   * used.  This is accepted — generated prompts evolve with Turing, and
+   * storage savings outweigh the minor semantic drift.
+   */
+  private resolveSystemPrompts(session: Session): { from: string; to: string } | undefined {
+    if (session.systemPrompts) return session.systemPrompts
+
+    const messages = state.getMessages(session.id)
+    const task = messages.find((msg) => msg.from === 'human' && msg.round === 0)?.content ?? ''
+    const fromAdapter = this.resolveAdapter(session.from.adapter, session.userId)
+    const toAdapter = this.resolveAdapter(session.to.adapter, session.userId)
+
+    return generateSystemPrompts(
+      session.mode,
+      session.from,
+      session.to,
+      task,
+      session.context,
+      {
+        fromCanUseTools: adapterCanUseTools(fromAdapter),
+        toCanUseTools: adapterCanUseTools(toAdapter),
+      }
+    )
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -1230,17 +1268,11 @@ export class Router extends EventEmitter {
     const mode = params.mode ?? 'freeform'
     const fromAdapter = this.resolveAdapter(params.from.adapter, params.userId)
     const toAdapter = this.resolveAdapter(params.to.adapter, params.userId)
-    const systemPrompts = params.systemPrompts ?? generateSystemPrompts(
-      mode,
-      params.from,
-      params.to,
-      params.initialPrompt,
-      params.context,
-      {
-        fromCanUseTools: adapterCanUseTools(fromAdapter),
-        toCanUseTools: adapterCanUseTools(toAdapter),
-      }
-    )
+
+    // Only persist user-provided system prompts.  Generated prompts are
+    // reconstructed at runtime via resolveSystemPrompts() — they embed the
+    // full context and would otherwise bloat the DB with redundant copies.
+    const systemPrompts = params.systemPrompts
 
     const created = state.createSession({
       id: uuidv4(),
@@ -1779,20 +1811,12 @@ export class Router extends EventEmitter {
       this.buildPipelineDependencyContext(dependencyIds)
     )
 
-    const task = state.getMessages(sessionId).find((msg) => msg.from === 'human' && msg.round === 0)?.content ?? ''
-    const systemPrompts = generateSystemPrompts(
-      session.mode,
-      session.from,
-      session.to,
-      task,
-      mergedContext,
-      {
-        fromCanUseTools: adapterCanUseTools(this.resolveAdapter(session.from.adapter, session.userId)),
-        toCanUseTools: adapterCanUseTools(this.resolveAdapter(session.to.adapter, session.userId)),
-      }
-    )
-
-    state.updateSession(sessionId, { context: mergedContext, systemPrompts })
+    // Only update context; do NOT persist regenerated system prompts.
+    // resolveSystemPrompts() will reconstruct them at call time from the
+    // merged context.  If this session has user-provided prompts, they
+    // are preserved untouched — the dependency context is carried by
+    // session.context and does not need to be baked into the prompt text.
+    state.updateSession(sessionId, { context: mergedContext })
     this.emitLog('info', `Injected pipeline dependency context into [${sessionId.slice(0, 8)}] from ${dependencyIds.length} upstream session(s)`, sessionId)
   }
 

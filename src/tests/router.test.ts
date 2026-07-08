@@ -1690,3 +1690,93 @@ test('recoverable quota errors pause and can resume with an agent override', asy
     assert.equal(state.getSession(session.id)?.to.adapter, 'opencode')
   })
 })
+
+test('session without custom systemPrompts does not persist them and reconstructs at runtime', async () => {
+  await withTempDb(async () => {
+    let capturedToPrompt = ''
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+    router.registerAdapter(new StubAdapter('claude-code', async (_session, _message, opts) => {
+      capturedToPrompt = opts?.systemPrompt ?? ''
+      return '[DONE]'
+    }))
+
+    const session = router.startSession({
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      initialPrompt: 'do something',
+      mode: 'collaborate',
+      maxRounds: 2,
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+    const stored = state.getSession(session.id)!
+    assert.equal(stored.systemPrompts, undefined, 'generated prompts should not be persisted')
+
+    const resolved = (router as any).resolveSystemPrompts(stored) as { from: string; to: string } | undefined
+    assert.ok(resolved?.from, 'reconstructed from-prompt should be non-empty')
+    assert.ok(resolved?.to, 'reconstructed to-prompt should be non-empty')
+
+    assert.ok(capturedToPrompt, 'adapter should have received a system prompt via the call path')
+    assert.equal(capturedToPrompt, resolved!.to)
+  })
+})
+
+test('session with custom systemPrompts persists and uses them as-is', async () => {
+  await withTempDb(async () => {
+    let capturedToPrompt = ''
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+    router.registerAdapter(new StubAdapter('claude-code', async (_session, _message, opts) => {
+      capturedToPrompt = opts?.systemPrompt ?? ''
+      return '[DONE]'
+    }))
+
+    const custom = { from: 'custom-from-prompt', to: 'custom-to-prompt' }
+    const session = router.startSession({
+      from: { adapter: 'codex' },
+      to: { adapter: 'claude-code' },
+      initialPrompt: 'do something',
+      systemPrompts: custom,
+      maxRounds: 2,
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+    const stored = state.getSession(session.id)!
+    assert.deepEqual(stored.systemPrompts, custom, 'user-provided prompts should be persisted as-is')
+
+    const resolved = (router as any).resolveSystemPrompts(stored) as { from: string; to: string } | undefined
+    assert.deepEqual(resolved, custom, 'resolveSystemPrompts should return the stored prompts verbatim')
+
+    assert.equal(capturedToPrompt, 'custom-to-prompt', 'adapter should receive the custom prompt')
+  })
+})
+
+test('legacy persisted system_prompts take priority over runtime reconstruction', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('codex', async () => '[DONE]'))
+
+    const legacy = { from: 'legacy-from-prompt', to: 'legacy-to-prompt' }
+    const session = state.createSession({
+      id: 'legacy-prompts-session',
+      from: { adapter: 'codex' },
+      to: { adapter: 'codex' },
+      systemPrompts: legacy,
+      maxRounds: 2,
+    })
+    state.addMessage({
+      id: 'legacy-prompts-message',
+      sessionId: session.id,
+      from: 'human',
+      content: 'original task',
+      timestamp: Date.now(),
+      round: 0,
+    })
+
+    const resolved = (router as any).resolveSystemPrompts(state.getSession(session.id)!) as { from: string; to: string } | undefined
+    assert.deepEqual(resolved, legacy, 'resolveSystemPrompts must return stored prompts for legacy sessions, not a reconstruction')
+  })
+})
