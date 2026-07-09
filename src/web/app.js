@@ -420,6 +420,15 @@ const MESSAGES = {
     'task_feedback_placeholder': 'What should the agent change or try next?',
     'task_feedback_create_new': 'Create New Task',
     'task_feedback_creating': 'Creating…',
+    'handoff_button': 'Continue with another agent',
+    'handoff_title': 'Continue Task',
+    'handoff_desc': 'Create a new task that continues from this stopped or failed attempt.',
+    'handoff_agent': 'Agent',
+    'handoff_no_agents': 'No compatible task agents.',
+    'handoff_create': 'Continue',
+    'handoff_creating': 'Creating…',
+    'handoff_source': 'Continued from',
+    'handoff_continued_from': 'Continued from {id}',
 
     // Sessions — onboarding
     'sessions.onboarding.ready': 'Ready to Go',
@@ -1036,6 +1045,15 @@ const MESSAGES = {
     'task_feedback_placeholder': '希望 Agent 修改什么或下一步尝试什么？',
     'task_feedback_create_new': '创建新任务',
     'task_feedback_creating': '创建中…',
+    'handoff_button': '换个 Agent 继续',
+    'handoff_title': '继续任务',
+    'handoff_desc': '基于这次停止或失败的尝试创建一个继续任务。',
+    'handoff_agent': 'Agent',
+    'handoff_no_agents': '没有兼容的任务 Agent。',
+    'handoff_create': '继续',
+    'handoff_creating': '创建中…',
+    'handoff_source': '继续自',
+    'handoff_continued_from': '继续自 {id}',
 
     // Sessions — onboarding
     'sessions.onboarding.ready': '一切就绪',
@@ -3103,9 +3121,13 @@ function renderTaskActions(task) {
       <button class="btn btn-danger btn-sm" onclick="window.stopCurrentTask()">${t('task_stop')}</button>
     `
   }
+  const handoffButton = (task.status === 'error' || task.status === 'stopped')
+    ? `<button class="btn btn-primary btn-sm" onclick="window.showTaskHandoffModal()">${t('handoff_button')}</button>`
+    : ''
   return `
     <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">${t('task_ask_ops')}</button>
     <button class="btn btn-secondary btn-sm" onclick="window.restartCurrentTask()">${t('task_restart')}</button>
+    ${handoffButton}
     <button class="btn btn-primary btn-sm" onclick="window.showTaskFeedbackModal()">${t('task_feedback_rerun')}</button>
   `
 }
@@ -3226,6 +3248,7 @@ function renderTaskContent(task) {
         <div class="panel-kv-row"><span class="kv-label">${t('task_info_id')}</span><span class="kv-value mono">${escapeHtml(task.id.slice(0, 12))}</span></div>
         <div class="panel-kv-row"><span class="kv-label">${t('task_info_agent')}</span><span class="kv-value">${escapeHtml(agentLabel(task.agent))}</span></div>
         <div class="panel-kv-row"><span class="kv-label">${t('task_info_status')}</span><span class="badge ${taskBadgeClass(task.status)}">${escapeHtml(taskStatusLabel(task.status))}</span></div>
+        ${task.metadata?.continuedFromTaskId ? `<div class="panel-kv-row"><span class="kv-label">${t('handoff_source')}</span><span class="kv-value mono">${escapeHtml(String(task.metadata.continuedFromTaskId).slice(0, 8))}</span></div>` : ''}
         <div class="panel-kv-row"><span class="kv-label">${t('task_info_created')}</span><span class="kv-value">${new Date(task.createdAt).toLocaleString()}</span></div>
         ${task.startedAt ? `<div class="panel-kv-row"><span class="kv-label">${t('task_info_started')}</span><span class="kv-value">${new Date(task.startedAt).toLocaleString()}</span></div>` : ''}
         ${task.finishedAt ? `<div class="panel-kv-row"><span class="kv-label">${t('task_info_finished')}</span><span class="kv-value">${new Date(task.finishedAt).toLocaleString()}</span></div>` : ''}
@@ -3236,6 +3259,7 @@ function renderTaskContent(task) {
         <div class="divider"></div>
         <div style="display: grid; gap: 10px;">
           <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="window.restartCurrentTask()">${t('task_restart')}</button>
+          ${(task.status === 'error' || task.status === 'stopped') ? `<button class="btn btn-primary btn-sm" style="width: 100%;" onclick="window.showTaskHandoffModal()">${t('handoff_button')}</button>` : ''}
           <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="window.showTaskFeedbackModal()">${t('task_feedback_rerun')}</button>
         </div>
       ` : ''}
@@ -5943,6 +5967,67 @@ window.showTaskFeedbackModal = function() {
   `)
 }
 
+window.showTaskHandoffModal = async function() {
+  const task = state.currentTask
+  if (!task) return
+  if (!state.agents.length) await loadAgents()
+  const agents = state.agents.filter(agent => taskAgentAccepted(agent) && (!task.cwd || agentHasFilesystem(agent.name)))
+  const noAgents = agents.length === 0
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3>${t('handoff_title')}</h3>
+          <p>${t('handoff_desc')}</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
+      </div>
+      ${noAgents ? `<p style="color: var(--text-muted); margin-bottom: 16px;">${t('handoff_no_agents')}</p>` : ''}
+      <form onsubmit="window.handoffCurrentTask(event)">
+        <div class="form-group">
+          <label>${t('handoff_agent')}</label>
+          <select class="input" name="agent" required ${noAgents ? 'disabled' : ''}>${agentOptionHtml(agents, '', { includeStatus: true })}</select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('common.cancel')}</button>
+          <button type="submit" class="btn btn-primary" data-submit ${noAgents ? 'disabled' : ''}>${t('handoff_create')}</button>
+        </div>
+      </form>
+    </div>
+  `)
+}
+
+window.handoffCurrentTask = async function(e) {
+  e.preventDefault()
+  const task = state.currentTask
+  if (!task) return
+  const submit = e.target.querySelector('[data-submit]')
+  const fd = new FormData(e.target)
+  const agent = String(fd.get('agent') || '')
+  if (task.cwd && !agentHasFilesystem(agent)) {
+    showToast(t('task_modal_cwd_requires_filesystem'))
+    return
+  }
+  try {
+    if (submit) {
+      submit.disabled = true
+      submit.textContent = t('handoff_creating')
+    }
+    const created = await api(`/api/tasks/${encodeURIComponent(task.id)}/handoff`, 'POST', {
+      agent: { adapter: agent },
+    })
+    closeModal()
+    state.tasks.unshift(created)
+    navigate(`/task/${created.id}`)
+  } catch (err) {
+    showToast(err.message)
+    if (submit) {
+      submit.disabled = false
+      submit.textContent = t('handoff_create')
+    }
+  }
+}
+
 window.rerunTaskWithFeedback = async function(e) {
   e.preventDefault()
   const task = state.currentTask
@@ -7400,14 +7485,18 @@ function agentHasFilesystem(name) {
   return agent ? agent.kind === 'local' : false
 }
 
+function taskAgentAccepted(agent) {
+  return agent.status !== 'invalid' && agent.status !== 'no_key'
+}
+
 function agentCapabilityLabel(agent) {
   return agent.kind === 'local' ? 'Filesystem' : 'No filesystem'
 }
 
-function agentOptionHtml(agents, selected = '') {
+function agentOptionHtml(agents, selected = '', opts = {}) {
   return agents.map(agent => `
     <option value="${escapeAttr(agent.name)}" ${agent.name === selected ? 'selected' : ''}>
-      ${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)} · ${agentCapabilityLabel(agent)}
+      ${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}${opts.includeStatus ? ` · ${escapeHtml(statusLabel(agent.status))}` : ''} · ${agentCapabilityLabel(agent)}
     </option>
   `).join('')
 }

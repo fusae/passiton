@@ -237,6 +237,7 @@ function createTables(): void {
       result            TEXT,
       error_message     TEXT,
       last_agent_output TEXT,
+      metadata          TEXT,
       created_at        INTEGER NOT NULL,
       updated_at        INTEGER NOT NULL,
       started_at        INTEGER,
@@ -392,6 +393,9 @@ function createTables(): void {
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE tasks ADD COLUMN workspace_state TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN metadata TEXT`)
   } catch { /* column already exists */ }
   try {
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_user_idempotency ON sessions(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL`)
@@ -667,6 +671,10 @@ function rowToTask(row: Record<string, unknown>): Task {
   if (row.workspace_state) {
     try { workspaceState = JSON.parse(row.workspace_state as string) } catch { /* ignore */ }
   }
+  let metadata: Task['metadata'] | undefined
+  if (row.metadata) {
+    try { metadata = JSON.parse(row.metadata as string) } catch { /* ignore */ }
+  }
   return {
     id: row.id as string,
     userId: (row.user_id as string | null) ?? undefined,
@@ -686,6 +694,7 @@ function rowToTask(row: Record<string, unknown>): Task {
     errorMessage: (row.error_message as string | null) ?? undefined,
     lastAgentOutput: (row.last_agent_output as string | null) ?? undefined,
     ...(workspaceState ? { workspaceState } : {}),
+    ...(metadata ? { metadata } : {}),
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
     startedAt: (row.started_at as number | null) ?? undefined,
@@ -703,13 +712,14 @@ export function createTask(params: {
   cwd?: string
   context?: SessionContext
   systemPrompt?: string
+  metadata?: Task['metadata']
 }): Task {
   const now = Date.now()
   db.prepare(`
     INSERT INTO tasks (
-      id, user_id, idempotency_key, agent_adapter, agent_label, prompt, status, permission_mode, cwd, context, system_prompt, created_at, updated_at
+      id, user_id, idempotency_key, agent_adapter, agent_label, prompt, status, permission_mode, cwd, context, system_prompt, metadata, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)
   `).run(
     params.id,
     params.userId ?? DEFAULT_USER_ID,
@@ -721,6 +731,7 @@ export function createTask(params: {
     params.cwd ?? null,
     params.context ? JSON.stringify(clampSessionContext(params.context) ?? params.context) : null,
     params.systemPrompt ?? null,
+    params.metadata ? JSON.stringify(params.metadata) : null,
     now,
     now
   )

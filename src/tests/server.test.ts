@@ -17,7 +17,26 @@ import { encryptSecret } from '../keyvault.js'
 
 class StubAgentCatalog {
   async listAgents(): Promise<unknown[]> {
-    return []
+    return [
+      {
+        name: 'codex',
+        adapter: 'codex',
+        source: 'configured',
+        healthy: true,
+        verified: true,
+        availableForSessions: true,
+        command: 'codex',
+      },
+      {
+        name: 'gemini-cli',
+        adapter: 'gemini-cli',
+        source: 'configured',
+        healthy: true,
+        verified: false,
+        availableForSessions: false,
+        command: 'gemini',
+      },
+    ]
   }
 
   async diagnoseAgent(name: string): Promise<unknown> {
@@ -368,8 +387,9 @@ test('GET /api/docs returns unauthenticated API reference', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/docs`)
     assert.equal(response.status, 200)
-    const payload = await response.json() as { createSession: { path: string }; agentManagement: { createApiAgent: { path: string }; createCliAgent: { path: string } } }
+    const payload = await response.json() as { createSession: { path: string }; handoffTask: { path: string }; agentManagement: { createApiAgent: { path: string }; createCliAgent: { path: string } } }
     assert.equal(payload.createSession.path, '/api/sessions')
+    assert.equal(payload.handoffTask.path, '/api/tasks/:id/handoff')
     assert.ok(payload.agentManagement, 'docs include agentManagement section')
     assert.equal(payload.agentManagement.createApiAgent.path, '/api/agents')
     assert.equal(payload.agentManagement.createCliAgent.path, '/api/config/agents')
@@ -639,6 +659,158 @@ test('POST /api/tasks runs a lead-agent task and exposes its result', async () =
       }))
     },
   })
+})
+
+test('POST /api/tasks/:id/handoff creates a continuation task from an errored cwd task', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'task-handoff@example.com')
+    const cwd = mkdtempSync(join(tmpdir(), 'turing-handoff-'))
+    try {
+      state.createTask({
+        id: 'handoff-source',
+        userId: auth.userId,
+        agent: { adapter: 'opencode' },
+        prompt: 'Finish the feature',
+        cwd,
+      })
+      state.updateTask('handoff-source', {
+        status: 'error',
+        errorMessage: 'provider quota exhausted',
+        lastAgentOutput: 'implemented server path\nleft frontend pending',
+        workspaceState: {
+          dirty: true,
+          changedFileCount: 2,
+          files: ['M src/server.ts', 'M src/web/app.js'],
+          preexistingFileCount: 1,
+          preexistingFiles: ['M README.md'],
+        },
+      }, auth.userId)
+
+      const response = await fetch(`${baseUrl}/api/tasks/handoff-source/handoff`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ agent: { adapter: 'codex' } }),
+      })
+      assert.equal(response.status, 201)
+      const created = await response.json() as { status: string; agent: { adapter: string }; prompt: string; cwd: string; metadata?: { continuedFromTaskId?: string } }
+      assert.equal(created.status, 'queued')
+      assert.equal(created.agent.adapter, 'codex')
+      assert.equal(created.cwd, cwd)
+      assert.equal(created.metadata?.continuedFromTaskId, 'handoff-source')
+      assert.match(created.prompt, /Finish the feature/)
+      assert.match(created.prompt, /provider quota exhausted/)
+      assert.match(created.prompt, /implemented server path/)
+      assert.match(created.prompt, /M src\/server\.ts/)
+      assert.match(created.prompt, /Pre-existing files count: 1/)
+      assert.match(created.prompt, /Verify the current state first/)
+    } finally {
+      rmSync(cwd, { recursive: true, force: true })
+    }
+  })
+})
+
+test('POST /api/tasks/:id/handoff accepts unverified agents and rejects nonexistent agents', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'task-handoff-unverified@example.com')
+    state.createTask({
+      id: 'handoff-unverified-source',
+      userId: auth.userId,
+      agent: { adapter: 'opencode' },
+      prompt: 'finish without cwd',
+    })
+    state.updateTask('handoff-unverified-source', { status: 'error', errorMessage: 'failed' }, auth.userId)
+
+    const accepted = await fetch(`${baseUrl}/api/tasks/handoff-unverified-source/handoff`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: { adapter: 'gemini-cli' } }),
+    })
+    assert.equal(accepted.status, 201)
+    const created = await accepted.json() as { agent: { adapter: string }; metadata?: { continuedFromTaskId?: string } }
+    assert.equal(created.agent.adapter, 'gemini-cli')
+    assert.equal(created.metadata?.continuedFromTaskId, 'handoff-unverified-source')
+
+    const rejected = await fetch(`${baseUrl}/api/tasks/handoff-unverified-source/handoff`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: { adapter: 'missing-agent' } }),
+    })
+    assert.equal(rejected.status, 400)
+    const payload = await rejected.json() as { error: string }
+    assert.match(payload.error, /Agent not found: missing-agent/)
+  })
+})
+
+test('POST /api/tasks/:id/handoff rejects running source tasks', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'task-handoff-running@example.com')
+    state.createTask({
+      id: 'handoff-running',
+      userId: auth.userId,
+      agent: { adapter: 'opencode' },
+      prompt: 'still running',
+    })
+    state.updateTask('handoff-running', { status: 'running' }, auth.userId)
+
+    const response = await fetch(`${baseUrl}/api/tasks/handoff-running/handoff`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: { adapter: 'codex' } }),
+    })
+    assert.equal(response.status, 400)
+  })
+})
+
+test('POST /api/tasks/:id/handoff enforces filesystem-capable agents for cwd tasks', async () => {
+  const fakeApi = http.createServer((_, res) => {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ choices: [{ message: { content: 'OK' }, finish_reason: 'stop' }] }))
+  })
+  await new Promise<void>((resolve) => fakeApi.listen(0, resolve))
+  const fakeAddress = fakeApi.address()
+  if (!fakeAddress || typeof fakeAddress === 'string') throw new Error('fake API did not start')
+
+  try {
+    await withServer(async (baseUrl) => {
+      const auth = await register(baseUrl, 'task-handoff-capability@example.com')
+      const cwd = mkdtempSync(join(tmpdir(), 'turing-handoff-cap-'))
+      try {
+        state.createUserAgent({
+          id: 'api-handoff-agent',
+          userId: auth.userId,
+          name: 'api-helper',
+          adapter: 'custom-api',
+          model: 'gpt-test',
+          baseUrl: `http://127.0.0.1:${fakeAddress.port}/chat/completions`,
+          ...encryptSecret(auth.userId, 'sk-test1234'),
+        })
+        state.createTask({
+          id: 'handoff-cwd-source',
+          userId: auth.userId,
+          agent: { adapter: 'opencode' },
+          prompt: 'finish cwd work',
+          cwd,
+        })
+        state.updateTask('handoff-cwd-source', { status: 'error', errorMessage: 'failed' }, auth.userId)
+
+        const agents = await fetch(`${baseUrl}/api/agents?refresh=1`, { headers: authHeaders(auth.token) })
+        assert.equal(agents.status, 200)
+
+        const response = await fetch(`${baseUrl}/api/tasks/handoff-cwd-source/handoff`, {
+          method: 'POST',
+          headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+          body: JSON.stringify({ agent: { adapter: 'api-helper' } }),
+        })
+        assert.equal(response.status, 400)
+        const payload = await response.json() as { error: string }
+        assert.match(payload.error, /filesystem-capable/)
+      } finally {
+        rmSync(cwd, { recursive: true, force: true })
+      }
+    })
+  } finally {
+    await new Promise<void>((resolve) => fakeApi.close(() => resolve()))
+  }
 })
 
 test('POST /mcp exposes tools and can create a task', async () => {

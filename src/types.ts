@@ -125,6 +125,10 @@ export interface WorkspaceDirtyState {
   preexistingFiles?: string[]
 }
 
+export interface TaskMetadata {
+  continuedFromTaskId?: string
+}
+
 export interface Task {
   id: string
   userId?: string
@@ -141,6 +145,7 @@ export interface Task {
   errorMessage?: string
   lastAgentOutput?: string
   workspaceState?: WorkspaceDirtyState
+  metadata?: TaskMetadata
   createdAt: number
   updatedAt: number
   startedAt?: number

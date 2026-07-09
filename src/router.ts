@@ -138,6 +138,7 @@ export class Router extends EventEmitter {
     systemPrompt?: string
     permissionMode?: Task['permissionMode']
     cwd?: string
+    metadata?: Task['metadata']
   }): Task {
     if (params.idempotencyKey && params.userId) {
       const existing = state.getTaskByIdempotencyKey(params.userId, params.idempotencyKey)
@@ -153,6 +154,7 @@ export class Router extends EventEmitter {
       systemPrompt: params.systemPrompt,
       permissionMode: params.permissionMode ?? 'safe',
       cwd: params.cwd,
+      metadata: params.metadata,
     })
 
     this.emit('event', { type: 'task:created', payload: task } satisfies WsEvent)

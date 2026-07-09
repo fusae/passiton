@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Task handoff endpoint and UI for continuing errored or stopped tasks with a ready agent.
 - `agentManagement` section in `GET /api/docs` self-describing API reference, documenting `POST /api/agents` (API Assistant), `PUT`/`DELETE /api/agents/:name`, and `POST`/`PUT`/`DELETE /api/config/agents` (local CLI Agent config) with required fields and minimal body examples.
 - `LICENSE` (Apache-2.0), `CONTRIBUTING.md`, `SECURITY.md`, this `CHANGELOG.md`.
 - Environment variable `TURING_GEMINI_SKILL_SCRIPT` for the experimental Gemini Image adapter.

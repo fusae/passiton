@@ -47,6 +47,7 @@ const COMPRESS_MAX_BYTES = 4 * 1024 * 1024
 const COMPRESSIBLE_EXT = new Set(['.html', '.js', '.css', '.json', '.svg', '.txt', '.md'])
 // Maximum number of entries retained in the static-asset cache.
 const STATIC_CACHE_MAX = 64
+const HANDOFF_OUTPUT_TAIL_CHARS = 4000
 const API_ADAPTERS = new Set(['anthropic-api', 'openai-api', 'zhipu-api', 'deepseek-api', 'qwen-api', 'moonshot-api', 'custom-api'])
 const PROVIDER_BY_ADAPTER: Record<string, string> = {
   'anthropic-api': 'Anthropic',
@@ -1207,6 +1208,53 @@ function parseTaskBody(body: unknown) {
     permissionMode: parsePermissionMode(data.permissionMode),
     cwd: optionalString(data.cwd, 'cwd'),
   }
+}
+
+function parseTaskHandoffBody(body: unknown): { agent: AgentRef } {
+  const data = requireRecord(body, 'body')
+  return {
+    agent: parseAgentRef(data.agent, 'agent'),
+  }
+}
+
+async function assertTaskAgentAccepted(userId: string, router: Router, agentCatalog: AgentCatalog, agent: AgentRef, cwd?: string): Promise<void> {
+  assertTaskFilesystemCapability(userId, agent, cwd)
+  if (router.getAdapter(agent.adapter)) return
+  const agents = await listAgentModels(userId, agentCatalog)
+  const target = agents.find((item) => item.name === agent.adapter || item.adapter === agent.adapter)
+  if (!target) throw new HttpError(400, `Agent not found: ${agent.adapter}`)
+  if (target.status === 'invalid' || target.status === 'no_key') {
+    throw new HttpError(400, `Agent is not usable: ${agent.adapter}`)
+  }
+}
+
+function buildTaskHandoffPrompt(source: Task): string {
+  const previousOutput = truncateText(source.lastAgentOutput || source.output || source.result || '', HANDOFF_OUTPUT_TAIL_CHARS)
+  const ended = source.status === 'error'
+    ? `error${source.errorMessage ? `: ${source.errorMessage}` : ''}`
+    : 'stopped'
+  const workspace = source.workspaceState
+  const workspaceSection = workspace ? [
+    '## Workspace state',
+    `Agent-caused changed files (${workspace.changedFileCount}):`,
+    ...(workspace.files.length ? workspace.files.map((file) => `- ${file}`) : ['- none recorded']),
+    `Pre-existing files count: ${workspace.preexistingFileCount ?? 0}`,
+    '',
+  ].join('\n') : ''
+
+  return [
+    source.prompt,
+    '',
+    '## Previous attempt',
+    `Agent: ${agentLabel(source.agent)}`,
+    `Ended: ${ended}`,
+    '',
+    previousOutput ? `Output tail:\n${previousOutput}` : 'Output tail: none recorded',
+    '',
+    workspaceSection,
+    '## Continuation instructions',
+    'Verify the current state first (git diff, read the files). Do not redo completed work. Finish only what remains. Report what you found versus what you did.',
+  ].filter(Boolean).join('\n')
 }
 
 function parseFilePreviewBody(body: unknown): { path: string; cwd?: string } {
@@ -2535,6 +2583,14 @@ function sessionApiDocs() {
         },
       },
     },
+    handoffTask: {
+      method: 'POST',
+      path: '/api/tasks/:id/handoff',
+      description: 'Continue an errored or stopped task as a new task with an accepted task agent.',
+      body: {
+        agent: { adapter: 'codex' },
+      },
+    },
     readSession: 'GET /api/sessions/:id',
     stopTask: 'POST /api/tasks/:id/stop',
     control: [
@@ -3418,7 +3474,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const params = parseTaskBody(await parseBody(req))
         assertAllowedWorkspace(params.cwd)
         assertPermissionModeAllowed(params.permissionMode, params.cwd)
-        assertTaskFilesystemCapability(authUser!.userId, params.agent, params.cwd)
+        await assertTaskAgentAccepted(authUser!.userId, router, agentCatalog, params.agent, params.cwd)
         const task = router.startTask({
           userId: authUser!.userId,
           ...params,
@@ -3465,6 +3521,31 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const task = state.getTask(taskMatch[1], authUser!.userId)
         if (!task) return json(res, 404, { error: 'Not found' })
         return json(res, 200, task)
+      }
+
+      // POST /api/tasks/:id/handoff
+      const taskHandoffMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/handoff$/)
+      if (taskHandoffMatch && method === 'POST') {
+        const source = state.getTask(taskHandoffMatch[1], authUser!.userId)
+        if (!source) return json(res, 404, { error: 'Not found' })
+        if (source.status !== 'error' && source.status !== 'stopped') {
+          throw new HttpError(400, 'Task handoff requires an error or stopped source task')
+        }
+        const params = parseTaskHandoffBody(await parseBody(req))
+        assertAllowedWorkspace(source.cwd)
+        assertPermissionModeAllowed(source.permissionMode, source.cwd)
+        await assertTaskAgentAccepted(authUser!.userId, router, agentCatalog, params.agent, source.cwd)
+        const task = router.startTask({
+          userId: authUser!.userId,
+          agent: params.agent,
+          prompt: buildTaskHandoffPrompt(source),
+          context: source.context,
+          systemPrompt: source.systemPrompt,
+          cwd: source.cwd,
+          permissionMode: source.permissionMode,
+          metadata: { continuedFromTaskId: source.id },
+        })
+        return json(res, 201, task)
       }
 
       // POST /api/tasks/:id/stop
