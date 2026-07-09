@@ -1,6 +1,6 @@
 {
   "name": "passiton",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Passiton agent-to-agent communication proxy",
   "type": "module",
   "main": "electron/main.cjs",
@@ -19,7 +19,8 @@
     "test": "npm run build && node --test dist/tests/*.test.js",
     "app": "npm run build && electron .",
     "app:quick": "electron .",
-    "deploy:check": "npm run build && node scripts/deploy-check.mjs"
+    "deploy:check": "npm run build && node scripts/deploy-check.mjs",
+    "prepublishOnly": "npm run check"
   },
   "dependencies": {
     "better-sqlite3": "^9.4.3",
@@ -33,5 +34,33 @@
     "@types/ws": "^8.5.10",
     "electron": "^42.4.1",
     "typescript": "^5.3.3"
-  }
+  },
+  "files": [
+    "dist",
+    "!dist/tests",
+    "config",
+    "electron"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fusae/passiton.git"
+  },
+  "homepage": "https://github.com/fusae/passiton#readme",
+  "bugs": {
+    "url": "https://github.com/fusae/passiton/issues"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "agents",
+    "multi-agent",
+    "orchestration",
+    "agent-handoff",
+    "local-first",
+    "claude-code",
+    "codex",
+    "gemini-cli",
+    "opencode",
+    "workflow",
+    "mcp"
+  ]
 }

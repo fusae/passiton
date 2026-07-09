@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-09
+
 ### Changed
 
 - Project renamed to Passiton; docs, README, and landing page positioning now reflect the local-first open-source launch. TURING_* env vars and ~/.turing remain supported as fallbacks.
@@ -45,5 +47,6 @@ Initial public baseline. Local-first agent-to-agent orchestration:
 - **Web UI**, HTTP API, WebSocket events, and `passiton` CLI.
 - **Auth**: JWT with auto-generated secret on first run, encrypted provider key vault, local-access auto-login.
 
-[Unreleased]: https://github.com/fusae/passiton/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/fusae/passiton/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/fusae/passiton/releases/tag/v0.2.0
 [0.1.0]: https://github.com/fusae/passiton/releases/tag/v0.1.0
