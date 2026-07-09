@@ -1522,6 +1522,7 @@ const state = {
   pipelineDetailController: null,
   pipelinesListController: null,
   settingsController: null,
+  rootLocalLoginAttempted: false,
 }
 
 // ── Router ────────────────────────────────────────────────────────────────────
@@ -1545,6 +1546,7 @@ function navigate(path) {
 function render() {
   nextViewToken()
   const path = location.pathname
+  if (path !== '/') state.rootLocalLoginAttempted = false
 
   // Abort in-flight detail/list fetches from the previous view so stale
   // responses can't render. The view-token guard is the primary defence;
@@ -1560,7 +1562,7 @@ function render() {
 
   // Auth check — remember the intended destination so the login flow can
   // restore it after (auto-)login instead of always defaulting to /sessions.
-  if (path !== '/' && path !== '/login' && !getValidAuthToken()) {
+  if (path !== '/' && path !== '/landing' && path !== '/login' && !getValidAuthToken()) {
     state.pendingPath = path
     return navigate('/login')
   }
@@ -1571,7 +1573,13 @@ function render() {
   if ((path === '/' || path === '/landing') && getValidAuthToken()) {
     return navigate('/sessions')
   }
-  if (path === '/' || path === '/landing') {
+  if (path === '/' && !state.rootLocalLoginAttempted) {
+    state.rootLocalLoginAttempted = true
+    renderLocalLoginLoading()
+    loginLocalUser('/sessions').catch(() => {
+      if (location.pathname === '/' && !getValidAuthToken()) renderLanding()
+    })
+  } else if (path === '/' || path === '/landing') {
     renderLanding()
   } else if (path === '/login') {
     renderLogin()
@@ -1679,7 +1687,7 @@ async function api(path, method = 'GET', body, options = {}) {
   }
 
   if (!r.ok) {
-    if (r.status === 401) {
+    if (r.status === 401 && !options.suppressUnauthorizedRedirect) {
       clearAuthToken()
       navigate('/login')
     }
@@ -2577,6 +2585,15 @@ function renderLogin() {
   }, 0)
 }
 
+function renderLocalLoginLoading() {
+  document.body.innerHTML = `
+    <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center;">
+      <p style="color: var(--text-muted);">${t('sessions.loading')}</p>
+    </div>
+  `
+  updateThemeButton()
+}
+
 window.handleLogin = async function(e) {
   e.preventDefault()
   const form = e.target
@@ -2596,17 +2613,16 @@ window.handleLogin = async function(e) {
   }
 }
 
-window.handleLocalLogin = async function() {
-  try {
-    const data = await api('/api/auth/local', 'POST', {})
-    setAuthToken(data.token)
-    state.user = data.user
-    const target = state.pendingPath || '/sessions'
-    state.pendingPath = null
-    navigate(target)
-  } catch (err) {
-    showToast(err.message)
-  }
+async function loginLocalUser(target = state.pendingPath || '/sessions') {
+  const data = await api('/api/auth/local', 'POST', {}, { suppressUnauthorizedRedirect: true })
+  setAuthToken(data.token)
+  state.user = data.user
+  state.pendingPath = null
+  navigate(target)
+}
+
+window.handleLocalLogin = function() {
+  return loginLocalUser().catch(err => showToast(err.message))
 }
 
 function renderSessions() {
