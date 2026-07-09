@@ -5,7 +5,7 @@ import type { Session, AdapterSendOpts } from '../types.js'
 import { resolveCommandArgs } from './command-args.js'
 import { buildPrompt, runCommand } from './shared.js'
 
-const DEFAULT_GEMINI_PATH = process.env.TURING_GEMINI_COMMAND ?? 'gemini'
+const DEFAULT_GEMINI_PATH = process.env.PASSITON_GEMINI_COMMAND ?? process.env.TURING_GEMINI_COMMAND ?? 'gemini'
 const DEFAULT_GEMINI_ARGS = ['-p', '{prompt}']
 
 export interface GeminiAdapterConfig {

@@ -228,7 +228,7 @@ function configureCors(req: http.IncomingMessage, res: http.ServerResponse): boo
 }
 
 function isAllowedCorsOrigin(origin: string): boolean {
-  const configured = parseAllowedCorsOrigins(process.env.TURING_ALLOWED_ORIGINS)
+  const configured = parseAllowedCorsOrigins(process.env.PASSITON_ALLOWED_ORIGINS ?? process.env.TURING_ALLOWED_ORIGINS)
   if (configured.has(origin)) return true
   try {
     const url = new URL(origin)
@@ -1153,7 +1153,7 @@ function appendOutputDirContext(context: SessionContext | undefined, outputDir?:
   if (!outputDir) return context
   const text = [
     context?.text,
-    `[[Turing Output Directory]]\nSave this step's durable outputs under: ${outputDir}\n[[End Turing Output Directory]]`,
+    `[[Passiton Output Directory]]\nSave this step's durable outputs under: ${outputDir}\n[[End Passiton Output Directory]]`,
   ].filter(Boolean).join('\n\n')
   return {
     ...(context ?? {}),
@@ -1422,11 +1422,11 @@ function assertPermissionModeAllowed(permissionMode: 'safe' | 'trusted' | undefi
 
 function mcpServerMetadata() {
   return {
-    name: 'turing',
+    name: 'passiton',
     transport: 'streamable-http',
     protocolVersion: '2025-06-18',
     endpoint: '/mcp',
-    auth: 'Authorization: Bearer <turing token>',
+    auth: 'Authorization: Bearer <passiton token>',
     tools: mcpTools().map((tool) => tool.name),
   }
 }
@@ -1435,7 +1435,7 @@ function logMcp(message: string): void {
   const line = `${new Date().toISOString()} ${message}\n`
   console.info(message)
   try {
-    fs.appendFileSync('/tmp/turing-mcp-access.log', line)
+    fs.appendFileSync('/tmp/passiton-mcp-access.log', line)
   } catch {
     // best-effort debug log
   }
@@ -1470,8 +1470,8 @@ async function handleMcpSingleRpc(body: unknown, ctx: McpContext): Promise<unkno
         return mcpResult(id, {
           protocolVersion: '2025-06-18',
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'turing', version: '0.1.1-mcp1' },
-          instructions: 'Use Turing tools to create and monitor agent tasks, sessions, and workflows. Ask before destructive operations.',
+          serverInfo: { name: 'passiton', version: '0.1.1-mcp1' },
+          instructions: 'Use Passiton tools to create and monitor agent tasks, sessions, and workflows. Ask before destructive operations.',
         })
       case 'notifications/initialized':
       case 'ping':
@@ -1524,16 +1524,16 @@ function compactMcpStructuredContent(data: unknown): unknown {
 function mcpTools(): McpTool[] {
   return [
     {
-      name: 'turing_list_agents',
-      title: 'List Turing agents',
-      description: 'List agents available to create Turing tasks, sessions, and workflows.',
+      name: 'passiton_list_agents',
+      title: 'List Passiton agents',
+      description: 'List agents available to create Passiton tasks, sessions, and workflows.',
       inputSchema: objectSchema({ refresh: { type: 'boolean', description: 'Run live diagnostics where supported.' } }),
       annotations: { readOnlyHint: true },
     },
     {
-      name: 'turing_create_task',
-      title: 'Create Turing task',
-      description: 'Create a single-agent Turing task. Use this for one-shot work.',
+      name: 'passiton_create_task',
+      title: 'Create Passiton task',
+      description: 'Create a single-agent Passiton task. Use this for one-shot work.',
       inputSchema: objectSchema({
         agent: agentSchema('Agent adapter name or agent reference.'),
         prompt: { type: 'string' },
@@ -1546,8 +1546,8 @@ function mcpTools(): McpTool[] {
       annotations: { destructiveHint: false },
     },
     {
-      name: 'turing_get_task_result',
-      title: 'Get Turing task result',
+      name: 'passiton_get_task_result',
+      title: 'Get Passiton task result',
       description: 'Read a compact task status/result by id. By default this returns a short summary to avoid client safety truncation; set includeOutput=true only when the full report is needed.',
       inputSchema: objectSchema({
         id: { type: 'string' },
@@ -1557,8 +1557,8 @@ function mcpTools(): McpTool[] {
       annotations: { readOnlyHint: true },
     },
     {
-      name: 'turing_create_session',
-      title: 'Create Turing session',
+      name: 'passiton_create_session',
+      title: 'Create Passiton session',
       description: 'Create an agent-to-agent session. Use this for multi-turn planning, implementation, review, or discussion between agents.',
       inputSchema: objectSchema({
         from: agentSchema('Planner or first speaker agent name.'),
@@ -1577,8 +1577,8 @@ function mcpTools(): McpTool[] {
       annotations: { destructiveHint: false },
     },
     {
-      name: 'turing_send_feedback',
-      title: 'Send feedback to Turing session',
+      name: 'passiton_send_feedback',
+      title: 'Send feedback to Passiton session',
       description: 'Inject human feedback into a running or paused session and let the agents continue.',
       inputSchema: objectSchema({
         sessionId: { type: 'string' },
@@ -1587,8 +1587,8 @@ function mcpTools(): McpTool[] {
       annotations: { destructiveHint: false },
     },
     {
-      name: 'turing_get_progress',
-      title: 'Get Turing progress',
+      name: 'passiton_get_progress',
+      title: 'Get Passiton progress',
       description: 'Get progress for a task, session, workflow, or the current active runs.',
       inputSchema: objectSchema({
         kind: { type: 'string', enum: ['task', 'session', 'workflow'] },
@@ -1625,33 +1625,33 @@ function contextSchema(): Record<string, unknown> {
 
 async function callMcpTool(name: string, args: unknown, ctx: McpContext): Promise<unknown> {
   switch (name) {
-    case 'turing_list_agents':
+    case 'passiton_list_agents':
       return mcpListAgents(args, ctx)
-    case 'turing_create_task':
+    case 'passiton_create_task':
       return mcpCreateTask(args, ctx)
-    case 'turing_get_task':
+    case 'passiton_get_task':
       return mcpGetTask(args, ctx)
-    case 'turing_get_task_result':
+    case 'passiton_get_task_result':
       return mcpGetTaskResult(args, ctx)
-    case 'turing_create_session':
+    case 'passiton_create_session':
       return mcpCreateSession(args, ctx)
-    case 'turing_get_session':
+    case 'passiton_get_session':
       return mcpGetSession(args, ctx)
-    case 'turing_create_workflow':
+    case 'passiton_create_workflow':
       return mcpCreateWorkflow(args, ctx)
-    case 'turing_get_workflow':
+    case 'passiton_get_workflow':
       return mcpGetWorkflow(args, ctx)
-    case 'turing_get_progress':
+    case 'passiton_get_progress':
       return mcpGetProgress(args, ctx)
-    case 'turing_send_feedback':
+    case 'passiton_send_feedback':
       return mcpSendFeedback(args, ctx)
-    case 'turing_approve_step':
+    case 'passiton_approve_step':
       return mcpApproveStep(args, ctx)
-    case 'turing_retry_step':
+    case 'passiton_retry_step':
       return mcpRetryStep(args, ctx)
-    case 'turing_stop_run':
+    case 'passiton_stop_run':
       return mcpStopRun(args, ctx)
-    case 'turing_read_artifact':
+    case 'passiton_read_artifact':
       return mcpReadArtifact(args)
     default:
       throw new HttpError(404, `Unknown MCP tool: ${name}`)
@@ -1808,7 +1808,7 @@ async function mcpCreateTask(args: unknown, ctx: McpContext): Promise<unknown> {
       task: summarizeTask(existing),
       url: `/tasks/${existing.id}`,
       reused: true,
-      message: `Task ${existing.id} reused. Use turing_get_task_result with this id to check progress.`,
+      message: `Task ${existing.id} reused. Use passiton_get_task_result with this id to check progress.`,
     }
   }
   const task = ctx.router.startTask({
@@ -1820,7 +1820,7 @@ async function mcpCreateTask(args: unknown, ctx: McpContext): Promise<unknown> {
     task: summarizeTask(task),
     url: `/tasks/${task.id}`,
     reused: false,
-    message: `Task ${task.id} created. Use turing_get_task_result with this id to check progress.`,
+    message: `Task ${task.id} created. Use passiton_get_task_result with this id to check progress.`,
   }
 }
 
@@ -2315,7 +2315,7 @@ async function generateOpsModelAnswer(
     }), {
       signal: controller.signal,
       systemPrompt: [
-        'You are the Ops steward for the Turing platform.',
+        'You are the Ops steward for the Passiton platform.',
         'Your role: inspect platform state, explain task/session/workflow issues, and recommend the next step.',
         'Your boundary: do not edit project files directly, commit, or push; when fixes are needed, recommend creating a repair task or using platform actions.',
         'Answer the user’s current question directly. Do not mechanically restate every diagnostic item.',
@@ -2929,7 +2929,7 @@ async function executeOpsAction(
     systemPrompt: task.systemPrompt,
     permissionMode: task.permissionMode,
     prompt: [
-      'You are a repair task created by Turing Ops. Fix only the issue exposed by the failed task below.',
+      'You are a repair task created by Passiton Ops. Fix only the issue exposed by the failed task below.',
       'Requirements: check the current workspace state first; edit only necessary files; do not push; do not rewrite history; finish with a change summary.',
       '',
       '## Original Task',
@@ -3760,11 +3760,11 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
   const onListening = () => {
     const displayHost = host === '0.0.0.0' ? '127.0.0.1' : host
-    console.log(`[server] Turing running at http://${displayHost ?? 'localhost'}:${port}`)
+    console.log(`[server] Passiton running at http://${displayHost ?? 'localhost'}:${port}`)
   }
   server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
-      console.error(`[server] Port ${port} is already in use. Another Turing instance may be running; stop it, or change server.port in ${getConfigPath()} and retry.`)
+      console.error(`[server] Port ${port} is already in use. Another Passiton instance may be running; stop it, or change server.port in ${getConfigPath()} and retry.`)
     } else {
       console.error(`[server] Startup failed: ${err.code ?? ''} ${err.message}`)
     }

@@ -69,16 +69,16 @@ async function withServer(
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'turing-server-'))
   const originalEnv = {
-    TURING_JWT_SECRET: process.env.TURING_JWT_SECRET,
-    TURING_ALLOW_REGISTRATION: process.env.TURING_ALLOW_REGISTRATION,
-    TURING_ALLOWED_WORKSPACES: process.env.TURING_ALLOWED_WORKSPACES,
-    TURING_ALLOWED_ORIGINS: process.env.TURING_ALLOWED_ORIGINS,
+    PASSITON_JWT_SECRET: process.env.PASSITON_JWT_SECRET,
+    PASSITON_ALLOW_REGISTRATION: process.env.PASSITON_ALLOW_REGISTRATION,
+    PASSITON_ALLOWED_WORKSPACES: process.env.PASSITON_ALLOWED_WORKSPACES,
+    PASSITON_ALLOWED_ORIGINS: process.env.PASSITON_ALLOWED_ORIGINS,
   }
-  process.env.TURING_JWT_SECRET = 'server-test-jwt-secret'
+  process.env.PASSITON_JWT_SECRET = 'server-test-jwt-secret'
   if (options.allowRegistration !== false) {
-    process.env.TURING_ALLOW_REGISTRATION = '1'
+    process.env.PASSITON_ALLOW_REGISTRATION = '1'
   }
-  process.env.TURING_ALLOWED_WORKSPACES ??= tmpdir()
+  process.env.PASSITON_ALLOWED_WORKSPACES ??= tmpdir()
   state.initDb(join(dir, 'turing.db'))
   const router = new Router()
   options.configureRouter?.(router)
@@ -231,7 +231,7 @@ test('ops endpoints report task failures and targeted diagnostics', async () => 
     assert.equal(actionResponse.status, 200)
     const action = await actionResponse.json() as { task: { id: string; prompt: string } }
     assert.ok(action.task.id)
-    assert.match(action.task.prompt, /Turing Ops/)
+    assert.match(action.task.prompt, /Passiton Ops/)
   }, {
     configureRouter(router) {
       router.registerAdapter(new StubAdapter('opencode', async () => '[DONE] repaired'))
@@ -273,9 +273,9 @@ test('CORS rejects unknown origins and supports configured origins', async () =>
     assert.equal(rejected.headers.get('access-control-allow-origin'), null)
   })
 
-  const previousOrigins = process.env.TURING_ALLOWED_ORIGINS
+  const previousOrigins = process.env.PASSITON_ALLOWED_ORIGINS
   try {
-    process.env.TURING_ALLOWED_ORIGINS = 'https://app.example'
+    process.env.PASSITON_ALLOWED_ORIGINS = 'https://app.example'
     await withServer(async (baseUrl) => {
       const allowed = await fetch(`${baseUrl}/health`, {
         method: 'OPTIONS',
@@ -289,9 +289,9 @@ test('CORS rejects unknown origins and supports configured origins', async () =>
     })
   } finally {
     if (previousOrigins === undefined) {
-      delete process.env.TURING_ALLOWED_ORIGINS
+      delete process.env.PASSITON_ALLOWED_ORIGINS
     } else {
-      process.env.TURING_ALLOWED_ORIGINS = previousOrigins
+      process.env.PASSITON_ALLOWED_ORIGINS = previousOrigins
     }
   }
 })
@@ -545,7 +545,7 @@ test('POST /api/auth/local returns a local user token', async () => {
     })
     assert.equal(response.status, 200)
     const payload = await response.json() as { token: string; user: { userId: string; email: string } }
-    assert.equal(payload.user.email, 'local@turing.local')
+    assert.equal(payload.user.email, 'local@passiton.local')
 
     const stats = await fetch(`${baseUrl}/api/stats`, { headers: authHeaders(payload.token) })
     assert.equal(stats.status, 200)
@@ -558,7 +558,7 @@ test('CLI task create authenticates locally and creates a task', async () => {
     const result = await execFileAsync(process.execPath, [cliPath, 'task', 'create', '--agent', 'opencode', 'write', 'article'], {
       env: {
         ...process.env,
-        TURING_BASE_URL: baseUrl,
+        PASSITON_BASE_URL: baseUrl,
       },
     })
 
@@ -575,7 +575,7 @@ test('CLI task create authenticates locally and creates a task', async () => {
 test('POST /api/sessions rejects cwd outside allowed workspaces', async () => {
   const allowed = mkdtempSync(join(tmpdir(), 'turing-allowed-workspace-'))
   const denied = mkdtempSync(join(tmpdir(), 'turing-denied-workspace-'))
-  process.env.TURING_ALLOWED_WORKSPACES = allowed
+  process.env.PASSITON_ALLOWED_WORKSPACES = allowed
   try {
     await withServer(async (baseUrl) => {
       const auth = await register(baseUrl, 'workspace@example.com')
@@ -594,7 +594,7 @@ test('POST /api/sessions rejects cwd outside allowed workspaces', async () => {
   } finally {
     rmSync(allowed, { recursive: true, force: true })
     rmSync(denied, { recursive: true, force: true })
-    delete process.env.TURING_ALLOWED_WORKSPACES
+    delete process.env.PASSITON_ALLOWED_WORKSPACES
   }
 })
 
@@ -652,7 +652,7 @@ test('POST /api/tasks runs a lead-agent task and exposes its result', async () =
     configureRouter: (router) => {
       router.registerAdapter(new StubAdapter('opencode', async (_session, message, opts) => {
         assert.equal(message, 'write article')
-        assert.match(opts?.systemPrompt ?? '', /lead agent for a task inside Turing/)
+        assert.match(opts?.systemPrompt ?? '', /lead agent for a task inside Passiton/)
         assert.match(opts?.systemPrompt ?? '', /requires delegation/)
         assert.match(opts?.systemPrompt ?? '', /markdown only/)
         return '[RESULT]article ready[/RESULT]'
@@ -825,7 +825,7 @@ test('POST /mcp exposes tools and can create a task', async () => {
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
       })
       assert.equal(initialize.status, 200)
-      assert.equal((await initialize.json() as { result: { serverInfo: { name: string } } }).result.serverInfo.name, 'turing')
+      assert.equal((await initialize.json() as { result: { serverInfo: { name: string } } }).result.serverInfo.name, 'passiton')
 
       const tools = await fetch(`${baseUrl}/mcp`, {
         method: 'POST',
@@ -835,7 +835,7 @@ test('POST /mcp exposes tools and can create a task', async () => {
       assert.equal(tools.status, 200)
       const toolsPayload = await tools.json() as { result: { resultType: string; tools: Array<{ name: string }> } }
       assert.equal(toolsPayload.result.resultType, 'complete')
-      assert.ok(toolsPayload.result.tools.some((tool) => tool.name === 'turing_create_task'))
+      assert.ok(toolsPayload.result.tools.some((tool) => tool.name === 'passiton_create_task'))
 
       const created = await fetch(`${baseUrl}/mcp`, {
         method: 'POST',
@@ -845,7 +845,7 @@ test('POST /mcp exposes tools and can create a task', async () => {
           id: 3,
           method: 'tools/call',
           params: {
-            name: 'turing_create_task',
+            name: 'passiton_create_task',
             arguments: {
               agent: 'opencode',
               prompt: 'write mcp article',
@@ -874,7 +874,7 @@ test('POST /mcp exposes tools and can create a task', async () => {
           id: 4,
           method: 'tools/call',
           params: {
-            name: 'turing_create_task',
+            name: 'passiton_create_task',
             arguments: {
               agent: 'opencode',
               prompt: 'write mcp article',
@@ -898,7 +898,7 @@ test('POST /mcp exposes tools and can create a task', async () => {
             jsonrpc: '2.0',
             id: 5,
             method: 'tools/call',
-            params: { name: 'turing_get_task_result', arguments: { id: taskId } },
+            params: { name: 'passiton_get_task_result', arguments: { id: taskId } },
           }),
         })
         const payload = await response.json() as { result: { content: Array<{ text: string }> } }
@@ -918,7 +918,7 @@ test('POST /mcp exposes tools and can create a task', async () => {
           jsonrpc: '2.0',
           id: 6,
           method: 'tools/call',
-          params: { name: 'turing_get_task_result', arguments: { id: taskId, includeOutput: true, maxChars: 1000 } },
+          params: { name: 'passiton_get_task_result', arguments: { id: taskId, includeOutput: true, maxChars: 1000 } },
         }),
       })
       const fullPayload = await fullResult.json() as { result: { content: Array<{ text: string }> } }
@@ -952,7 +952,7 @@ test('POST /mcp reuses duplicate session idempotency keys', async () => {
           id,
           method: 'tools/call',
           params: {
-            name: 'turing_create_session',
+            name: 'passiton_create_session',
             arguments: {
               from: 'opencode',
               to: 'codex',
@@ -996,7 +996,7 @@ test('POST /mcp reuses duplicate sessions without explicit idempotency keys', as
           id,
           method: 'tools/call',
           params: {
-            name: 'turing_create_session',
+            name: 'passiton_create_session',
             arguments: {
               from: 'opencode',
               to: 'codex',
@@ -1040,7 +1040,7 @@ test('MCP accepts token query authentication for custom app setup', async () => 
     assert.equal(response.status, 200)
     const payload = await response.json() as { endpoint: string; tools: string[] }
     assert.equal(payload.endpoint, '/mcp')
-    assert.ok(payload.tools.includes('turing_create_task'))
+    assert.ok(payload.tools.includes('passiton_create_task'))
   })
 })
 
@@ -1440,8 +1440,8 @@ test('EADDRINUSE prints a friendly message and exits with code 1', async () => {
 
 test('registerPersistedUserAgents tolerates agents with undecryptable keys', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-decrypt-'))
-  const originalKey = process.env.TURING_ENCRYPTION_KEY
-  process.env.TURING_ENCRYPTION_KEY = 'decrypt-test-key-A'
+  const originalKey = process.env.PASSITON_ENCRYPTION_KEY
+  process.env.PASSITON_ENCRYPTION_KEY = 'decrypt-test-key-A'
   state.initDb(join(dir, 'turing.db'))
   const userId = 'user-decrypt'
   state.createUser({ id: userId, email: 'decrypt@example.com', passwordHash: 'hash', salt: 'salt' })
@@ -1477,13 +1477,13 @@ test('registerPersistedUserAgents tolerates agents with undecryptable keys', asy
 
   state.closeDb()
   rmSync(dir, { recursive: true, force: true })
-  if (originalKey === undefined) delete process.env.TURING_ENCRYPTION_KEY
-  else process.env.TURING_ENCRYPTION_KEY = originalKey
+  if (originalKey === undefined) delete process.env.PASSITON_ENCRYPTION_KEY
+  else process.env.PASSITON_ENCRYPTION_KEY = originalKey
 })
 
 test('GET /api/agents shows decrypt-failed agent as invalid with error', async () => {
-  const originalKey = process.env.TURING_ENCRYPTION_KEY
-  process.env.TURING_ENCRYPTION_KEY = 'server-test-encryption-key-B'
+  const originalKey = process.env.PASSITON_ENCRYPTION_KEY
+  process.env.PASSITON_ENCRYPTION_KEY = 'server-test-encryption-key-B'
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'agentlist@example.com')
 
@@ -1526,6 +1526,6 @@ test('GET /api/agents shows decrypt-failed agent as invalid with error', async (
     assert.ok(good, 'valid agent should also appear in the list')
     assert.notEqual(good!.status, 'invalid')
   })
-  if (originalKey === undefined) delete process.env.TURING_ENCRYPTION_KEY
-  else process.env.TURING_ENCRYPTION_KEY = originalKey
+  if (originalKey === undefined) delete process.env.PASSITON_ENCRYPTION_KEY
+  else process.env.PASSITON_ENCRYPTION_KEY = originalKey
 })

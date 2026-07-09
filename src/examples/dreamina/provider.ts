@@ -30,14 +30,14 @@ export interface DreaminaProviderOptions {
 
 /**
  * Build the Dreamina ExternalTaskProvider. The provider is inert unless the
- * dreamina binary is configured (TURING_DREAMINA_COMMAND). When inert, parse
+ * dreamina binary is configured (PASSITON_DREAMINA_COMMAND). When inert, parse
  * still works (so a pending job can be registered) but submit/query error out.
  *
  * Kept as a standalone function (not a class) so the test seam is just a
  * function call with option overrides — no Router needed.
  */
 export function createDreaminaProvider(opts: DreaminaProviderOptions = {}): ExternalTaskProvider {
-  const binary = opts.binary ?? process.env.TURING_DREAMINA_COMMAND ?? ''
+  const binary = opts.binary ?? process.env.PASSITON_DREAMINA_COMMAND ?? process.env.TURING_DREAMINA_COMMAND ?? ''
   const submitFn = opts.submitFn ?? ((args, cwd) => submitDreaminaCommand(binary, args, cwd))
   const queryFn = opts.queryFn ?? ((id, dir) => queryDreaminaResult(binary, id, dir))
 
@@ -59,7 +59,7 @@ export function createDreaminaProvider(opts: DreaminaProviderOptions = {}): Exte
 
     async submit(args, cwd) {
       if (!binary) {
-        throw new Error('Dreamina is not configured. Set TURING_DREAMINA_COMMAND to enable video generation steps.')
+        throw new Error('Dreamina is not configured. Set PASSITON_DREAMINA_COMMAND to enable video generation steps.')
       }
       return submitFn(args, cwd)
     },
@@ -111,7 +111,7 @@ async function submitDreaminaVideoStep(
     `已提交即梦视频片段 ${doneJobs.length + 1}/${plan.commands.length}。`,
     '',
     `submit_id：\`${externalId}\``,
-    `命令：\`${process.env.TURING_DREAMINA_COMMAND ?? 'dreamina'} ${next.args.map(shellQuote).join(' ')}\``,
+    `命令：\`${process.env.PASSITON_DREAMINA_COMMAND ?? process.env.TURING_DREAMINA_COMMAND ?? 'dreamina'} ${next.args.map(shellQuote).join(' ')}\``,
     `下载目录：\`${next.downloadDir}\``,
     '状态：`querying`',
     '[/RESULT]',

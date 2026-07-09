@@ -3,8 +3,8 @@ import * as path from 'node:path'
 import { execFile } from 'node:child_process'
 import type { DreaminaQueryResult } from './types.js'
 
-const CURL_COMMAND = process.env.TURING_CURL_COMMAND ?? 'curl'
-const FFMPEG_COMMAND = process.env.TURING_FFMPEG_COMMAND ?? 'ffmpeg'
+const CURL_COMMAND = process.env.PASSITON_CURL_COMMAND ?? process.env.TURING_CURL_COMMAND ?? 'curl'
+const FFMPEG_COMMAND = process.env.PASSITON_FFMPEG_COMMAND ?? process.env.TURING_FFMPEG_COMMAND ?? 'ffmpeg'
 
 export function execFileText(command: string, args: string[], timeout = 60_000, cwd?: string): Promise<string> {
   return new Promise((resolve, reject) => {

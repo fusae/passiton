@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Turing CLI — communicates with the Turing Server via HTTP
-// Usage: turing <command> [options]
+// Passiton CLI — communicates with the Passiton Server via HTTP
+// Usage: passiton <command> [options]
 
 import http from 'http'
 import https from 'https'
@@ -11,9 +11,9 @@ import { loadConfig, validateExposureConfig } from './config.js'
 // ── Config / base URL ─────────────────────────────────────────────────────────
 
 const config = loadConfig()
-const BASE = process.env.TURING_BASE_URL ?? `http://localhost:${config.server.port}`
-const PID_FILE = '/tmp/turing-server.pid'
-let authToken = process.env.TURING_TOKEN
+const BASE = process.env.PASSITON_BASE_URL ?? process.env.TURING_BASE_URL ?? `http://localhost:${config.server.port}`
+const PID_FILE = '/tmp/passiton-server.pid'
+let authToken = process.env.PASSITON_TOKEN ?? process.env.TURING_TOKEN
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────
 
@@ -242,7 +242,7 @@ async function serverStart() {
   } catch { /* not running */ }
 
   // Import and start inline (same process, foreground)
-  console.log(`Starting Turing server at ${BASE} ...`)
+  console.log(`Starting Passiton server at ${BASE} ...`)
   const { initDb } = await import('./state.js')
   const { Router } = await import('./router.js')
   const { registerBuiltinAdapters, registerConfiguredAdapters } = await import('./adapters/factory.js')
@@ -324,7 +324,7 @@ async function chat(flags: Flags) {
   try {
     r = await post('/api/sessions', body)
   } catch (e) {
-    die(`Cannot reach server at ${BASE}. Is it running? (turing server start)`)
+    die(`Cannot reach server at ${BASE}. Is it running? (passiton server start)`)
   }
 
   if (r!.status !== 201) {
@@ -712,7 +712,7 @@ async function configCommand(subcommand: string | undefined, flags: Flags, argv:
       if (flags.mode) (body.defaults as Record<string, unknown>).mode = flags.mode
       if (flags.rounds) (body.defaults as Record<string, unknown>).maxRounds = flags.rounds
       if (Object.keys(body.defaults as Record<string, unknown>).length === 0) {
-        die('Usage: turing config set-defaults [--mode <mode>] [--rounds <n>]')
+        die('Usage: passiton config set-defaults [--mode <mode>] [--rounds <n>]')
       }
       const r = await put('/api/config', body).catch(() => die(`Cannot reach server at ${BASE}`))
       if ((r as { status: number }).status === 200) console.log('Updated defaults.')
@@ -721,7 +721,7 @@ async function configCommand(subcommand: string | undefined, flags: Flags, argv:
     }
 
     case 'set-port': {
-      if (!flags.port) die('Usage: turing config set-port --port <n>')
+      if (!flags.port) die('Usage: passiton config set-port --port <n>')
       const r = await put('/api/config', { server: { port: flags.port } }).catch(() => die(`Cannot reach server at ${BASE}`))
       if ((r as { status: number }).status === 200) console.log('Updated server port. Restart required.')
       else console.error('Error:', (r as { data: unknown }).data)
@@ -730,7 +730,7 @@ async function configCommand(subcommand: string | undefined, flags: Flags, argv:
 
     case 'add-agent': {
       if (!flags.name || !flags.adapter || !flags.command) {
-        die('Usage: turing config add-agent --name <name> --adapter <adapter> --command <path> [--env KEY=VALUE]')
+        die('Usage: passiton config add-agent --name <name> --adapter <adapter> --command <path> [--env KEY=VALUE]')
       }
       const r = await post('/api/config/agents', {
         name: flags.name,
@@ -745,7 +745,7 @@ async function configCommand(subcommand: string | undefined, flags: Flags, argv:
 
     case 'update-agent': {
       const name = argv[2]
-      if (!name) die('Usage: turing config update-agent <name> [--adapter <adapter>] [--command <path>] [--env KEY=VALUE]')
+      if (!name) die('Usage: passiton config update-agent <name> [--adapter <adapter>] [--command <path>] [--env KEY=VALUE]')
       const currentRes = await get('/api/config').catch(() => die(`Cannot reach server at ${BASE}`))
       const current = (currentRes as { data: unknown }).data as {
         agents: Record<string, { adapter: string; command: string; env?: Record<string, string> }>
@@ -765,7 +765,7 @@ async function configCommand(subcommand: string | undefined, flags: Flags, argv:
 
     case 'delete-agent': {
       const name = argv[2]
-      if (!name) die('Usage: turing config delete-agent <name>')
+      if (!name) die('Usage: passiton config delete-agent <name>')
       const r = await del(`/api/config/agents/${encodeURIComponent(name)}`).catch(() => die(`Cannot reach server at ${BASE}`))
       if ((r as { status: number }).status === 200) console.log(`Deleted agent ${name}.`)
       else console.error('Error:', (r as { data: unknown }).data)
@@ -959,46 +959,46 @@ function die(msg: string): never {
 // ── Usage ─────────────────────────────────────────────────────────────────────
 function usage() {
   console.log(`
-  Turing — agent-to-agent communication proxy
+  Passiton — agent-to-agent communication proxy
 
   Usage:
-    turing server start
-    turing server stop
-    turing server status
+    passiton server start
+    passiton server stop
+    passiton server status
 
-    turing chat --from <agent> --to <agent> [--from-label <label>] [--to-label <label>]
+    passiton chat --from <agent> --to <agent> [--from-label <label>] [--to-label <label>]
                 [--mode <mode>] [--cwd <path>] [--approve] [--rounds <n>]
                 [--context-rules <text>] [--context-text <text>] [--context-files <paths>]
                 "<prompt>"
 
-    turing task create --agent <agent> [--cwd <path>]
+    passiton task create --agent <agent> [--cwd <path>]
                        [--context-rules <text>] [--context-text <text>] [--context-files <paths>]
                        "<prompt>"
-    turing tasks [--status <queued|running|done|error|stopped>]
-    turing task show <task-id>
-    turing task stop <task-id>
+    passiton tasks [--status <queued|running|done|error|stopped>]
+    passiton task show <task-id>
+    passiton task stop <task-id>
 
-    turing sessions [--status <active|paused|done|error|stopped>]
-    turing log <session-id>
-    turing delete <session-id>
+    passiton sessions [--status <active|paused|done|error|stopped>]
+    passiton log <session-id>
+    passiton delete <session-id>
 
-    turing pause  <session-id>
-    turing resume <session-id> [--rounds <n>]
-    turing stop   <session-id>
-    turing nudge  <session-id> "<message>"
+    passiton pause  <session-id>
+    passiton resume <session-id> [--rounds <n>]
+    passiton stop   <session-id>
+    passiton nudge  <session-id> "<message>"
 
-    turing takeover <session-id>
-    turing release  <session-id>
+    passiton takeover <session-id>
+    passiton release  <session-id>
 
-    turing agents
-    turing templates
-    turing config show
-    turing config set-defaults [--mode <mode>] [--rounds <n>]
-    turing config set-port --port <n>
-    turing config add-agent --name <name> --adapter <adapter> --command <path> [--env KEY=VALUE]
-    turing config update-agent <name> [--adapter <adapter>] [--command <path>] [--env KEY=VALUE]
-    turing config delete-agent <name>
-    turing health
+    passiton agents
+    passiton templates
+    passiton config show
+    passiton config set-defaults [--mode <mode>] [--rounds <n>]
+    passiton config set-port --port <n>
+    passiton config add-agent --name <name> --adapter <adapter> --command <path> [--env KEY=VALUE]
+    passiton config update-agent <name> [--adapter <adapter>] [--command <path>] [--env KEY=VALUE]
+    passiton config delete-agent <name>
+    passiton health
   `)
 }
 
@@ -1038,13 +1038,13 @@ async function main() {
           break
         case 'show': {
           const id = argv[2]
-          if (!id) die('Usage: turing task show <task-id>')
+          if (!id) die('Usage: passiton task show <task-id>')
           await showTask(id)
           break
         }
         case 'stop': {
           const id = argv[2]
-          if (!id) die('Usage: turing task stop <task-id>')
+          if (!id) die('Usage: passiton task stop <task-id>')
           await stopTask(id)
           break
         }
@@ -1063,35 +1063,35 @@ async function main() {
 
     case 'log': {
       const id = argv[1]
-      if (!id) die('Usage: turing log <session-id>')
+      if (!id) die('Usage: passiton log <session-id>')
       await logSession(id)
       break
     }
 
     case 'pause': {
       const id = argv[1]
-      if (!id) die('Usage: turing pause <session-id>')
+      if (!id) die('Usage: passiton pause <session-id>')
       await pauseSession(id)
       break
     }
 
     case 'resume': {
       const id = argv[1]
-      if (!id) die('Usage: turing resume <session-id> [--rounds <n>]')
+      if (!id) die('Usage: passiton resume <session-id> [--rounds <n>]')
       await resumeSession(id, flags.rounds)
       break
     }
 
     case 'stop': {
       const id = argv[1]
-      if (!id) die('Usage: turing stop <session-id>')
+      if (!id) die('Usage: passiton stop <session-id>')
       await stopSession(id)
       break
     }
 
     case 'delete': {
       const id = argv[1]
-      if (!id) die('Usage: turing delete <session-id>')
+      if (!id) die('Usage: passiton delete <session-id>')
       await deleteSession(id)
       break
     }
@@ -1099,21 +1099,21 @@ async function main() {
     case 'nudge': {
       const id = argv[1]
       const message = argv.slice(2).join(' ')
-      if (!id || !message) die('Usage: turing nudge <session-id> "<message>"')
+      if (!id || !message) die('Usage: passiton nudge <session-id> "<message>"')
       await nudgeSession(id, message)
       break
     }
 
     case 'takeover': {
       const id = argv[1]
-      if (!id) die('Usage: turing takeover <session-id>')
+      if (!id) die('Usage: passiton takeover <session-id>')
       await takeover(id)
       break
     }
 
     case 'release': {
       const id = argv[1]
-      if (!id) die('Usage: turing release <session-id>')
+      if (!id) die('Usage: passiton release <session-id>')
       await releaseSession(id)
       break
     }
@@ -1133,7 +1133,7 @@ async function main() {
       break
 
     default:
-      die(`Unknown command "${cmd}". Run \`turing --help\` for usage.`)
+      die(`Unknown command "${cmd}". Run \`passiton --help\` for usage.`)
   }
 }
 

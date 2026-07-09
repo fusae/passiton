@@ -18,16 +18,16 @@ ENV NODE_ENV=production
 ENV PORT=4590
 ENV HOME=/app/data
 
-RUN addgroup -S turing && adduser -S -G turing -h /app/data turing && mkdir -p /app/data && chown -R turing:turing /app
+RUN addgroup -S passiton && adduser -S -G passiton -h /app/data passiton && mkdir -p /app/data && chown -R passiton:passiton /app
 
-COPY --from=builder --chown=turing:turing /app/package.json ./package.json
-COPY --from=builder --chown=turing:turing /app/node_modules ./node_modules
-COPY --from=builder --chown=turing:turing /app/dist ./dist
+COPY --from=builder --chown=passiton:passiton /app/package.json ./package.json
+COPY --from=builder --chown=passiton:passiton /app/node_modules ./node_modules
+COPY --from=builder --chown=passiton:passiton /app/dist ./dist
 
 EXPOSE 4590
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD curl -fsS "http://localhost:${PORT:-4590}/health" || exit 1
 
-USER turing
+USER passiton
 
 CMD ["node", "dist/index.js"]

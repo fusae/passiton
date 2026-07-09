@@ -1,4 +1,4 @@
-// Turing Cloud — SPA Application
+// Passiton — SPA Application
 // Complete rewrite based on new UI design
 
 const API = ''  // same origin
@@ -92,7 +92,8 @@ const PROVIDER_PRESETS = {
 }
 
 // ── i18n ──────────────────────────────────────────────────────────────────────
-const LANG_KEY = 'turing_lang'
+const LANG_KEY = 'passiton_lang'
+const LEGACY_LANG_KEY = 'turing_lang'
 
 const MESSAGES = {
   en: {
@@ -434,7 +435,7 @@ const MESSAGES = {
     'sessions.onboarding.ready': 'Ready to Go',
     'sessions.onboarding.readyDesc': 'Ready with <strong>{count}</strong> agent(s). Start your first session!',
     'sessions.onboarding.manageAgents': 'Manage Agents',
-    'sessions.onboarding.welcome': 'Welcome to Turing',
+    'sessions.onboarding.welcome': 'Welcome to Passiton',
     'sessions.onboarding.welcomeDesc': 'Connect an AI model to get started. Pick your path:',
     'sessions.onboarding.apiModel': 'API Model (Fastest)',
     'sessions.onboarding.apiModelDesc': 'Add a provider key — no install needed. Supports Anthropic, OpenAI, Zhipu, DeepSeek, Qwen, Moonshot.',
@@ -761,14 +762,14 @@ const MESSAGES = {
     'landing_badge': 'Agent Sessions Platform',
     'landing_hero_title_prefix': 'Coordinate your AI agents',
     'landing_hero_title_highlight': 'in one workspace',
-    'landing_hero_sub': 'Turing Cloud routes work across API models and local CLI agents. Use tasks and workflows to hand off complex work with clear state and outputs.',
+    'landing_hero_sub': 'Passiton routes work across API models and local CLI agents. Use tasks and workflows to hand off complex work with clear state and outputs.',
     'landing_hero_get_started': 'Get Started',
     'landing_hero_sign_in': 'Sign In',
     'landing_arch_title': 'How it works',
-    'landing_arch_sub': 'Agent A ↔ Turing ↔ Agent B — simple routing for multi-agent work',
+    'landing_arch_sub': 'Agent A ↔ Passiton ↔ Agent B — simple routing for multi-agent work',
     'landing_arch_center_sub': 'Routing · orchestration · billing',
     'landing_zhipu_api': 'Zhipu API',
-    'landing_features_title': 'Why Turing Cloud',
+    'landing_features_title': 'Why Passiton',
     'landing_features_sub': 'Three practical reasons to use agents together',
     'landing_feature_orchestration_title': 'Agent orchestration',
     'landing_feature_orchestration_body': 'Define how assistants talk through tasks and workflows. Support serial steps, parallel work, and conditional branches without custom glue code.',
@@ -778,8 +779,8 @@ const MESSAGES = {
     'landing_feature_billing_body': 'Costs follow actual task usage with per-turn accounting. No monthly plan is required for occasional or variable work.',
     'landing_cta_title': 'Ready to coordinate agents?',
     'landing_cta_sub': 'Start free, scale as needed, and create your first task in a few minutes.',
-    'landing_cta_button': 'Start using Turing Cloud',
-    'landing_footer': '© 2026 Turing Cloud. All rights reserved.',
+    'landing_cta_button': 'Start using Passiton',
+    'landing_footer': '© 2026 Passiton. All rights reserved.',
 
     // Login page
     'login_tagline': 'Agent Sessions Platform',
@@ -1059,7 +1060,7 @@ const MESSAGES = {
     'sessions.onboarding.ready': '一切就绪',
     'sessions.onboarding.readyDesc': '已有 <strong>{count}</strong> 个可用的 Agent。开始你的第一个会话吧。',
     'sessions.onboarding.manageAgents': '管理 Agent',
-    'sessions.onboarding.welcome': '欢迎使用 Turing',
+    'sessions.onboarding.welcome': '欢迎使用 Passiton',
     'sessions.onboarding.welcomeDesc': '开始前需要先连接一个 AI 模型。下面两条路任选其一：',
     'sessions.onboarding.apiModel': '用 API 模型（最快）',
     'sessions.onboarding.apiModelDesc': '填一个 Provider Key 即可，无需安装任何东西。支持 Anthropic、OpenAI、智谱、DeepSeek、Qwen、Moonshot。',
@@ -1386,14 +1387,14 @@ const MESSAGES = {
     'landing_badge': 'Agent Sessions Platform',
     'landing_hero_title_prefix': '让你的 AI 助手',
     'landing_hero_title_highlight': '协同工作',
-    'landing_hero_sub': 'Turing Cloud 是一个 AI 助手协作平台。自带 API Key，灵活路由，用任务和工作流让多个 AI 模型协作完成复杂任务。',
+    'landing_hero_sub': 'Passiton 是一个 AI 助手协作平台。自带 API Key，灵活路由，用任务和工作流让多个 AI 模型协作完成复杂任务。',
     'landing_hero_get_started': 'Get Started',
     'landing_hero_sign_in': 'Sign In',
     'landing_arch_title': '工作原理',
-    'landing_arch_sub': 'Agent A ↔ Turing ↔ Agent B —— 简洁而强大的任务编排',
+    'landing_arch_sub': 'Agent A ↔ Passiton ↔ Agent B —— 简洁而强大的任务编排',
     'landing_arch_center_sub': '路由 · 编排 · 计费',
     'landing_zhipu_api': '智谱 API',
-    'landing_features_title': '为什么选择 Turing Cloud',
+    'landing_features_title': '为什么选择 Passiton',
     'landing_features_sub': '三个核心优势，让助手协作变得简单',
     'landing_feature_orchestration_title': '助手编排',
     'landing_feature_orchestration_body': '通过任务和工作流灵活定义助手之间的通信拓扑。支持串行、并行、条件分支 —— 像搭积木一样构建复杂工作流。',
@@ -1403,8 +1404,8 @@ const MESSAGES = {
     'landing_feature_billing_body': '只为实际使用的任务付费。透明的按回合计费模式，没有包月、没有隐藏费用。用多少、付多少。',
     'landing_cta_title': '准备好让助手协作了吗？',
     'landing_cta_sub': '免费开始，按需扩展。几分钟内就能创建第一个任务。',
-    'landing_cta_button': '开始使用 Turing Cloud',
-    'landing_footer': '© 2026 Turing Cloud. All rights reserved.',
+    'landing_cta_button': '开始使用 Passiton',
+    'landing_footer': '© 2026 Passiton. All rights reserved.',
 
     // Login page
     'login_tagline': 'Agent Sessions Platform',
@@ -1424,7 +1425,11 @@ const MESSAGES = {
 }
 
 function getCurrentLang() {
-  const lang = localStorage.getItem(LANG_KEY)
+  let lang = localStorage.getItem(LANG_KEY)
+  if (!lang) {
+    lang = localStorage.getItem(LEGACY_LANG_KEY)
+    if (lang) localStorage.setItem(LANG_KEY, lang)
+  }
   return (lang === 'zh' || lang === 'en') ? lang : 'en'
 }
 
@@ -1660,7 +1665,7 @@ async function api(path, method = 'GET', body, options = {}) {
   try {
     r = await fetch(API + path, opts)
   } catch (err) {
-    throw new Error(options.signal?.aborted ? 'aborted' : 'Cannot reach Turing server')
+    throw new Error(options.signal?.aborted ? 'aborted' : 'Cannot reach Passiton server')
   }
 
   const text = await r.text()
@@ -1847,7 +1852,7 @@ function renderSidebar(active) {
     <aside class="sidebar">
       <div class="sidebar-brand">
         <div class="logo-icon">T</div>
-        <span>Turing Cloud</span>
+        <span>Passiton</span>
       </div>
       <nav class="sidebar-nav">
         <a href="/sessions" class="${active === 'sessions' ? 'active' : ''}">
@@ -1864,7 +1869,7 @@ function renderSidebar(active) {
         </a>
       </nav>
       <div class="sidebar-footer">
-        Turing Cloud v0.1.0
+        Passiton v0.1.0
       </div>
     </aside>
     ${renderOpsWidget()}
@@ -1881,7 +1886,7 @@ function renderOpsWidget() {
     : [{ from: 'ops', content: t('ops_intro') }]
   return `
     <div class="ops-widget ${open ? 'open' : ''} ${alignX} ${alignY}" id="ops-widget" style="--ops-x: ${pos.x}px; --ops-y: ${pos.y}px;">
-      <button class="ops-fab" onpointerdown="window.beginOpsDrag(event)" title="Turing Ops">
+      <button class="ops-fab" onpointerdown="window.beginOpsDrag(event)" title="Passiton Ops">
         <span class="ops-mascot" aria-hidden="true">
           <span class="ops-mascot-head">
             <span class="ops-mascot-eye left"></span>
@@ -2392,7 +2397,7 @@ function renderLanding() {
     <nav class="landing-nav">
       <div class="landing-brand">
         <div class="logo-icon">T</div>
-        <span>Turing Cloud</span>
+        <span>Passiton</span>
       </div>
       <div class="landing-nav-links">
         <a href="#features">${t('landing_nav_features')}</a>
@@ -2449,7 +2454,7 @@ function renderLanding() {
 
         <div class="arch-center">
           <div class="arch-icon">⚡</div>
-          <div class="arch-label">Turing Cloud</div>
+          <div class="arch-label">Passiton</div>
           <div class="arch-sub" style="color: var(--text-secondary); margin-top: 4px;">${t('landing_arch_center_sub')}</div>
         </div>
 
@@ -2536,7 +2541,7 @@ function renderLogin() {
         <div style="text-align: center; margin-bottom: 32px;">
           <div style="display: inline-flex; align-items: center; gap: 10px; margin-bottom: 16px;">
             <div class="logo-icon" style="width: 36px; height: 36px; font-size: 1rem;">T</div>
-            <h2 style="margin: 0;">Turing Cloud</h2>
+            <h2 style="margin: 0;">Passiton</h2>
           </div>
           <p style="color: var(--text-secondary); font-size: 0.9rem;">${t('login_tagline')}</p>
         </div>
@@ -5195,7 +5200,7 @@ window.exportCurrentSession = function() {
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `turing-session-${state.currentSession.id}.md`
+  link.download = `passiton-session-${state.currentSession.id}.md`
   document.body.appendChild(link)
   link.click()
   link.remove()
@@ -5331,7 +5336,7 @@ async function renderSettings() {
 
               <div class="form-group">
                 <label>${t('settings.general.workspaces')}</label>
-                <textarea class="input" id="allowed-workspaces-input" rows="4" placeholder="/home/turing/projects&#10;/Users/me/Projects">${escapeHtml((state.config?.policy?.allowedWorkspaces || []).join('\n'))}</textarea>
+                <textarea class="input" id="allowed-workspaces-input" rows="4" placeholder="/home/passiton/projects&#10;/Users/me/Projects">${escapeHtml((state.config?.policy?.allowedWorkspaces || []).join('\n'))}</textarea>
               </div>
 
               <button class="btn btn-primary" onclick="window.saveGeneralSettings()">${t('settings.general.save')}</button>

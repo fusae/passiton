@@ -1,4 +1,4 @@
-app = "turing-cloud"
+app = "passiton"
 primary_region = "sin"
 
 [build]
@@ -7,11 +7,11 @@ primary_region = "sin"
 [env]
   NODE_ENV = "production"
   PORT = "4590"
-  TURING_HOST = "0.0.0.0"
-  TURING_LOCAL_CLI_AGENTS = "false"
-  TURING_LOCAL_ACCESS = "false"
-  TURING_ALLOWED_WORKSPACES = "/app/data"
-  # Set TURING_JWT_SECRET with `fly secrets set`; do not store it here.
+  PASSITON_HOST = "0.0.0.0"
+  PASSITON_LOCAL_CLI_AGENTS = "false"
+  PASSITON_LOCAL_ACCESS = "false"
+  PASSITON_ALLOWED_WORKSPACES = "/app/data"
+  # Set PASSITON_JWT_SECRET with `fly secrets set`; do not store it here.
 
 [http_service]
   internal_port = 4590
@@ -28,5 +28,5 @@ primary_region = "sin"
     path = "/health"
 
 [[mounts]]
-  source = "turing_data"
+  source = "passiton_data"
   destination = "/app/data"

@@ -1,12 +1,12 @@
 services:
-  turing-cloud:
+  passiton:
     build: .
     environment:
-      TURING_HOST: 0.0.0.0
-      TURING_LOCAL_ACCESS: "false"
-      TURING_JWT_SECRET: ${TURING_JWT_SECRET:?set a strong TURING_JWT_SECRET}
-      TURING_ENCRYPTION_KEY: ${TURING_ENCRYPTION_KEY:?set a strong TURING_ENCRYPTION_KEY}
-      TURING_ALLOWED_WORKSPACES: /app/workspaces
+      PASSITON_HOST: 0.0.0.0
+      PASSITON_LOCAL_ACCESS: "false"
+      PASSITON_JWT_SECRET: ${PASSITON_JWT_SECRET:?set a strong PASSITON_JWT_SECRET}
+      PASSITON_ENCRYPTION_KEY: ${PASSITON_ENCRYPTION_KEY:?set a strong PASSITON_ENCRYPTION_KEY}
+      PASSITON_ALLOWED_WORKSPACES: /app/workspaces
       PORT: 4590
     volumes:
       - ./data:/app/data

@@ -1,14 +1,14 @@
 {
-  "name": "turing",
+  "name": "passiton",
   "version": "0.1.0",
-  "description": "Agent-to-agent communication proxy",
+  "description": "Passiton agent-to-agent communication proxy",
   "type": "module",
   "main": "electron/main.cjs",
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "turing": "dist/cli.js"
+    "passiton": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc && mkdir -p dist/web && cp src/web/*.html src/web/*.js src/web/*.css dist/web/",

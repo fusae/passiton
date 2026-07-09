@@ -4,16 +4,16 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { activeAgents, DEFAULT_CONFIG, LOCAL_CLI_AGENT_DEFAULTS, loadConfig, getConfigPath, writeConfig } from '../config.js'
-import { resolveTuringHome } from '../paths.js'
+import { resolveDataHome } from '../paths.js'
 
 test('default config keeps local CLI agents available', () => {
   assert.deepEqual(DEFAULT_CONFIG.agents, {})
-  assert.equal(LOCAL_CLI_AGENT_DEFAULTS.codex.command, process.env.TURING_CODEX_COMMAND ?? 'codex')
-  assert.equal(LOCAL_CLI_AGENT_DEFAULTS['claude-code'].command, process.env.TURING_CLAUDE_COMMAND ?? 'claude')
-  assert.equal(LOCAL_CLI_AGENT_DEFAULTS['gemini-cli'].command, process.env.TURING_GEMINI_COMMAND ?? 'gemini')
+  assert.equal(LOCAL_CLI_AGENT_DEFAULTS.codex.command, process.env.PASSITON_CODEX_COMMAND ?? process.env.TURING_CODEX_COMMAND ?? 'codex')
+  assert.equal(LOCAL_CLI_AGENT_DEFAULTS['claude-code'].command, process.env.PASSITON_CLAUDE_COMMAND ?? process.env.TURING_CLAUDE_COMMAND ?? 'claude')
+  assert.equal(LOCAL_CLI_AGENT_DEFAULTS['gemini-cli'].command, process.env.PASSITON_GEMINI_COMMAND ?? process.env.TURING_GEMINI_COMMAND ?? 'gemini')
   assert.deepEqual(LOCAL_CLI_AGENT_DEFAULTS['gemini-cli'].args, ['-p', '{prompt}'])
   assert.deepEqual(LOCAL_CLI_AGENT_DEFAULTS.opencode.args, ['run', '{prompt}'])
-  assert.equal(LOCAL_CLI_AGENT_DEFAULTS.opencode.command, process.env.TURING_OPENCODE_COMMAND ?? 'opencode')
+  assert.equal(LOCAL_CLI_AGENT_DEFAULTS.opencode.command, process.env.PASSITON_OPENCODE_COMMAND ?? process.env.TURING_OPENCODE_COMMAND ?? 'opencode')
   assert.equal(DEFAULT_CONFIG.policy.messageRetentionMs, 30 * 24 * 60 * 60 * 1000)
   assert.deepEqual(activeAgents({
     ...DEFAULT_CONFIG,
@@ -24,10 +24,10 @@ test('default config keeps local CLI agents available', () => {
 
 test('PORT environment variable overrides config port', () => {
   const savedPort = process.env.PORT
-  const savedHome = process.env.TURING_HOME
+  const savedHome = process.env.PASSITON_HOME
   const tempDir = mkdtempSync(join(tmpdir(), 'turing-port-test-'))
   process.env.PORT = '9876'
-  process.env.TURING_HOME = tempDir
+  process.env.PASSITON_HOME = tempDir
   try {
     const config = loadConfig()
     assert.equal(config.server.port, 9876)
@@ -38,20 +38,20 @@ test('PORT environment variable overrides config port', () => {
       process.env.PORT = savedPort
     }
     if (savedHome === undefined) {
-      delete process.env.TURING_HOME
+      delete process.env.PASSITON_HOME
     } else {
-      process.env.TURING_HOME = savedHome
+      process.env.PASSITON_HOME = savedHome
     }
     rmSync(tempDir, { recursive: true, force: true })
   }
 })
 
-test('TURING_HOME isolates the data directory', () => {
-  const savedHome = process.env.TURING_HOME
+test('PASSITON_HOME isolates the data directory', () => {
+  const savedHome = process.env.PASSITON_HOME
   const tempDir = mkdtempSync(join(tmpdir(), 'turing-home-test-'))
-  process.env.TURING_HOME = tempDir
+  process.env.PASSITON_HOME = tempDir
   try {
-    assert.equal(resolveTuringHome(), tempDir)
+    assert.equal(resolveDataHome(), tempDir)
     assert.equal(getConfigPath(), join(tempDir, 'config.json'))
 
     const customConfig = {
@@ -65,20 +65,37 @@ test('TURING_HOME isolates the data directory', () => {
     assert.equal(loaded.server.port, 11111)
   } finally {
     if (savedHome === undefined) {
-      delete process.env.TURING_HOME
+      delete process.env.PASSITON_HOME
     } else {
-      process.env.TURING_HOME = savedHome
+      process.env.PASSITON_HOME = savedHome
     }
     rmSync(tempDir, { recursive: true, force: true })
   }
 })
 
-test('first loadConfig persists config.json with jwtSecret before listen', () => {
-  const savedHome = process.env.TURING_HOME
-  const savedJwt = process.env.TURING_JWT_SECRET
-  const tempDir = mkdtempSync(join(tmpdir(), 'turing-persist-test-'))
+test('TURING_HOME remains a data directory fallback', () => {
+  const savedPassitonHome = process.env.PASSITON_HOME
+  const savedTuringHome = process.env.TURING_HOME
+  const tempDir = mkdtempSync(join(tmpdir(), 'turing-home-fallback-test-'))
+  delete process.env.PASSITON_HOME
   process.env.TURING_HOME = tempDir
-  delete process.env.TURING_JWT_SECRET
+  try {
+    assert.equal(resolveDataHome(), tempDir)
+  } finally {
+    if (savedPassitonHome === undefined) delete process.env.PASSITON_HOME
+    else process.env.PASSITON_HOME = savedPassitonHome
+    if (savedTuringHome === undefined) delete process.env.TURING_HOME
+    else process.env.TURING_HOME = savedTuringHome
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
+test('first loadConfig persists config.json with jwtSecret before listen', () => {
+  const savedHome = process.env.PASSITON_HOME
+  const savedJwt = process.env.PASSITON_JWT_SECRET
+  const tempDir = mkdtempSync(join(tmpdir(), 'turing-persist-test-'))
+  process.env.PASSITON_HOME = tempDir
+  delete process.env.PASSITON_JWT_SECRET
   try {
     const configPath = join(tempDir, 'config.json')
 
@@ -102,14 +119,14 @@ test('first loadConfig persists config.json with jwtSecret before listen', () =>
     assert.equal(raw2.auth.jwtSecret, firstJwt, 'jwtSecret should not change on second loadConfig')
   } finally {
     if (savedHome === undefined) {
-      delete process.env.TURING_HOME
+      delete process.env.PASSITON_HOME
     } else {
-      process.env.TURING_HOME = savedHome
+      process.env.PASSITON_HOME = savedHome
     }
     if (savedJwt === undefined) {
-      delete process.env.TURING_JWT_SECRET
+      delete process.env.PASSITON_JWT_SECRET
     } else {
-      process.env.TURING_JWT_SECRET = savedJwt
+      process.env.PASSITON_JWT_SECRET = savedJwt
     }
     rmSync(tempDir, { recursive: true, force: true })
   }

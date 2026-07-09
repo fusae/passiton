@@ -3,8 +3,8 @@ import path from 'path'
 import type { Adapter, AdapterResponse, AdapterSendOpts, Session } from '../types.js'
 import { buildPrompt, runCommand } from './shared.js'
 
-const SKILL_SCRIPT = process.env.TURING_GEMINI_SKILL_SCRIPT ?? ''
-const NPX_COMMAND = process.env.TURING_NPX_COMMAND ?? 'npx'
+const SKILL_SCRIPT = process.env.PASSITON_GEMINI_SKILL_SCRIPT ?? process.env.TURING_GEMINI_SKILL_SCRIPT ?? ''
+const NPX_COMMAND = process.env.PASSITON_NPX_COMMAND ?? process.env.TURING_NPX_COMMAND ?? 'npx'
 const COOKIE_PATH = process.env.GEMINI_WEB_COOKIE_PATH ?? ''
 
 export class GeminiImageAdapter implements Adapter {
@@ -22,7 +22,7 @@ export class GeminiImageAdapter implements Adapter {
 
   async send(session: Session, message: string, opts?: AdapterSendOpts): Promise<AdapterResponse> {
     if (!SKILL_SCRIPT || !COOKIE_PATH) {
-      throw new Error('Gemini Image requires TURING_GEMINI_SKILL_SCRIPT and GEMINI_WEB_COOKIE_PATH')
+      throw new Error('Gemini Image requires PASSITON_GEMINI_SKILL_SCRIPT and GEMINI_WEB_COOKIE_PATH')
     }
     try {
       await access(COOKIE_PATH)

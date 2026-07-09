@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Project renamed to Passiton; TURING_* env vars and ~/.turing remain supported as fallbacks.
 - Fully internationalized the UI: English is the default, Chinese is available via Settings, and server-side user-facing messages are now plain English.
 - Default `features.localCliAgents` to `true` for local-first onboarding. Cloud deployments set `TURING_LOCAL_CLI_AGENTS=false` (Fly.io config updated automatically).
 - Removed hardcoded personal binary paths from `DREAMINA_COMMAND` and `GeminiImageAdapter`. Both now require explicit environment configuration and degrade gracefully when unconfigured.

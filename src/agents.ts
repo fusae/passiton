@@ -84,10 +84,10 @@ let searchPathCache: string[] | undefined
 let extraSearchPathEntries: string[] = []
 
 const DISCOVERY_PRESETS: DiscoveryPreset[] = [
-  { name: 'codex', adapter: 'codex', commands: ['codex'], envVars: ['TURING_CODEX_COMMAND'], supported: true },
-  { name: 'claude-code', adapter: 'claude-code', commands: ['claude'], envVars: ['TURING_CLAUDE_COMMAND'], supported: true },
-  { name: 'gemini-cli', adapter: 'gemini-cli', commands: ['gemini'], envVars: ['TURING_GEMINI_COMMAND'], supported: true },
-  { name: 'opencode', adapter: 'opencode', commands: ['opencode'], envVars: ['TURING_OPENCODE_COMMAND'], supported: true },
+  { name: 'codex', adapter: 'codex', commands: ['codex'], envVars: ['PASSITON_CODEX_COMMAND', 'TURING_CODEX_COMMAND'], supported: true },
+  { name: 'claude-code', adapter: 'claude-code', commands: ['claude'], envVars: ['PASSITON_CLAUDE_COMMAND', 'TURING_CLAUDE_COMMAND'], supported: true },
+  { name: 'gemini-cli', adapter: 'gemini-cli', commands: ['gemini'], envVars: ['PASSITON_GEMINI_COMMAND', 'TURING_GEMINI_COMMAND'], supported: true },
+  { name: 'opencode', adapter: 'opencode', commands: ['opencode'], envVars: ['PASSITON_OPENCODE_COMMAND', 'TURING_OPENCODE_COMMAND'], supported: true },
   // Other CLI agents (aider, goose, amp, cursor, windsurf, ...) are deliberately
   // not auto-discovered. They have no bundled adapter yet; users who want one can
   // register a custom adapter or contribute. See docs/community-adapters.md.

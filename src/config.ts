@@ -1,15 +1,20 @@
-// Config module — load config.json from TURING_HOME (default ~/.turing) and merge with defaults
+// Config module — load config.json from PASSITON_HOME/TURING_HOME and merge with defaults
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
 import { delimiter, join, dirname } from 'path'
 import crypto from 'crypto'
 import type { AppConfig, SessionMode } from './types.js'
 import { defaultClaudeCodeArgs } from './adapters/claude-code.js'
-import { resolveTuringHome } from './paths.js'
-const DEFAULT_CODEX_COMMAND = process.env.TURING_CODEX_COMMAND ?? 'codex'
-const DEFAULT_CLAUDE_COMMAND = process.env.TURING_CLAUDE_COMMAND ?? 'claude'
-const DEFAULT_GEMINI_COMMAND = process.env.TURING_GEMINI_COMMAND ?? 'gemini'
-const DEFAULT_OPENCODE_COMMAND = process.env.TURING_OPENCODE_COMMAND ?? 'opencode'
+import { resolveDataHome } from './paths.js'
+
+function env(name: string): string | undefined {
+  return process.env[`PASSITON_${name}`] ?? process.env[`TURING_${name}`]
+}
+
+const DEFAULT_CODEX_COMMAND = env('CODEX_COMMAND') ?? 'codex'
+const DEFAULT_CLAUDE_COMMAND = env('CLAUDE_COMMAND') ?? 'claude'
+const DEFAULT_GEMINI_COMMAND = env('GEMINI_COMMAND') ?? 'gemini'
+const DEFAULT_OPENCODE_COMMAND = env('OPENCODE_COMMAND') ?? 'opencode'
 
 export const DEFAULT_CONFIG: AppConfig = {
   server: {
@@ -25,7 +30,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     mode: 'collaborate',
   },
   features: {
-    localCliAgents: parseBooleanEnv(process.env.TURING_LOCAL_CLI_AGENTS) ?? true,
+    localCliAgents: parseBooleanEnv(env('LOCAL_CLI_AGENTS')) ?? true,
   },
   agents: {},
   policy: {
@@ -85,10 +90,10 @@ function ensureConfigFile(): void {
   if (existsSync(configPath)) return
 
   const auth: AppConfig['auth'] = { ...DEFAULT_CONFIG.auth }
-  if (!process.env.TURING_JWT_SECRET && !auth.jwtSecret) {
+  if (!env('JWT_SECRET') && !auth.jwtSecret) {
     auth.jwtSecret = crypto.randomBytes(32).toString('hex')
   }
-  if (!process.env.TURING_ENCRYPTION_KEY && !auth.encryptionKey) {
+  if (!env('ENCRYPTION_KEY') && !auth.encryptionKey) {
     auth.encryptionKey = crypto.randomBytes(32).toString('hex')
   }
   const toWrite: AppConfig = { ...DEFAULT_CONFIG, auth }
@@ -196,9 +201,9 @@ function isApiAdapter(adapter: string): boolean {
 function normalizeConfig(config: AppConfig): AppConfig {
   const auth = {
     ...config.auth,
-    allowRegistration: parseBooleanEnv(process.env.TURING_ALLOW_REGISTRATION) ?? config.auth?.allowRegistration ?? false,
-    localAccess: parseBooleanEnv(process.env.TURING_LOCAL_ACCESS) ?? config.auth?.localAccess ?? true,
-    localUserEmail: process.env.TURING_LOCAL_USER_EMAIL ?? config.auth?.localUserEmail,
+    allowRegistration: parseBooleanEnv(env('ALLOW_REGISTRATION')) ?? config.auth?.allowRegistration ?? false,
+    localAccess: parseBooleanEnv(env('LOCAL_ACCESS')) ?? config.auth?.localAccess ?? true,
+    localUserEmail: env('LOCAL_USER_EMAIL') ?? config.auth?.localUserEmail,
   }
   const defaults = {
     maxRounds: config.defaults?.maxRounds ?? config.policy?.maxRounds ?? DEFAULT_CONFIG.defaults.maxRounds,
@@ -207,7 +212,7 @@ function normalizeConfig(config: AppConfig): AppConfig {
   const features = {
     ...DEFAULT_CONFIG.features,
     ...config.features,
-    localCliAgents: parseBooleanEnv(process.env.TURING_LOCAL_CLI_AGENTS) ?? config.features?.localCliAgents ?? DEFAULT_CONFIG.features.localCliAgents,
+    localCliAgents: parseBooleanEnv(env('LOCAL_CLI_AGENTS')) ?? config.features?.localCliAgents ?? DEFAULT_CONFIG.features.localCliAgents,
   }
 
   return {
@@ -215,7 +220,7 @@ function normalizeConfig(config: AppConfig): AppConfig {
     server: {
       ...config.server,
       port: resolvePort(process.env.PORT) ?? config.server?.port ?? DEFAULT_CONFIG.server.port,
-      host: process.env.TURING_HOST ?? config.server?.host ?? DEFAULT_CONFIG.server.host,
+      host: env('HOST') ?? config.server?.host ?? DEFAULT_CONFIG.server.host,
     },
     auth,
     defaults,
@@ -224,7 +229,7 @@ function normalizeConfig(config: AppConfig): AppConfig {
     policy: {
       ...config.policy,
       maxRounds: defaults.maxRounds,
-      allowedWorkspaces: parseListEnv(process.env.TURING_ALLOWED_WORKSPACES) ?? config.policy?.allowedWorkspaces ?? [],
+      allowedWorkspaces: parseListEnv(env('ALLOWED_WORKSPACES')) ?? config.policy?.allowedWorkspaces ?? [],
     },
   }
 }
@@ -289,10 +294,10 @@ export function validateExposureConfig(config: AppConfig): void {
   const host = config.server.host ?? '127.0.0.1'
   if (host === '127.0.0.1' || host === 'localhost' || host === '::1') return
   if (config.auth?.localAccess !== false) {
-    throw new Error('[security] Non-localhost bind requires TURING_LOCAL_ACCESS=false')
+    throw new Error('[security] Non-localhost bind requires PASSITON_LOCAL_ACCESS=false')
   }
-  if (!process.env.TURING_JWT_SECRET && !config.auth?.jwtSecret) {
-    throw new Error('[security] Non-localhost bind requires TURING_JWT_SECRET or auth.jwtSecret')
+  if (!env('JWT_SECRET') && !config.auth?.jwtSecret) {
+    throw new Error('[security] Non-localhost bind requires PASSITON_JWT_SECRET or auth.jwtSecret')
   }
   if ((config.policy.allowedWorkspaces ?? []).length === 0) {
     throw new Error('[security] Non-localhost bind requires policy.allowedWorkspaces')
@@ -334,5 +339,5 @@ export function writeConfig(config: AppConfig): void {
 }
 
 export function getConfigPath(): string {
-  return join(resolveTuringHome(), 'config.json')
+  return join(resolveDataHome(), 'config.json')
 }

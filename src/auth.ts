@@ -43,17 +43,18 @@ function safeEqualHex(a: string, b: string): boolean {
 }
 
 function getJwtSecret(): string {
-  if (process.env.TURING_JWT_SECRET) {
-    return process.env.TURING_JWT_SECRET
+  const jwtSecret = process.env.PASSITON_JWT_SECRET ?? process.env.TURING_JWT_SECRET
+  if (jwtSecret) {
+    return jwtSecret
   }
   const config = loadConfig()
   const existing = config.auth?.jwtSecret
   if (existing) {
     return existing
   }
-  const jwtSecret = crypto.randomBytes(32).toString('hex')
-  writeConfig({ ...config, auth: { ...config.auth, jwtSecret } })
-  return jwtSecret
+  const generatedJwtSecret = crypto.randomBytes(32).toString('hex')
+  writeConfig({ ...config, auth: { ...config.auth, jwtSecret: generatedJwtSecret } })
+  return generatedJwtSecret
 }
 
 export function signJwt(user: AuthUser, nowSeconds = Math.floor(Date.now() / 1000)): string {
@@ -147,7 +148,7 @@ export function loginLocalUser(email?: string): { user: AuthUser; token: string 
   const salt = crypto.randomBytes(16).toString('hex')
   const created = state.createUser({
     id: crypto.randomUUID(),
-    email: normalizedEmail || 'local@turing.local',
+    email: normalizedEmail || 'local@passiton.local',
     salt,
     passwordHash: hashPassword(crypto.randomBytes(32).toString('hex'), salt),
   })
@@ -156,7 +157,7 @@ export function loginLocalUser(email?: string): { user: AuthUser; token: string 
 }
 
 export function createUserToken(userId: string, name?: string): { id: string; token: string; name: string; createdAt: number } {
-  const token = `turing_${crypto.randomBytes(32).toString('hex')}`
+  const token = `passiton_${crypto.randomBytes(32).toString('hex')}`
   const record = state.createApiToken({
     id: crypto.randomUUID(),
     userId,
@@ -186,10 +187,10 @@ export function authenticateRequest(req: http.IncomingMessage): AuthUser {
   const bearer = typeof authorization === 'string' && authorization.startsWith('Bearer ')
     ? authorization.slice('Bearer '.length).trim()
     : undefined
-  const token = bearer ?? readCookie(req, 'turing_token')
+  const token = bearer ?? readCookie(req, 'passiton_token') ?? readCookie(req, 'turing_token')
   if (!token) throw new AuthError('Authentication required')
 
-  if (token.startsWith('turing_')) {
+  if (token.startsWith('passiton_') || token.startsWith('turing_')) {
     const apiToken = state.getApiTokenByHash(sha256(token))
     if (!apiToken) throw new AuthError('Invalid token')
     const user = state.getUserById(apiToken.userId)
@@ -207,7 +208,7 @@ export function authenticateRequest(req: http.IncomingMessage): AuthUser {
 
 export function authCookie(token: string, options: { secure?: boolean } = {}): string {
   const secure = options.secure ? '; Secure' : ''
-  return `turing_token=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${TOKEN_TTL_SECONDS}${secure}`
+  return `passiton_token=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${TOKEN_TTL_SECONDS}${secure}`
 }
 
 function readCookie(req: http.IncomingMessage, name: string): string | undefined {

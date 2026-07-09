@@ -23,8 +23,9 @@ export function validateProvider(value: string): Provider {
 }
 
 function getEncryptionSecret(): string {
-  if (process.env.TURING_ENCRYPTION_KEY) {
-    return process.env.TURING_ENCRYPTION_KEY
+  const encryptionSecret = process.env.PASSITON_ENCRYPTION_KEY ?? process.env.TURING_ENCRYPTION_KEY
+  if (encryptionSecret) {
+    return encryptionSecret
   }
   const config = loadConfig()
   const existing = config.auth?.encryptionKey

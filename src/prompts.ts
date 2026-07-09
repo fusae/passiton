@@ -39,7 +39,7 @@ export function clampSessionContext(context?: SessionContext): SessionContext | 
     }
     const originalKB = Math.round(originalBytes / 1024)
     const keptKB = Math.round(maxBytes / 1024)
-    result += `\n[Turing: file truncated from ${originalKB}KB to ${keptKB}KB]`
+    result += `\n[Passiton: file truncated from ${originalKB}KB to ${keptKB}KB]`
     return result
   }
 
@@ -120,7 +120,7 @@ export function clampSessionContext(context?: SessionContext): SessionContext | 
   // Build result only if something changed (avoid unnecessary copy).
   if (!fileChanged && !totalChanged) return context
 
-  console.warn(`[turing] session context clamped (file-level=${fileChanged}, total-level=${totalChanged})`)
+  console.warn(`[passiton] session context clamped (file-level=${fileChanged}, total-level=${totalChanged})`)
 
   const result: SessionContext = {}
   if (context.rules) result.rules = context.rules
@@ -139,7 +139,7 @@ export interface PromptCapabilities {
   toCanUseTools?: boolean
 }
 
-const TURING_AWARENESS = 'You are operating inside Turing, an agent-to-agent orchestration system. If the task should be split into parallel or dependent sub-tasks, explicitly propose a Turing pipeline/session plan instead of losing scope in one thread. When your task is complete, wrap your final result or summary in [RESULT]...[/RESULT] tags.'
+const TURING_AWARENESS = 'You are operating inside Passiton, an agent-to-agent orchestration system. If the task should be split into parallel or dependent sub-tasks, explicitly propose a Passiton pipeline/session plan instead of losing scope in one thread. When your task is complete, wrap your final result or summary in [RESULT]...[/RESULT] tags.'
 
 const PROGRESS_OUTPUT_GUIDANCE = 'For long-running tasks, output brief progress as you work — one short line per completed step or file. Extended silence risks triggering an idle timeout that terminates your process.'
 
@@ -162,9 +162,9 @@ const HUMAN_SUMMON_PROTOCOL = [
 
 export function generateTaskSystemPrompt(context?: SessionContext): string {
   return [
-    `You are the lead agent for a task inside Turing.`,
+    `You are the lead agent for a task inside Passiton.`,
     `Follow the existing workflow and repository instructions for this task.`,
-    `If the workflow requires delegation, create the necessary Turing sessions or pipelines and use their outputs instead of collapsing the work into one-agent execution.`,
+    `If the workflow requires delegation, create the necessary Passiton sessions or pipelines and use their outputs instead of collapsing the work into one-agent execution.`,
     `Do not assume you must do every step yourself just because this task was assigned to you.`,
     `When the task is complete, wrap your final result or summary in [RESULT]...[/RESULT] tags.`,
     PROGRESS_OUTPUT_GUIDANCE,

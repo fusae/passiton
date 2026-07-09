@@ -8,7 +8,7 @@ import * as state from '../state.js'
 
 function withTempDb(fn: (userId: string) => void | Promise<void>): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'turing-keyvault-'))
-  process.env.TURING_ENCRYPTION_KEY = 'test-encryption-secret'
+  process.env.PASSITON_ENCRYPTION_KEY = 'test-encryption-secret'
   state.initDb(join(dir, 'turing.db'))
   const user = state.createUser({
     id: 'user-1',
@@ -19,7 +19,7 @@ function withTempDb(fn: (userId: string) => void | Promise<void>): Promise<void>
   return Promise.resolve(fn(user.id)).finally(() => {
     state.closeDb()
     rmSync(dir, { recursive: true, force: true })
-    delete process.env.TURING_ENCRYPTION_KEY
+    delete process.env.PASSITON_ENCRYPTION_KEY
   })
 }
 

@@ -9,17 +9,17 @@ import { Router } from '../router.js'
 
 test.afterEach(() => {
   setExtraAgentSearchPathsForTesting([])
-  delete process.env.TURING_CODEX_COMMAND
+  delete process.env.PASSITON_CODEX_COMMAND
 })
 
 test('findExecutable prefers explicit env command paths', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-env-'))
   const command = join(dir, 'my-codex')
   writeExecutable(command)
-  process.env.TURING_CODEX_COMMAND = command
+  process.env.PASSITON_CODEX_COMMAND = command
 
   try {
-    assert.equal(await findExecutable(['codex'], ['TURING_CODEX_COMMAND']), command)
+    assert.equal(await findExecutable(['codex'], ['PASSITON_CODEX_COMMAND']), command)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

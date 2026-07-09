@@ -3,7 +3,7 @@
 import Database from 'better-sqlite3'
 import { mkdirSync } from 'fs'
 import { join } from 'path'
-import { resolveTuringHome } from './paths.js'
+import { resolveDataHome } from './paths.js'
 import { clampSessionContext } from './prompts.js'
 import type {
   Session,
@@ -30,7 +30,7 @@ import type {
   ExternalJob,
 } from './types.js'
 
-const DB_DIR = resolveTuringHome()
+const DB_DIR = resolveDataHome()
 const DB_PATH = join(DB_DIR, 'turing.db')
 const DEFAULT_MESSAGE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000
 const MESSAGE_GC_INTERVAL_MS = 60 * 60 * 1000
@@ -87,7 +87,7 @@ export function initDb(
   dbPath = DB_PATH,
   options?: { messageRetentionMs?: number }
 ): void {
-  mkdirSync(resolveTuringHome(), { recursive: true })
+  mkdirSync(resolveDataHome(), { recursive: true })
   db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
@@ -119,24 +119,24 @@ function runOneTimeBloatMigration(): void {
   const version = (db.pragma('user_version', { simple: true }) as number) ?? 0
   if (version >= 1) return
 
-  console.log('[turing] Running one-time DB bloat cleanup migration (user_version 0 → 1)…')
+  console.log('[passiton] Running one-time DB bloat cleanup migration (user_version 0 → 1)…')
 
   // ── system_prompts: NULL out anything over 1 MB ──
   const promptResult = db.prepare(
     `UPDATE sessions SET system_prompts = NULL WHERE LENGTH(system_prompts) > 1048576`
   ).run()
   if (promptResult.changes > 0) {
-    console.log(`[turing] Bloat cleanup: nulled ${promptResult.changes} oversized system_prompts row(s)`)
+    console.log(`[passiton] Bloat cleanup: nulled ${promptResult.changes} oversized system_prompts row(s)`)
   }
 
   // context: intentionally NOT touched (see function doc above).
 
   // ── VACUUM to reclaim disk space ──
-  console.log('[turing] Bloat cleanup: running VACUUM to reclaim freed space (may take a few seconds)…')
+  console.log('[passiton] Bloat cleanup: running VACUUM to reclaim freed space (may take a few seconds)…')
   db.exec('VACUUM')
 
   db.pragma('user_version = 1')
-  console.log('[turing] Bloat cleanup migration complete (user_version set to 1)')
+  console.log('[passiton] Bloat cleanup migration complete (user_version set to 1)')
 }
 
 export function closeDb(): void {

@@ -9,7 +9,7 @@
  *   import { registerDreamina } from './examples/dreamina/index.js'
  *   registerDreamina(router)
  *
- * The provider is inert unless TURING_DREAMINA_COMMAND points at the dreamina
+ * The provider is inert unless PASSITON_DREAMINA_COMMAND points at the dreamina
  * binary. src/index.ts registers it by default so the local build keeps full
  * functionality; open-source consumers may omit the call to ship a clean core.
  */

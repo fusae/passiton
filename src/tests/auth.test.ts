@@ -16,12 +16,12 @@ import * as state from '../state.js'
 
 function withTempDb(fn: () => void | Promise<void>): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'turing-auth-'))
-  process.env.TURING_JWT_SECRET = 'test-jwt-secret'
+  process.env.PASSITON_JWT_SECRET = 'test-jwt-secret'
   state.initDb(join(dir, 'turing.db'))
   return Promise.resolve(fn()).finally(() => {
     state.closeDb()
     rmSync(dir, { recursive: true, force: true })
-    delete process.env.TURING_JWT_SECRET
+    delete process.env.PASSITON_JWT_SECRET
   })
 }
 
@@ -66,7 +66,7 @@ test('authenticateRequest accepts API token and masks listed tokens', async () =
     const registered = registerUser('token@example.com', 'password123')
     const created = createUserToken(registered.user.userId, 'CI')
 
-    assert.match(created.token, /^turing_[0-9a-f]{64}$/)
+    assert.match(created.token, /^passiton_[0-9a-f]{64}$/)
     assert.deepEqual(
       authenticateRequest(reqWithAuth(`Bearer ${created.token}`)),
       registered.user

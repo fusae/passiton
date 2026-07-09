@@ -425,7 +425,7 @@ test('clampSessionContext: single file over 256KB is truncated with marker', () 
   }
   const clamped = clampSessionContext(ctx)!
   assert.ok(clamped.files![0].content.length < bigContent.length)
-  assert.ok(clamped.files![0].content.includes('[Turing: file truncated'))
+  assert.ok(clamped.files![0].content.includes('[Passiton: file truncated'))
   assert.equal(clamped.rules, 'keep me')
   assert.ok(
     Buffer.byteLength(clamped.files![0].content, 'utf8') <= CONTEXT_FILE_MAX_BYTES,
@@ -449,7 +449,7 @@ test('clampSessionContext: total over 2MB is reduced starting from largest file'
   }
   assert.ok(total <= CONTEXT_TOTAL_MAX_BYTES, `total ${total} should be <= 2MB`)
   // At least one file should have a truncation marker
-  const hasMarker = (clamped.files ?? []).some((f) => f.content.includes('[Turing:'))
+  const hasMarker = (clamped.files ?? []).some((f) => f.content.includes('[Passiton:'))
   assert.ok(hasMarker, 'at least one file should have truncation marker')
 })
 

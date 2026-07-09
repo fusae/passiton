@@ -1169,9 +1169,9 @@ export class Router extends EventEmitter {
    * function of session state, so persisting generated copies was pure waste
    * (they embedded the full context and inflated the DB).
    *
-   * Design trade-off: when an old session is resumed after a Turing upgrade,
+   * Design trade-off: when an old session is resumed after a Passiton upgrade,
    * the reconstructed prompts may differ from what the session originally
-   * used.  This is accepted — generated prompts evolve with Turing, and
+   * used.  This is accepted — generated prompts evolve with Passiton, and
    * storage savings outweigh the minor semantic drift.
    */
   private resolveSystemPrompts(session: Session): { from: string; to: string } | undefined {
@@ -1417,7 +1417,7 @@ export class Router extends EventEmitter {
       '[RESULT]',
       'HOST_IMAGE_GENERATION_REQUIRED',
       '',
-      'This step requires the image generation tool built into the Codex main process. The Turing backend will not start another Codex subprocess for it.',
+      'This step requires the image generation tool built into the Codex main process. The Passiton backend will not start another Codex subprocess for it.',
       '',
       'How to proceed:',
       '1. In the Codex main process, generate images from this step output and upstream `script.md` / `prompt.txt`.',
@@ -2435,7 +2435,7 @@ function formatManualPipelineOutput(output?: string): string {
 export function sessionOutputDirectory(session: Session): string | undefined {
   const sources = [session.context?.rules, session.context?.text].filter((value): value is string => Boolean(value))
   for (const source of sources) {
-    const tagged = source.match(/\[\[Turing Output Directory\]\]\s*Save this step's durable outputs under:\s*(.+?)\s*\[\[End Turing Output Directory\]\]/s)
+    const tagged = source.match(/\[\[Passiton Output Directory\]\]\s*Save this step's durable outputs under:\s*(.+?)\s*\[\[End Passiton Output Directory\]\]/s)
     if (tagged?.[1]?.trim()) return tagged[1].trim()
     const fixed = source.match(/输出目录固定为\s*(.+?)(?:。|\n|$)/)
     if (fixed?.[1]?.trim()) return fixed[1].trim()
