@@ -21,7 +21,7 @@ import type {
   PipelineStep,
   PipelineTemplateRecord,
   PipelineWithSessions,
-  TuringStats,
+  PassitonStats,
   AgentUsageStats,
   AgentConfig,
   Task,
@@ -1592,7 +1592,7 @@ function rowToExternalJob(row: Record<string, unknown>): ExternalJob {
   }
 }
 
-export function getStats(userId?: string): TuringStats {
+export function getStats(userId?: string): PassitonStats {
   const sessions = listSessions(userId ? { userId } : undefined)
   const pipelineCounts = countPipelinesByStatus(userId)
   const counts = {

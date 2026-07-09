@@ -2,51 +2,54 @@
 
 ## Supported Versions
 
-Turing is local-first software. Only the latest release receives security updates.
+Passiton is local-first software. Only the latest release receives security updates.
 
 ## Reporting a Vulnerability
 
-**Do not open a public GitHub issue for security vulnerabilities.**
+Do not open a public GitHub issue for security vulnerabilities.
 
-Instead, please report suspected vulnerabilities privately:
+Please report suspected vulnerabilities privately through a GitHub Security Advisory for `fusae/passiton`.
 
-- Open a **private** GitHub Security Advisory (Repo → Security → Advisories → New advisory).
+Include:
 
-Please include:
-- A description of the issue and its potential impact
-- Steps to reproduce or a proof of concept
-- Affected versions, if known
+- description and impact
+- reproduction steps or proof of concept
+- affected versions, if known
 
-You should receive an initial response within 72 hours. Please allow reasonable time for assessment and a fix before any public disclosure.
+You should receive an initial response within 72 hours.
 
 ## Trust Model
 
-Turing is designed to run locally on your machine. Its defaults assume a single trusted user:
+Passiton is designed to run locally on your machine. Defaults assume a single trusted user:
 
-- **Local access is enabled by default** (`auth.localAccess: true`). The first local user is auto-logged-in without a password.
-- **Registration is disabled by default** (`auth.allowRegistration: false`).
-- **JWT secret is auto-generated** on first run and persisted to `~/.turing/config.json`. Set `TURING_JWT_SECRET` explicitly if you need a stable secret across reinstalls.
-- **CLI agents are high-privilege local processes**. A task with `cwd` can cause an agent to read, modify, or execute commands inside the permitted workspace.
+- Local access is enabled by default (`auth.localAccess: true`).
+- Registration is disabled by default (`auth.allowRegistration: false`).
+- JWT secret is auto-generated on first run and persisted to `~/.passiton/config.json`.
+- Existing `~/.turing/` installs are still reused for compatibility.
+- CLI agents are high-privilege local processes. A task with `cwd` can cause an agent to read, modify, or execute commands inside the permitted workspace.
 
 ## Exposure Warning
 
-If you expose Turing beyond `localhost` (Tailscale, Cloudflare Tunnel, LAN, public internet), you **must**:
+If you expose Passiton beyond `localhost` through Tailscale, Cloudflare Tunnel, LAN, or the public internet, you must:
 
-1. Disable local access: `TURING_LOCAL_ACCESS=false`
-2. Set an explicit `TURING_JWT_SECRET`
+1. Disable local access: `PASSITON_LOCAL_ACCESS=false`
+2. Set an explicit `PASSITON_JWT_SECRET`
 3. Restrict `policy.allowedWorkspaces` to specific directories
-4. Use the `trusted` permission mode only with narrowly scoped `cwd` values
+4. Use `trusted` permission mode only with narrowly scoped `cwd` values
 
 Startup fails fast for non-localhost binds unless authentication is explicit and workspaces are restricted.
 
-The `trusted` permission mode injects auto-approve flags into CLI agents. Never enable it for agents running against sensitive or shared directories.
+The `trusted` permission mode injects auto-approve flags into supported CLI agents. Never enable it for agents running against sensitive or shared directories.
 
 ## Provider Keys
 
-API keys (Anthropic, OpenAI, etc.) are encrypted at rest using AES-256-GCM with a key derived from `TURING_ENCRYPTION_KEY` (auto-generated if unset). The encrypted material lives in `~/.turing/turing.db`. Protect your `~/.turing/` directory with appropriate filesystem permissions.
+API keys are encrypted at rest using AES-256-GCM with key material from `PASSITON_ENCRYPTION_KEY` when set, or an auto-generated local key otherwise. The encrypted material lives in the local SQLite database under the Passiton data directory. Protect that directory with appropriate filesystem permissions.
+
+Legacy `TURING_*` environment variables are accepted as fallbacks for matching `PASSITON_*` names.
 
 ## Scope
 
-This policy covers the Turing application code. It does not cover:
-- The behavior of third-party CLI agents that Turing invokes (Codex, Claude Code, etc.) — refer to their own policies
-- The experimental Dreamina and Gemini Image integrations — these invoke external binaries and are disabled by default
+This policy covers the Passiton application code. It does not cover:
+
+- third-party CLI agents invoked by Passiton, such as Codex or Claude Code
+- experimental Dreamina and Gemini Image integrations, which invoke external binaries and are disabled when unconfigured

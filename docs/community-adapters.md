@@ -1,52 +1,40 @@
 # Community Adapters
 
-Turing's core ships with adapters for four CLI agents that have stable,
-non-interactive modes:
+Passiton ships with adapters for four CLI agents that have usable non-interactive modes:
 
 | Agent | Adapter | Status |
-|-------|---------|--------|
+| --- | --- | --- |
 | [Codex](https://github.com/openai/codex) | `codex` | Bundled |
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `claude-code` | Bundled |
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini-cli` | Bundled |
 | [OpenCode](https://github.com/sst/opencode) | `opencode` | Bundled |
 
-## Other agents we know about
+API assistants are also supported through Anthropic, OpenAI, DeepSeek, Zhipu, Qwen, Moonshot, and custom OpenAI-compatible adapters.
 
-These CLI agents are **not** auto-discovered or bundled, because they lack a
-stable non-interactive mode, require an editor host, or have licensing
-constraints. If you want to use one, you can register a custom adapter (see
-`src/adapters/`) — and we welcome PRs to promote an entry below into a bundled
-adapter.
+## Other Agents We Know About
 
-- **aider** — AI pair programming in the terminal. Has `--message` for
-  non-interactive runs; a good candidate for a community adapter.
-- **goose** — Block's open-source agent. Has a headless `session` mode.
-- **amp** — Sourcegraph's agent.
-- **cursor** (`cursor-agent`) — Cursor's CLI.
-- **windsurf** — Codeium's agent.
-- **copilot** (`gh copilot`) — GitHub Copilot CLI.
-- **cline**, **continue**, **roo-code**, **kilo-code** — editor extensions,
-  primarily run inside VS Code; no clean standalone mode.
-- **openhands** — autonomous agent runtime.
-- **devin**, **swe-agent** — autonomous/CI-oriented agents.
-- **kiro**, **zed-agent** (`zed`) — editor-integrated agents.
+These CLI agents are not auto-discovered or bundled today because they need a cleaner non-interactive mode, require an editor host, or need adapter work:
 
-## Writing an adapter
+- **aider**: has `--message`; a good community adapter candidate.
+- **goose**: has a headless `session` mode.
+- **amp**: Sourcegraph's agent.
+- **cursor** (`cursor-agent`): Cursor's CLI.
+- **windsurf**: Codeium's agent.
+- **copilot** (`gh copilot`): GitHub Copilot CLI.
+- **cline**, **continue**, **roo-code**, **kilo-code**: primarily VS Code extensions.
+- **openhands**, **devin**, **swe-agent**: autonomous or CI-oriented agents.
+- **kiro**, **zed-agent** (`zed`): editor-integrated agents.
 
-A CLI adapter is a small class implementing the `Adapter` interface (see
-`src/types.ts`). At minimum:
+## Writing an Adapter
 
-1. Spawn your binary with the user's prompt as a CLI arg.
-2. Stream stdout, call `opts.onOutput(line)` for live progress.
-3. Resolve with the agent's final text (or an `AdapterResponse`).
+A CLI adapter implements the `Adapter` interface. At minimum:
 
-Register it with `router.registerAdapter(new MyAdapter())`. See the existing
-adapters in `src/adapters/` for complete examples.
+1. Spawn the binary with the prompt.
+2. Stream stdout through `opts.onOutput(line)` for live progress.
+3. Resolve with final text or an `AdapterResponse`.
 
-## Writing an external-task provider
+Register it with `router.registerAdapter(new MyAdapter())`. Existing examples live in `src/adapters/`.
 
-For integrations that aren't agents but "submit a job and poll until done"
-(video generation, rendering, batch processing), implement
-`ExternalTaskProvider` instead — see
-[README §扩展点](../README.md#扩展点external-task-providers) and the bundled
-Dreamina provider at `src/examples/dreamina/`.
+## Writing an External Task Provider
+
+For integrations that submit a job and poll until done, such as video generation, rendering, or batch processing, implement `ExternalTaskProvider` instead. See [README § External Task Providers](../README.md#external-task-providers) and the bundled Dreamina provider in `src/examples/dreamina/`.

@@ -1,5 +1,5 @@
 /**
- * Dreamina video-pipeline provider for Turing.
+ * Dreamina video-pipeline provider for Passiton.
  *
  * This is a bundled example of an ExternalTaskProvider. The engine core
  * (src/router.ts) stays free of any vendor: it only talks to registered

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Turing are documented in this file.
+All notable changes to Passiton are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Project renamed to Passiton; TURING_* env vars and ~/.turing remain supported as fallbacks.
+- Project renamed to Passiton; docs, README, and landing page positioning now reflect the local-first open-source launch. TURING_* env vars and ~/.turing remain supported as fallbacks.
 - Fully internationalized the UI: English is the default, Chinese is available via Settings, and server-side user-facing messages are now plain English.
-- Default `features.localCliAgents` to `true` for local-first onboarding. Cloud deployments set `TURING_LOCAL_CLI_AGENTS=false` (Fly.io config updated automatically).
+- Default `features.localCliAgents` to `true` for local-first onboarding. Cloud deployments set `PASSITON_LOCAL_CLI_AGENTS=false` (Fly.io config updated automatically).
 - Removed hardcoded personal binary paths from `DREAMINA_COMMAND` and `GeminiImageAdapter`. Both now require explicit environment configuration and degrade gracefully when unconfigured.
 - Rewrote `docs/README.md` to remove personal-assistant references and fix path/status inaccuracies.
 - Added `stopped` to documented session status values in `docs/EXTERNAL_AGENT_USAGE.md`.
@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Task handoff endpoint and UI for continuing errored or stopped tasks with a ready agent.
 - `agentManagement` section in `GET /api/docs` self-describing API reference, documenting `POST /api/agents` (API Assistant), `PUT`/`DELETE /api/agents/:name`, and `POST`/`PUT`/`DELETE /api/config/agents` (local CLI Agent config) with required fields and minimal body examples.
 - `LICENSE` (Apache-2.0), `CONTRIBUTING.md`, `SECURITY.md`, this `CHANGELOG.md`.
-- Environment variable `TURING_GEMINI_SKILL_SCRIPT` for the experimental Gemini Image adapter.
+- Environment variable `PASSITON_GEMINI_SKILL_SCRIPT` for the experimental Gemini Image adapter.
 
 ### Fixed
 
@@ -41,9 +41,9 @@ Initial public baseline. Local-first agent-to-agent orchestration:
 - **API Assistants**: Anthropic, OpenAI, DeepSeek, Zhipu, and OpenAI-compatible.
 - **Capability constraints**: API assistants cannot touch the local filesystem; `cwd` tasks require a local CLI agent.
 - **Permission modes**: `safe` (default) and `trusted` (auto-approve for trusted workspaces).
-- **Persistence**: SQLite at `~/.turing/turing.db` with configurable message retention.
-- **Web UI**, HTTP API, WebSocket events, and `turing` CLI.
+- **Persistence**: SQLite at `~/.passiton/turing.db` with configurable message retention.
+- **Web UI**, HTTP API, WebSocket events, and `passiton` CLI.
 - **Auth**: JWT with auto-generated secret on first run, encrypted provider key vault, local-access auto-login.
 
-[Unreleased]: https://github.com/fusae/turing/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/fusae/turing/releases/tag/v0.1.0
+[Unreleased]: https://github.com/fusae/passiton/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/fusae/passiton/releases/tag/v0.1.0

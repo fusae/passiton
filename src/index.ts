@@ -1,4 +1,4 @@
-// Turing — entry point
+// Passiton — entry point
 
 import { activeAgents, loadConfig, validateExposureConfig } from './config.js'
 import { AgentCatalog } from './agents.js'

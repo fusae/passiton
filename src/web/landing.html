@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=1440">
-  <title>Turing Cloud — Agent Sessions Platform</title>
+  <title>Passiton — Local-first multi-agent orchestration</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <script>
@@ -62,8 +62,8 @@
   <!-- ===================== NAV ===================== -->
   <nav class="landing-nav">
     <div class="landing-brand">
-      <div class="logo-icon">T</div>
-      <span>Turing Cloud</span>
+      <div class="logo-icon">P</div>
+      <span>Passiton</span>
     </div>
     <div class="landing-nav-links">
       <a href="#features">Features</a>
@@ -82,21 +82,21 @@
     </div>
 
     <div class="hero-badge fade-in-up">
-      <span>✦</span> Agent Sessions Platform
+      <span>✦</span> 本地优先的开源工具
     </div>
 
     <h1 class="fade-in-up delay-1">
-      让你的 AI 助手<br><span class="grad-text">协同工作</span>
+      把任务传给<br><span class="grad-text">另一个 AI agent</span>
     </h1>
 
     <p class="hero-sub fade-in-up delay-2">
-      Turing Cloud 是一个 AI 助手协作平台。自带 API Key，灵活路由，
-      用任务和工作流让多个 AI 模型协作完成复杂任务。
+      Passiton 运行在你的机器上，使用你自己的 CLI agents 和 API keys。
+      当某个 agent 额度耗尽、超时或中断时，把任务交给另一个 agent 继续。
     </p>
 
     <div class="hero-cta fade-in-up delay-3">
       <a href="index.html" class="btn btn-primary pulse-glow">
-        Get Started
+        本地开始
         <span>→</span>
       </a>
       <a href="/settings" class="btn btn-secondary">
@@ -108,7 +108,7 @@
   <!-- ===================== ARCHITECTURE ===================== -->
   <section class="arch-section" id="architecture">
     <h2 class="fade-in-up">工作原理</h2>
-    <p class="section-sub fade-in-up delay-1">Agent A ↔ Turing ↔ Agent B —— 简洁而强大的任务编排</p>
+    <p class="section-sub fade-in-up delay-1">Agent A ↔ Passiton ↔ Agent B —— 本地多 agent 路由</p>
 
     <div class="arch-diagram fade-in-up delay-2">
       <!-- Left Agents -->
@@ -128,11 +128,11 @@
       <!-- Connector -->
       <div class="arch-connector"></div>
 
-      <!-- Center: Turing -->
+      <!-- Center: Passiton -->
       <div class="arch-center">
         <div class="arch-icon">⚡</div>
-        <div class="arch-label">Turing Cloud</div>
-        <div class="arch-sub" style="color: var(--text-secondary); margin-top: 4px;">路由 · 编排 · 计费</div>
+        <div class="arch-label">Passiton</div>
+        <div class="arch-sub" style="color: var(--text-secondary); margin-top: 4px;">路由 · 交接 · 状态</div>
       </div>
 
       <!-- Connector -->
@@ -156,8 +156,8 @@
 
   <!-- ===================== FEATURES ===================== -->
   <section class="features-section" id="features">
-    <h2>为什么选择 Turing Cloud</h2>
-    <p class="section-sub">三个核心优势，让助手协作变得简单</p>
+    <h2>为什么选择 Passiton</h2>
+    <p class="section-sub">管理你已经在用的 agents</p>
 
     <div class="features-grid">
       <!-- Feature 1 -->
@@ -165,10 +165,10 @@
         <div class="feature-icon" style="background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(139,92,246,0.15));">
           🔀
         </div>
-        <h3>助手编排</h3>
+        <h3>Agent handoff</h3>
         <p>
-          通过任务和工作流灵活定义助手之间的通信拓扑。
-          支持串行、并行、条件分支 —— 像搭积木一样构建复杂工作流。
+          失败或停止的任务可交给另一个 ready agent 继续，
+          并带上上一轮输出和可用的工作区状态。
         </p>
       </div>
 
@@ -189,10 +189,10 @@
         <div class="feature-icon" style="background: linear-gradient(135deg, rgba(34,197,94,0.15), rgba(16,185,129,0.15));">
           📊
         </div>
-        <h3>按需计费</h3>
+        <h3>免费开源</h3>
         <p>
-          只为实际使用的任务付费。透明的按回合计费模式，
-          没有包月、没有隐藏费用。用多少、付多少。
+          Passiton 没有计费层。你在本机运行它，代码可审计；
+          使用 API 模型时只支付自己的 provider。
         </p>
       </div>
     </div>
@@ -201,14 +201,14 @@
   <!-- ===================== CTA ===================== -->
   <section class="cta-section">
     <h2 class="fade-in-up" style="margin-bottom: 16px;">
-      准备好让助手协作了吗？
+      运行第一个本地任务
     </h2>
     <p class="fade-in-up delay-1" style="color: var(--text-secondary); font-size: 1.05rem; margin-bottom: 36px;">
-      免费开始，按需扩展。几分钟内就能创建第一个任务。
+      安装后添加一个已发现的 agent，再从本地 Web UI 创建任务。
     </p>
     <div class="fade-in-up delay-2">
       <a href="index.html" class="btn btn-primary" style="padding: 14px 36px; font-size: 1rem;">
-        开始使用 Turing Cloud
+        打开 Passiton
         <span>→</span>
       </a>
     </div>
@@ -216,7 +216,7 @@
 
   <!-- ===================== FOOTER ===================== -->
   <footer class="landing-footer">
-    <p>© 2026 Turing Cloud. All rights reserved.</p>
+    <p>© 2026 Passiton. All rights reserved.</p>
   </footer>
 
 <script>

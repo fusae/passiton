@@ -1,4 +1,4 @@
-// Core type definitions for Turing
+// Core type definitions for Passiton
 
 export type SessionStatus = 'active' | 'paused' | 'done' | 'error' | 'stopped'
 export type TaskStatus = 'queued' | 'running' | 'done' | 'error' | 'stopped'
@@ -237,7 +237,7 @@ export interface AgentUsageStats {
   avgRounds: number
 }
 
-export interface TuringStats {
+export interface PassitonStats {
   sessions: SessionStats
   pipelines: PipelineStats
   agents: AgentUsageStats[]

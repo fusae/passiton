@@ -759,27 +759,27 @@ const MESSAGES = {
     'landing_nav_architecture': 'Architecture',
     'landing_nav_sessions': 'Sessions',
     'landing_nav_get_started': 'Get Started',
-    'landing_badge': 'Agent Sessions Platform',
-    'landing_hero_title_prefix': 'Coordinate your AI agents',
-    'landing_hero_title_highlight': 'in one workspace',
-    'landing_hero_sub': 'Passiton routes work across API models and local CLI agents. Use tasks and workflows to hand off complex work with clear state and outputs.',
-    'landing_hero_get_started': 'Get Started',
+    'landing_badge': 'Local-first open source',
+    'landing_hero_title_prefix': 'Pass tasks between',
+    'landing_hero_title_highlight': 'your AI agents',
+    'landing_hero_sub': 'Run Passiton on your machine with your CLI agents and API keys. When one agent hits quota, times out, or stops, hand the task to another with workspace state attached.',
+    'landing_hero_get_started': 'Start locally',
     'landing_hero_sign_in': 'Sign In',
     'landing_arch_title': 'How it works',
-    'landing_arch_sub': 'Agent A ↔ Passiton ↔ Agent B — simple routing for multi-agent work',
-    'landing_arch_center_sub': 'Routing · orchestration · billing',
+    'landing_arch_sub': 'Agent A ↔ Passiton ↔ Agent B — local routing for multi-agent work',
+    'landing_arch_center_sub': 'Routing · handoff · state',
     'landing_zhipu_api': 'Zhipu API',
     'landing_features_title': 'Why Passiton',
-    'landing_features_sub': 'Three practical reasons to use agents together',
-    'landing_feature_orchestration_title': 'Agent orchestration',
-    'landing_feature_orchestration_body': 'Define how assistants talk through tasks and workflows. Support serial steps, parallel work, and conditional branches without custom glue code.',
+    'landing_features_sub': 'A local control plane for agents you already use',
+    'landing_feature_orchestration_title': 'Agent handoff',
+    'landing_feature_orchestration_body': 'Continue failed or stopped tasks with another ready agent, including prior output and workspace state when available.',
     'landing_feature_keys_title': 'Use your own keys',
     'landing_feature_keys_body': 'Connect Anthropic, OpenAI, Zhipu, and other providers directly. Keep provider choice and model access under your control.',
-    'landing_feature_billing_title': 'Pay for usage',
-    'landing_feature_billing_body': 'Costs follow actual task usage with per-turn accounting. No monthly plan is required for occasional or variable work.',
-    'landing_cta_title': 'Ready to coordinate agents?',
-    'landing_cta_sub': 'Start free, scale as needed, and create your first task in a few minutes.',
-    'landing_cta_button': 'Start using Passiton',
+    'landing_feature_billing_title': 'Free and open source',
+    'landing_feature_billing_body': 'No hosted meter or subscription. Run it locally, inspect the code, and pay only your own providers when you use API models.',
+    'landing_cta_title': 'Run your first local task',
+    'landing_cta_sub': 'Install, add a discovered agent, and create a task from the local web UI.',
+    'landing_cta_button': 'Open Passiton',
     'landing_footer': '© 2026 Passiton. All rights reserved.',
 
     // Login page
@@ -1384,27 +1384,27 @@ const MESSAGES = {
     'landing_nav_architecture': 'Architecture',
     'landing_nav_sessions': 'Sessions',
     'landing_nav_get_started': 'Get Started',
-    'landing_badge': 'Agent Sessions Platform',
-    'landing_hero_title_prefix': '让你的 AI 助手',
-    'landing_hero_title_highlight': '协同工作',
-    'landing_hero_sub': 'Passiton 是一个 AI 助手协作平台。自带 API Key，灵活路由，用任务和工作流让多个 AI 模型协作完成复杂任务。',
-    'landing_hero_get_started': 'Get Started',
+    'landing_badge': '本地优先的开源工具',
+    'landing_hero_title_prefix': '把任务传给',
+    'landing_hero_title_highlight': '另一个 AI agent',
+    'landing_hero_sub': 'Passiton 运行在你的机器上，使用你自己的 CLI agents 和 API keys。当某个 agent 额度耗尽、超时或中断时，把任务连同工作区状态交给另一个 agent 继续。',
+    'landing_hero_get_started': '本地开始',
     'landing_hero_sign_in': 'Sign In',
     'landing_arch_title': '工作原理',
-    'landing_arch_sub': 'Agent A ↔ Passiton ↔ Agent B —— 简洁而强大的任务编排',
-    'landing_arch_center_sub': '路由 · 编排 · 计费',
+    'landing_arch_sub': 'Agent A ↔ Passiton ↔ Agent B —— 本地多 agent 路由',
+    'landing_arch_center_sub': '路由 · 交接 · 状态',
     'landing_zhipu_api': '智谱 API',
     'landing_features_title': '为什么选择 Passiton',
-    'landing_features_sub': '三个核心优势，让助手协作变得简单',
-    'landing_feature_orchestration_title': '助手编排',
-    'landing_feature_orchestration_body': '通过任务和工作流灵活定义助手之间的通信拓扑。支持串行、并行、条件分支 —— 像搭积木一样构建复杂工作流。',
+    'landing_features_sub': '管理你已经在用的 agents',
+    'landing_feature_orchestration_title': 'Agent handoff',
+    'landing_feature_orchestration_body': '失败或停止的任务可交给另一个 ready agent 继续，并带上上一轮输出和可用的工作区状态。',
     'landing_feature_keys_title': '用自己的 Key',
     'landing_feature_keys_body': '自带 API Key，直接对接 Anthropic、OpenAI、智谱等主流提供商。不锁定供应商，数据不经代理 —— 完全掌控你的 AI 资产。',
-    'landing_feature_billing_title': '按需计费',
-    'landing_feature_billing_body': '只为实际使用的任务付费。透明的按回合计费模式，没有包月、没有隐藏费用。用多少、付多少。',
-    'landing_cta_title': '准备好让助手协作了吗？',
-    'landing_cta_sub': '免费开始，按需扩展。几分钟内就能创建第一个任务。',
-    'landing_cta_button': '开始使用 Passiton',
+    'landing_feature_billing_title': '免费开源',
+    'landing_feature_billing_body': 'Passiton 没有计费层。你在本机运行它，代码可审计；使用 API 模型时只支付自己的 provider。',
+    'landing_cta_title': '运行第一个本地任务',
+    'landing_cta_sub': '安装后添加一个已发现的 agent，再从本地 Web UI 创建任务。',
+    'landing_cta_button': '打开 Passiton',
     'landing_footer': '© 2026 Passiton. All rights reserved.',
 
     // Login page
@@ -1851,7 +1851,7 @@ function renderSidebar(active) {
   return `
     <aside class="sidebar">
       <div class="sidebar-brand">
-        <div class="logo-icon">T</div>
+        <div class="logo-icon">P</div>
         <span>Passiton</span>
       </div>
       <nav class="sidebar-nav">
@@ -2396,7 +2396,7 @@ function renderLanding() {
   document.body.innerHTML = `
     <nav class="landing-nav">
       <div class="landing-brand">
-        <div class="logo-icon">T</div>
+        <div class="logo-icon">P</div>
         <span>Passiton</span>
       </div>
       <div class="landing-nav-links">
@@ -2540,7 +2540,7 @@ function renderLogin() {
       <div class="card" style="max-width: 420px; width: 100%;">
         <div style="text-align: center; margin-bottom: 32px;">
           <div style="display: inline-flex; align-items: center; gap: 10px; margin-bottom: 16px;">
-            <div class="logo-icon" style="width: 36px; height: 36px; font-size: 1rem;">T</div>
+            <div class="logo-icon" style="width: 36px; height: 36px; font-size: 1rem;">P</div>
             <h2 style="margin: 0;">Passiton</h2>
           </div>
           <p style="color: var(--text-secondary); font-size: 0.9rem;">${t('login_tagline')}</p>
