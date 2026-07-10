@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { checkSessionTimeout } from '../policy.js'
-import { resolveWorkspacePath, WorkspaceAccessError } from '../workspace.js'
+import { resolveWorkspacePath, WorkspaceAccessError, setWorkspacePlatformForTesting, normalizePathForComparison, isPathInsideRoot } from '../workspace.js'
 import type { Session } from '../types.js'
 
 test('session timeout uses last update time so approval waits can resume', () => {
@@ -108,3 +108,44 @@ function withTempDirs(fn: (root: string, outside: string) => void): void {
     rmSync(parent, { recursive: true, force: true })
   }
 }
+
+// --- win32 path normalization tests ---
+
+test.afterEach(() => {
+  setWorkspacePlatformForTesting(undefined)
+})
+
+test('win32: normalizePathForComparison replaces separators and lowercases', () => {
+  assert.equal(
+    normalizePathForComparison('C:/Users/X/Projects', 'win32'),
+    'c:\\users\\x\\projects'
+  )
+  assert.equal(
+    normalizePathForComparison('C:\\Users\\X\\Projects', 'win32'),
+    'c:\\users\\x\\projects'
+  )
+  assert.equal(
+    normalizePathForComparison('/home/user/proj', 'linux'),
+    '/home/user/proj'
+  )
+})
+
+test('win32: isPathInsideRoot matches case-insensitively and across separators', () => {
+  const root = 'C:\\Users\\James\\Projects'
+  const target = 'c:/users/james/projects/myapp'
+  assert.ok(isPathInsideRoot(target, root, 'win32'))
+  assert.ok(isPathInsideRoot(root, root, 'win32'))
+})
+
+test('win32: isPathInsideRoot rejects paths outside root', () => {
+  const root = 'C:\\Users\\James\\Projects'
+  const target = 'D:\\Users\\James\\Projects'
+  assert.ok(!isPathInsideRoot(target, root, 'win32'))
+})
+
+test('win32: isPathInsideRoot does not false-positive on prefix matches', () => {
+  const root = 'C:\\Users\\James\\Projects'
+  // "Projects-2" should NOT match inside "Projects"
+  const target = 'c:/users/james/projects-2/app'
+  assert.ok(!isPathInsideRoot(target, root, 'win32'))
+})

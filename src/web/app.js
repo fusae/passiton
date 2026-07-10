@@ -155,6 +155,7 @@ const MESSAGES = {
     'settings.general.mode.review': 'Review',
     'settings.general.mode.freeform': 'Freeform',
     'settings.general.workspaces': 'Allowed Workspaces',
+    'settings.general.workspacesPlaceholder': '/home/me/projects\n/Users/me/Projects',
     'settings.general.save': 'Save Settings',
     'settings.general.language': 'Language',
     'settings.general.language.en': 'English',
@@ -859,6 +860,7 @@ const MESSAGES = {
     'settings.general.mode.review': '审查',
     'settings.general.mode.freeform': '自由',
     'settings.general.workspaces': '允许的工作区',
+    'settings.general.workspacesPlaceholder': '/home/me/projects\n/Users/me/Projects',
     'settings.general.save': '保存设置',
     'settings.general.language': '语言',
     'settings.general.language.en': 'English',
@@ -5263,7 +5265,7 @@ async function renderSettings() {
 
               <div class="form-group">
                 <label>${t('settings.general.workspaces')}</label>
-                <textarea class="input" id="allowed-workspaces-input" rows="4" placeholder="/home/passiton/projects&#10;/Users/me/Projects">${escapeHtml((state.config?.policy?.allowedWorkspaces || []).join('\n'))}</textarea>
+                <textarea class="input" id="allowed-workspaces-input" rows="4" placeholder="${escapeAttr(t('settings.general.workspacesPlaceholder'))}">${escapeHtml((state.config?.policy?.allowedWorkspaces || []).join('\n'))}</textarea>
                 <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">${t('settings.agents.workspacesHint')}</p>
               </div>
               <button class="btn btn-primary" onclick="window.saveAllowedWorkspaces()">${t('settings.general.save')}</button>

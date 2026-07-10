@@ -4,7 +4,7 @@
 
 Passiton is local-first multi-agent orchestration: run tasks across the CLI agents and API models you already have, and when one agent dies from quota, timeout, or interruption, pass the task on to another.
 
-![Agent handoff demo: a task fails on one agent and is continued by another, which verifies the workspace and finishes only the remaining work](./docs/assets/handoff-demo.gif)
+![Agent handoff demo: a task fails on one agent and is continued by another, which verifies the workspace and finishes only the remaining work](https://raw.githubusercontent.com/fusae/passiton/main/docs/assets/handoff-demo.gif)
 
 ## Key Features
 

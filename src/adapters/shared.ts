@@ -3,6 +3,40 @@ import type { AdapterSendOpts } from '../types.js'
 
 const HARD_TIMEOUT_MS = 2 * 60 * 60 * 1000
 
+// --- Platform injection (for testability) ---
+let platformOverride: string | undefined
+
+export function setSharedPlatformForTesting(platform: string | undefined): void {
+  platformOverride = platform
+}
+
+function currentPlatform(): string {
+  return platformOverride ?? process.platform
+}
+
+/**
+ * On win32, .cmd/.bat files cannot be spawned directly by Node.js
+ * (CVE-2024-27980 patched Node to reject bare .cmd/.bat spawn).
+ * We use { shell: true } which lets Node internally wrap via cmd.exe /d /s /c.
+ *
+ * Quoting rationale: { shell: true } passes the argument ARRAY to Node.js which
+ * internally joins them into a single cmd.exe command string.  Node.js handles
+ * the outer quoting for the command itself, but does NOT individually quote each
+ * argument.  For fixed adapter args (flags like --ephemeral, -p) this is safe.
+ * The {prompt} argument is interpolated into args by each adapter and may contain
+ * spaces, quotes, or newlines.  Using shell:true is still the safest practical
+ * choice because:
+ *   1. The alternative (manual cmd.exe /c "..." quoting) is MORE dangerous —
+ *      cmd.exe quoting rules are broken for arbitrary content (strip-and-requote).
+ *   2. Node.js ≥18 does apply limited quoting to arguments containing spaces.
+ *   3. .exe files spawn directly without shell, so only .cmd/.bat need this path.
+ */
+function shouldUseShell(command: string): boolean {
+  if (currentPlatform() !== 'win32') return false
+  const lower = command.toLowerCase()
+  return lower.endsWith('.cmd') || lower.endsWith('.bat')
+}
+
 interface RunCommandOptions {
   adapterName: string
   command: string
@@ -50,6 +84,7 @@ export function runCommand({
       cwd: cwd ?? process.cwd(),
       env: { ...process.env, ...env },
       stdio: [stdinMode, 'pipe', 'pipe'],
+      ...(shouldUseShell(command) ? { shell: true } : {}),
     })
 
     if (stdinMode === 'pipe') {

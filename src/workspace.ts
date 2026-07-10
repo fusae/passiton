@@ -3,6 +3,31 @@ import path from 'path'
 
 export class WorkspaceAccessError extends Error {}
 
+// --- Platform injection (for testability) ---
+let platformOverride: string | undefined
+
+export function setWorkspacePlatformForTesting(platform: string | undefined): void {
+  platformOverride = platform
+}
+
+function currentPlatform(): string {
+  return platformOverride ?? process.platform
+}
+
+export function normalizePathForComparison(p: string, platform: string = currentPlatform()): string {
+  if (platform === 'win32') {
+    return p.replace(/\//g, '\\').toLowerCase()
+  }
+  return p
+}
+
+export function isPathInsideRoot(target: string, root: string, platform: string = currentPlatform()): boolean {
+  const normTarget = normalizePathForComparison(target, platform)
+  const normRoot = normalizePathForComparison(root, platform)
+  const sep = platform === 'win32' ? '\\' : path.sep
+  return normTarget === normRoot || normTarget.startsWith(normRoot + sep)
+}
+
 export function defaultWorkspaceRoots(): string[] {
   return [process.cwd()]
 }
@@ -43,7 +68,7 @@ export function resolveWorkspacePath(
 
 export function assertInsideAllowedRoots(target: string, roots: string[], field = 'path'): void {
   const realRoots = allowedWorkspaceRoots(roots)
-  const matched = realRoots.some((root) => target === root || target.startsWith(`${root}${path.sep}`))
+  const matched = realRoots.some((root) => isPathInsideRoot(target, root))
   if (!matched) {
     throw new WorkspaceAccessError(`"${field}" is outside allowed workspaces`)
   }

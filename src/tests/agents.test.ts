@@ -3,12 +3,13 @@ import assert from 'node:assert/strict'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { AgentCatalog, findExecutable, setExtraAgentSearchPathsForTesting } from '../agents.js'
+import { AgentCatalog, findExecutable, setExtraAgentSearchPathsForTesting, setPlatformForTesting } from '../agents.js'
 import { registerConfiguredAdapters } from '../adapters/factory.js'
 import { Router } from '../router.js'
 
 test.afterEach(() => {
   setExtraAgentSearchPathsForTesting([])
+  setPlatformForTesting(undefined)
   delete process.env.PASSITON_CODEX_COMMAND
 })
 
@@ -176,6 +177,113 @@ exit 2
     assert.equal(codex?.healthy, true)
     assert.equal(codex?.verified, false)
     assert.equal(codex?.version, 'codex-test')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// --- win32 extension resolution tests (run on any OS via platform injection) ---
+
+test('win32: resolveCommand prefers .exe over .cmd and bare name', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-win32-exe-'))
+  writeFileSync(join(dir, 'claude.exe'), 'fake exe')
+  writeFileSync(join(dir, 'claude.cmd'), 'fake cmd')
+  writeFileSync(join(dir, 'claude'), 'fake bare')
+  setExtraAgentSearchPathsForTesting([dir])
+  setPlatformForTesting('win32')
+
+  try {
+    const result = await findExecutable(['claude'])
+    assert.equal(result, join(dir, 'claude.exe'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('win32: resolveCommand prefers .cmd over bare name when .exe absent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-win32-cmd-'))
+  writeFileSync(join(dir, 'codex.cmd'), 'fake cmd')
+  writeFileSync(join(dir, 'codex'), 'fake bare')
+  setExtraAgentSearchPathsForTesting([dir])
+  setPlatformForTesting('win32')
+
+  try {
+    const result = await findExecutable(['codex'])
+    assert.equal(result, join(dir, 'codex.cmd'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('win32: resolveCommand tries bare name LAST', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-win32-bare-'))
+  writeFileSync(join(dir, 'gemini'), 'fake bare')
+  setExtraAgentSearchPathsForTesting([dir])
+  setPlatformForTesting('win32')
+
+  try {
+    const result = await findExecutable(['gemini'])
+    assert.equal(result, join(dir, 'gemini'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('win32: resolveCommand with full path adds .exe extension', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-win32-path-'))
+  writeFileSync(join(dir, 'claude.exe'), 'fake exe')
+  setExtraAgentSearchPathsForTesting([dir])
+  setPlatformForTesting('win32')
+
+  try {
+    const result = await findExecutable([join(dir, 'claude')])
+    assert.equal(result, join(dir, 'claude.exe'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('win32: resolveCommand respects PATHEXT for additional extensions', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-win32-pathext-'))
+  writeFileSync(join(dir, 'opencode.ps1'), 'fake ps1')
+  setExtraAgentSearchPathsForTesting([dir])
+  setPlatformForTesting('win32')
+  process.env.PATHEXT = '.COM;.EXE;.BAT;.CMD;.PS1'
+
+  try {
+    const result = await findExecutable(['opencode'])
+    assert.equal(result, join(dir, 'opencode.ps1'))
+  } finally {
+    delete process.env.PATHEXT
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('win32: .cmd found when .exe absent (npm bash shim scenario)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-win32-npm-'))
+  // Simulate npm install: bare shim (Git Bash) + .cmd sibling
+  writeFileSync(join(dir, 'codex'), '#!/bin/sh\nnode ...')
+  writeFileSync(join(dir, 'codex.cmd'), '@echo off\nnode ...')
+  setExtraAgentSearchPathsForTesting([dir])
+  setPlatformForTesting('win32')
+
+  try {
+    const result = await findExecutable(['codex'])
+    assert.equal(result, join(dir, 'codex.cmd'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('non-win32: bare name resolution unchanged (no extension appending)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-nowin32-'))
+  writeExecutable(join(dir, 'claude'))
+  setExtraAgentSearchPathsForTesting([dir])
+  setPlatformForTesting('linux')
+
+  try {
+    const result = await findExecutable(['claude'])
+    assert.equal(result, join(dir, 'claude'))
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

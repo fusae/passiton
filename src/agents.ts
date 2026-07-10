@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm } from 'fs/promises'
+import { access, mkdtemp, rm, stat } from 'fs/promises'
 import { constants } from 'fs'
 import { delimiter, dirname, join } from 'path'
 import { homedir, tmpdir } from 'os'
@@ -11,6 +11,18 @@ import type { Session } from './types.js'
 
 const execFileAsync = promisify(execFile)
 const HEALTH_CACHE_TTL_MS = 60_000
+
+// --- Platform injection (for testability) ---
+let platformOverride: string | undefined
+
+export function setPlatformForTesting(platform: string | undefined): void {
+  platformOverride = platform
+  searchPathCache = undefined
+}
+
+function currentPlatform(): string {
+  return platformOverride ?? process.platform
+}
 
 interface DiscoveryPreset {
   name: string
@@ -195,7 +207,7 @@ export class AgentCatalog {
       }
     }
 
-    const commandExecutable = entry.command.includes('/')
+    const commandExecutable = isPathLike(entry.command)
       ? await isExecutable(entry.command)
       : Boolean(await resolveCommand(entry.command))
     const versionProbe = refresh ? await probeCommand(entry.command) : { healthy: commandExecutable }
@@ -279,8 +291,26 @@ export function setExtraAgentSearchPathsForTesting(entries: string[]): void {
 }
 
 async function resolveCommand(command: string): Promise<string | undefined> {
-  if (command.includes('/')) {
+  const platform = currentPlatform()
+
+  if (isPathLike(command, platform)) {
+    if (platform === 'win32') {
+      return resolvePathWithExtensions(command)
+    }
     return await isExecutable(command) ? command : undefined
+  }
+
+  if (platform === 'win32') {
+    const extensions = getExecutableExtensions()
+    for (const entry of await getSearchPathEntries()) {
+      for (const ext of extensions) {
+        const fullPath = join(entry, command + ext)
+        if (await isExecutable(fullPath)) {
+          return fullPath
+        }
+      }
+    }
+    return undefined
   }
 
   for (const entry of await getSearchPathEntries()) {
@@ -293,10 +323,51 @@ async function resolveCommand(command: string): Promise<string | undefined> {
   return undefined
 }
 
+function isPathLike(command: string, platform: string = currentPlatform()): boolean {
+  if (command.includes('/')) return true
+  if (platform === 'win32') {
+    return command.includes('\\') || /^[a-zA-Z]:/.test(command)
+  }
+  return false
+}
+
+async function resolvePathWithExtensions(commandPath: string): Promise<string | undefined> {
+  const lower = commandPath.toLowerCase()
+  if (lower.endsWith('.exe') || lower.endsWith('.cmd') || lower.endsWith('.bat')) {
+    return await isExecutable(commandPath) ? commandPath : undefined
+  }
+  for (const ext of getExecutableExtensions()) {
+    const candidate = ext ? commandPath + ext : commandPath
+    if (await isExecutable(candidate)) {
+      return candidate
+    }
+  }
+  return undefined
+}
+
+function getExecutableExtensions(): string[] {
+  const ourPriority = ['.exe', '.cmd', '.bat']
+  const pathext = process.env.PATHEXT
+  if (pathext) {
+    const userExts = pathext.split(';').filter(Boolean).map((e) => e.toLowerCase())
+    const result: string[] = []
+    for (const ext of ourPriority) {
+      if (userExts.includes(ext) && !result.includes(ext)) result.push(ext)
+    }
+    for (const ext of userExts) {
+      if (!result.includes(ext)) result.push(ext)
+    }
+    result.push('')
+    return result
+  }
+  return [...ourPriority, '']
+}
+
 async function getSearchPathEntries(): Promise<string[]> {
   if (searchPathCache) return searchPathCache
 
   const home = homedir()
+  const platform = currentPlatform()
   const entries = [
     ...extraSearchPathEntries,
     ...(process.env.PATH ?? '').split(delimiter),
@@ -319,14 +390,29 @@ async function getSearchPathEntries(): Promise<string[]> {
     '/bin',
     '/usr/sbin',
     '/sbin',
-    ...await packageManagerBins(),
   ]
+
+  if (platform === 'win32') {
+    if (process.env.APPDATA) {
+      entries.push(join(process.env.APPDATA, 'npm'))
+    }
+    entries.push(join(home, 'scoop', 'shims'))
+    if (process.env.ProgramData) {
+      entries.push(join(process.env.ProgramData, 'chocolatey', 'bin'))
+    }
+    if (process.env.LOCALAPPDATA) {
+      entries.push(join(process.env.LOCALAPPDATA, 'Programs'))
+    }
+  }
+
+  entries.push(...await packageManagerBins())
 
   searchPathCache = Array.from(new Set(entries.filter(Boolean)))
   return searchPathCache
 }
 
 async function packageManagerBins(): Promise<string[]> {
+  const isWin32 = currentPlatform() === 'win32'
   const probes: Array<[string, string[]]> = [
     ['npm', ['bin', '-g']],
     ['pnpm', ['bin', '-g']],
@@ -337,7 +423,10 @@ async function packageManagerBins(): Promise<string[]> {
 
   for (const [command, args] of probes) {
     try {
-      const { stdout } = await execFileAsync(command, args, { timeout: 2_000 })
+      const { stdout } = await execFileAsync(command, args, {
+        timeout: 2_000,
+        ...(isWin32 ? { shell: true } : {}),
+      })
       const path = String(stdout).trim()
       if (path && !path.includes('\n')) bins.push(path)
     } catch {
@@ -350,6 +439,12 @@ async function packageManagerBins(): Promise<string[]> {
 
 async function isExecutable(filePath: string): Promise<boolean> {
   try {
+    if (currentPlatform() === 'win32') {
+      // On Windows, X_OK succeeds for any existing file (no execute bit concept).
+      // Check existence and that it's a regular file.
+      await access(filePath, constants.F_OK)
+      return (await stat(filePath)).isFile()
+    }
     await access(filePath, constants.X_OK)
     return true
   } catch {
@@ -359,7 +454,12 @@ async function isExecutable(filePath: string): Promise<boolean> {
 
 async function probeCommand(command: string): Promise<{ healthy: boolean; version?: string; error?: string }> {
   try {
-    const { stdout, stderr } = await execFileAsync(command, ['--version'], { timeout: 10_000 })
+    const isWin32 = currentPlatform() === 'win32'
+    const needsShell = isWin32 && /\.(cmd|bat)$/i.test(command)
+    const { stdout, stderr } = await execFileAsync(command, ['--version'], {
+      timeout: 10_000,
+      ...(needsShell ? { shell: true } : {}),
+    })
     const version = parseVersion(stdout || stderr)
     return { healthy: true, version }
   } catch (err) {

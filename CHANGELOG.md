@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows agent discovery: `resolveCommand` now tries `.exe`, `.cmd`, `.bat` extensions (and respects `PATHEXT`) so agents like `claude.exe` and `codex.cmd` are found instead of only the bare name. Previously `claude` installed at `~/.local/bin/claude.exe` was invisible because the resolver only checked the exact name.
+- Windows spawn correctness: `.cmd` and `.bat` files are now spawned via `shell: true` (required since Node.js CVE-2024-27980). `.exe` files spawn directly.
+- Windows workspace path matching: separators and case are normalized so `C:\Users\X\Projects` matches `c:/users/x/projects`.
+- Added Windows-common search paths: `%APPDATA%\npm`, `~/scoop/shims`, `%ProgramData%\chocolatey\bin`, `%LOCALAPPDATA%\Programs`.
+
 ## [0.2.0] - 2026-07-09
 
 ### Changed
