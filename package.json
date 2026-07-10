@@ -11,7 +11,7 @@
     "passiton": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc && mkdir -p dist/web && cp src/web/*.html src/web/*.js src/web/*.css dist/web/",
+    "build": "tsc && node scripts/copy-web.mjs",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run build",
     "start": "node dist/index.js",
