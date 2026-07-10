@@ -1957,9 +1957,10 @@ function extractChangedFiles(diff: string): string[] {
 
 function extractReferencedTextFiles(content: string, cwd: string): string[] {
   const matches = new Set<string>()
-  const patterns = [
+  const patterns: RegExp[] = [
     /`([^`\n]+\.(?:md|txt|json|ya?ml|csv|tsv))`/gi,
     /(^|[\s("'（])((?:\/|\.{0,2}\/)[^\s`'"<>，。；：、)）]+\.(?:md|txt|json|ya?ml|csv|tsv))(?=$|[\s`'"<>，。；：、)）])/gim,
+    /(^|[\s("'（])((?:[a-zA-Z]:[\\/]|\\|\.{0,2}\\)[^\s`'"<>，。；：、)）]+\.(?:md|txt|json|ya?ml|csv|tsv))(?=$|[\s`'"<>，。；：、)）])/gim,
   ]
   for (const pattern of patterns) {
     for (const match of content.matchAll(pattern)) {

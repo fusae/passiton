@@ -603,17 +603,18 @@ test('recoverSessions pauses interrupted active sessions', async () => {
 
 test('dreamina provider.parseAgentOutput ignores completed local video output', () => {
   const provider = createDreaminaProvider({ binary: '/usr/bin/true' })
+  const cwd = join(tmpdir(), 'project')
   const pending = provider.parseAgentOutput(
     'submit_id: `5db07d3a-4d66-44b7-ac53-b2f9f660ce11` querying',
-    { cwd: '/tmp/project' }
+    { cwd }
   )
   assert.deepEqual(pending, {
     externalId: '5db07d3a-4d66-44b7-ac53-b2f9f660ce11',
-    downloadDir: '/tmp/project/output',
+    downloadDir: join(cwd, 'output'),
   })
   assert.equal(provider.parseAgentOutput(
     'submit_id: `5db07d3a-4d66-44b7-ac53-b2f9f660ce11`\n本地视频：`/tmp/video.mp4`',
-    { cwd: '/tmp/project' }
+    { cwd }
   ), undefined)
 })
 
@@ -1479,7 +1480,11 @@ test('pipeline dependencies inject referenced files even without git snapshots',
       secondSessionId = pipeline.sessions[1].sessionId
       await waitFor(() => state.getSession(secondSessionId)?.status === 'done', 5_000)
 
-      assert.match(dependencyPrompt, new RegExp(referencePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      // Use realpathSync.native so the comparison is robust against symlink
+      // resolution differences across platforms (e.g. /var → /private/var on
+      // macOS, or junction resolution on Windows).
+      const realReferencePath = realpathSync.native(referencePath)
+      assert.match(dependencyPrompt, new RegExp(realReferencePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
       assert.match(dependencyPrompt, /真实素材：高考考生被带回站点办理入职/)
     } finally {
       rmSync(dir, { recursive: true, force: true })

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { AgentCatalog, findExecutable, setExtraAgentSearchPathsForTesting, setPlatformForTesting } from '../agents.js'
+import { AgentCatalog, findExecutable, getBundledCodexCandidates, setExtraAgentSearchPathsForTesting, setPlatformForTesting } from '../agents.js'
 import { registerConfiguredAdapters } from '../adapters/factory.js'
 import { Router } from '../router.js'
 
@@ -15,8 +15,7 @@ test.afterEach(() => {
 
 test('findExecutable prefers explicit env command paths', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-env-'))
-  const command = join(dir, 'my-codex')
-  writeExecutable(command)
+  const command = writeExecutable(join(dir, 'my-codex'))
   process.env.PASSITON_CODEX_COMMAND = command
 
   try {
@@ -28,14 +27,71 @@ test('findExecutable prefers explicit env command paths', async () => {
 
 test('findExecutable searches fallback bin paths outside PATH', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-bin-'))
-  const command = join(dir, 'codex')
-  writeExecutable(command)
+  const command = writeExecutable(join(dir, 'codex'))
   setExtraAgentSearchPathsForTesting([dir])
 
   try {
     assert.equal(await findExecutable(['codex']), command)
   } finally {
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('Codex discovery includes the executable bundled with ChatGPT on macOS', () => {
+  const candidates = getBundledCodexCandidates('darwin', '/Users/test', {})
+  assert.equal(candidates[0], '/Applications/ChatGPT.app/Contents/Resources/codex')
+  assert.ok(candidates.includes('/Users/test/Applications/ChatGPT.app/Contents/Resources/codex'))
+})
+
+test('Codex discovery includes common ChatGPT locations on Windows', () => {
+  const candidates = getBundledCodexCandidates('win32', 'C:\\Users\\test', {
+    LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local',
+    ProgramFiles: 'C:\\Program Files',
+  })
+  assert.ok(candidates.some((candidate) => candidate.endsWith(join('Microsoft', 'WindowsApps', 'codex.exe'))))
+  assert.ok(candidates.some((candidate) => candidate.endsWith(join('Programs', 'ChatGPT', 'resources', 'codex.exe'))))
+  assert.ok(candidates.some((candidate) => candidate.endsWith(join('ChatGPT', 'resources', 'codex.exe'))))
+})
+
+test('discovery repairs a configured Codex path after the app executable moves', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-codex-moved-'))
+  const command = writeExecutable(join(dir, 'codex'), 'echo codex-test')
+  setExtraAgentSearchPathsForTesting([dir])
+  const catalog = new AgentCatalog({
+    codex: {
+      adapter: 'codex',
+      command: join(dir, 'removed-codex'),
+      args: ['exec', '{prompt}'],
+    },
+  }, true)
+
+  try {
+    await catalog.discover({ refresh: true })
+    assert.equal(catalog.configuredAgentConfigs().codex?.command, command)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('refresh rescans CLI locations changed after Passiton started', async () => {
+  const firstDir = mkdtempSync(join(tmpdir(), 'passiton-agent-refresh-old-'))
+  const nextDir = mkdtempSync(join(tmpdir(), 'passiton-agent-refresh-new-'))
+  const firstCommand = writeExecutable(join(firstDir, 'claude'), 'echo claude-old')
+  setExtraAgentSearchPathsForTesting([firstDir])
+  const catalog = new AgentCatalog({}, true)
+
+  try {
+    await catalog.discover()
+    assert.equal((await catalog.listAgents()).find((agent) => agent.name === 'claude-code')?.command, firstCommand)
+
+    rmSync(firstDir, { recursive: true, force: true })
+    const nextCommand = writeExecutable(join(nextDir, 'claude'), 'echo claude-new')
+    setExtraAgentSearchPathsForTesting([nextDir])
+    const refreshed = await catalog.listAgents({ refresh: true })
+    assert.equal(refreshed.find((agent) => agent.name === 'claude-code')?.command, nextCommand)
+  } finally {
+    rmSync(firstDir, { recursive: true, force: true })
+    rmSync(nextDir, { recursive: true, force: true })
   }
 })
 
@@ -93,11 +149,10 @@ test('discovered local agents are not registered until configured', async () => 
 
 test('configured local agents require a successful smoke run to be healthy', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-smoke-'))
-  const command = join(dir, 'codex')
-  writeExecutable(command, `
-if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi
-echo TURING_READY
-`)
+  const command = writeExecutable(join(dir, 'codex'),
+    'if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi\necho TURING_READY',
+    'if "%~1"=="--version" (echo codex-test & exit /b 0)\necho TURING_READY'
+  )
 
   try {
     const catalog = new AgentCatalog({
@@ -108,11 +163,14 @@ echo TURING_READY
         timeout: 1_000,
       },
     }, true)
-    const agents = await catalog.listAgents({ refresh: true })
+    const diagnostic = await catalog.diagnoseAgent('codex', true)
+    const agents = await catalog.listAgents()
     const codex = agents.find((agent) => agent.name === 'codex')
 
+    assert.equal(diagnostic?.smokeOk, true)
     assert.equal(codex?.source, 'configured')
     assert.equal(codex?.healthy, true)
+    assert.equal(codex?.verified, true)
     assert.equal(codex?.version, 'codex-test')
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -121,11 +179,10 @@ echo TURING_READY
 
 test('configured local agents reflect installed (version probe) health without refresh', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-no-probe-'))
-  const command = join(dir, 'codex')
-  writeExecutable(command, `
-if [ "$1" = "--version" ]; then exit 2; fi
-exit 2
-`)
+  const command = writeExecutable(join(dir, 'codex'),
+    'if [ "$1" = "--version" ]; then exit 2; fi\nexit 2',
+    'if "%~1"=="--version" (exit /b 2)\nexit /b 2'
+  )
 
   try {
     const catalog = new AgentCatalog({
@@ -152,11 +209,10 @@ exit 2
 
 test('configured local agents stay healthy-but-unverified when smoke run fails', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-smoke-fail-'))
-  const command = join(dir, 'codex')
-  writeExecutable(command, `
-if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi
-exit 2
-`)
+  const command = writeExecutable(join(dir, 'codex'),
+    'if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi\nexit 2',
+    'if "%~1"=="--version" (echo codex-test & exit /b 0)\nexit /b 2'
+  )
 
   try {
     const catalog = new AgentCatalog({
@@ -277,7 +333,12 @@ test('win32: .cmd found when .exe absent (npm bash shim scenario)', async () => 
 
 test('non-win32: bare name resolution unchanged (no extension appending)', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-nowin32-'))
-  writeExecutable(join(dir, 'claude'))
+  // This test injects 'linux' platform to verify non-win32 resolution logic.
+  // Write a bare executable directly (not via writeExecutable, which would
+  // create a .cmd file on real win32).
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'claude'), '#!/bin/sh\necho test\n')
+  if (!isWin32) chmodSync(join(dir, 'claude'), 0o755)
   setExtraAgentSearchPathsForTesting([dir])
   setPlatformForTesting('linux')
 
@@ -289,8 +350,16 @@ test('non-win32: bare name resolution unchanged (no extension appending)', async
   }
 })
 
-function writeExecutable(path: string, body = 'echo test-version'): void {
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `#!/bin/sh\n${body}\n`)
-  chmodSync(path, 0o755)
+const isWin32 = process.platform === 'win32'
+
+function writeExecutable(filePath: string, posixBody = 'echo test-version', win32Body?: string): string {
+  mkdirSync(dirname(filePath), { recursive: true })
+  if (isWin32) {
+    const cmdPath = filePath + '.cmd'
+    writeFileSync(cmdPath, `@echo off\n${win32Body ?? posixBody}\n`)
+    return cmdPath
+  }
+  writeFileSync(filePath, `#!/bin/sh\n${posixBody}\n`)
+  chmodSync(filePath, 0o755)
+  return filePath
 }
