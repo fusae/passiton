@@ -102,11 +102,12 @@ const MESSAGES = {
     'nav.tasks': 'Tasks',
     'nav.workflows': 'Workflows',
     'nav.settings': 'Settings',
+    'nav.apiDocs': 'API Docs',
 
     // Settings — tabs
     'settings.tab.apiAssistants': 'API Assistants',
     'settings.tab.providerKeys': 'Provider Keys',
-    'settings.tab.localCli': 'Local CLI Agents',
+    'settings.tab.agents': 'Agents',
     'settings.tab.diagnostics': 'Diagnostics',
     'settings.tab.apiDocs': 'API Docs',
     'settings.tab.general': 'General',
@@ -133,7 +134,8 @@ const MESSAGES = {
     'settings.localCli.add': 'Add',
     'settings.localCli.diagnose': 'Diagnose',
 
-    // Settings — Diagnostics
+    // Settings — Agents tab extras
+    'settings.agents.workspacesHint': 'Security boundary: directories CLI agents may operate in',
     'settings.diagnostics.title': 'Diagnostics',
     'settings.diagnostics.desc': 'Check deployment and CLI agent runtime status',
     'settings.diagnostics.refresh': 'Refresh',
@@ -804,11 +806,12 @@ const MESSAGES = {
     'nav.tasks': 'Tasks',
     'nav.workflows': 'Workflows',
     'nav.settings': 'Settings',
+    'nav.apiDocs': 'API 文档',
 
     // Settings — tabs
     'settings.tab.apiAssistants': 'API 助手',
     'settings.tab.providerKeys': '供应商密钥',
-    'settings.tab.localCli': '本地 CLI 代理',
+    'settings.tab.agents': 'Agent',
     'settings.tab.diagnostics': '诊断',
     'settings.tab.apiDocs': 'API 文档',
     'settings.tab.general': '通用',
@@ -835,7 +838,8 @@ const MESSAGES = {
     'settings.localCli.add': '添加',
     'settings.localCli.diagnose': '诊断',
 
-    // Settings — Diagnostics
+    // Settings — Agents tab extras
+    'settings.agents.workspacesHint': '安全边界：CLI 代理可操作的目录范围',
     'settings.diagnostics.title': '诊断',
     'settings.diagnostics.desc': '检查部署和 CLI 代理运行状态',
     'settings.diagnostics.refresh': '刷新',
@@ -1878,6 +1882,7 @@ function renderSidebar(active) {
       </nav>
       <div class="sidebar-footer">
         Passiton v0.1.0
+        <a href="/api/docs" target="_blank" rel="noopener" style="display: block; font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">${t('nav.apiDocs')}</a>
       </div>
     </aside>
     ${renderOpsWidget()}
@@ -5235,7 +5240,6 @@ async function renderSettings() {
       loadConfig(signal),
       loadAgents(signal),
       loadApiKeys(signal),
-      loadApiDocs(signal),
       loadDeployCheck(signal),
     ])
   } catch (err) {
@@ -5244,15 +5248,26 @@ async function renderSettings() {
   // Stale guard: user navigated away while settings data was loading.
   if (state.viewToken !== myToken || location.pathname !== '/settings') return
 
-  const localCliTab = `<button class="tab-btn" data-tab="local-cli" onclick="window.switchSettingsTab('local-cli')">${t('settings.tab.localCli')}</button>`
-  const localCliPanel = `
-            <div id="tab-local-cli" class="tab-panel" data-tab="local-cli">
+  const agentsTab = `<button class="tab-btn active" data-tab="local-cli" onclick="window.switchSettingsTab('local-cli')">${t('settings.tab.agents')}</button>`
+  const agentsPanel = `
+            <div id="tab-local-cli" class="tab-panel active" data-tab="local-cli">
               <div class="flex-between mb-24">
                 <div>
                   <h3>${t('settings.localCli.title')}</h3>
                   <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">${t('settings.localCli.desc')}</p>
                 </div>
+                <button class="btn btn-secondary btn-sm" onclick="window.refreshDiagnostics()">${t('settings.diagnostics.refresh')}</button>
               </div>
+
+              <div id="agents-deploy-check"></div>
+
+              <div class="form-group">
+                <label>${t('settings.general.workspaces')}</label>
+                <textarea class="input" id="allowed-workspaces-input" rows="4" placeholder="/home/passiton/projects&#10;/Users/me/Projects">${escapeHtml((state.config?.policy?.allowedWorkspaces || []).join('\n'))}</textarea>
+                <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">${t('settings.agents.workspacesHint')}</p>
+              </div>
+              <button class="btn btn-primary" onclick="window.saveAllowedWorkspaces()">${t('settings.general.save')}</button>
+
               <div class="agent-list" id="local-cli-list"></div>
             </div>
   `
@@ -5275,15 +5290,11 @@ async function renderSettings() {
         <div class="content">
           <div style="max-width: 860px;">
             <div class="tabs">
-              <button class="tab-btn active" data-tab="agents" onclick="window.switchSettingsTab('agents')">${t('settings.tab.apiAssistants')}</button>
-              <button class="tab-btn" data-tab="apikeys" onclick="window.switchSettingsTab('apikeys')">${t('settings.tab.providerKeys')}</button>
-              ${localCliTab}
-              <button class="tab-btn" data-tab="diagnostics" onclick="window.switchSettingsTab('diagnostics')">${t('settings.tab.diagnostics')}</button>
-              <button class="tab-btn" data-tab="api-docs" onclick="window.switchSettingsTab('api-docs')">${t('settings.tab.apiDocs')}</button>
+              ${agentsTab}
               <button class="tab-btn" data-tab="general" onclick="window.switchSettingsTab('general')">${t('settings.tab.general')}</button>
             </div>
 
-            <div id="tab-agents" class="tab-panel active" data-tab="agents">
+            <div id="tab-agents" class="tab-panel" data-tab="agents">
               <div class="flex-between mb-24">
                 <div>
                   <h3>${t('settings.agents.title')}</h3>
@@ -5306,23 +5317,7 @@ async function renderSettings() {
               <div class="agent-list" id="api-keys-list"></div>
             </div>
 
-            ${localCliPanel}
-
-            <div id="tab-diagnostics" class="tab-panel" data-tab="diagnostics">
-              <div class="flex-between mb-24">
-                <div>
-                  <h3>${t('settings.diagnostics.title')}</h3>
-                  <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">${t('settings.diagnostics.desc')}</p>
-                </div>
-                <button class="btn btn-secondary btn-sm" onclick="window.refreshDiagnostics()">${t('settings.diagnostics.refresh')}</button>
-              </div>
-              <div id="diagnostics-panel"></div>
-            </div>
-
-            <div id="tab-api-docs" class="tab-panel" data-tab="api-docs">
-              <h3 class="mb-24">${t('settings.apiDocs.title')}</h3>
-              <pre class="code-block" style="white-space: pre-wrap;">${escapeHtml(JSON.stringify(state.apiDocs || {}, null, 2))}</pre>
-            </div>
+            ${agentsPanel}
 
             <div id="tab-general" class="tab-panel" data-tab="general">
               <h3 class="mb-24">${t('settings.general.title')}</h3>
@@ -5348,11 +5343,6 @@ async function renderSettings() {
                   <option value="review" ${state.config?.defaults?.mode === 'review' ? 'selected' : ''}>${t('settings.general.mode.review')}</option>
                   <option value="freeform" ${state.config?.defaults?.mode === 'freeform' ? 'selected' : ''}>${t('settings.general.mode.freeform')}</option>
                 </select>
-              </div>
-
-              <div class="form-group">
-                <label>${t('settings.general.workspaces')}</label>
-                <textarea class="input" id="allowed-workspaces-input" rows="4" placeholder="/home/passiton/projects&#10;/Users/me/Projects">${escapeHtml((state.config?.policy?.allowedWorkspaces || []).join('\n'))}</textarea>
               </div>
 
               <button class="btn btn-primary" onclick="window.saveGeneralSettings()">${t('settings.general.save')}</button>
@@ -5487,11 +5477,10 @@ window.addLocalCliAgent = async function(name) {
 }
 
 function renderDiagnosticsPanel() {
-  const container = document.getElementById('diagnostics-panel')
+  const container = document.getElementById('agents-deploy-check')
   if (!container) return
-  const localAgents = state.agents.filter(agent => agent.kind === 'local')
   container.innerHTML = `
-    <div class="agent-list">
+    <div class="agent-list" style="margin-bottom: 24px;">
       <div class="agent-item">
         <div class="agent-icon">D</div>
         <div class="agent-info">
@@ -5500,16 +5489,6 @@ function renderDiagnosticsPanel() {
         </div>
         <span class="badge badge-${state.deployCheck?.ok ? 'active' : 'error'}">${state.deployCheck?.ok ? t('badge.ok') : t('badge.unknown')}</span>
       </div>
-      ${localAgents.map(agent => `
-        <div class="agent-item">
-          <div class="agent-icon">${escapeHtml(agent.name.charAt(0).toUpperCase())}</div>
-          <div class="agent-info">
-            <div class="agent-name">${escapeHtml(agent.name)}</div>
-            <div class="agent-model">${escapeHtml(agent.command || agent.adapter)}</div>
-          </div>
-          <button class="btn btn-secondary btn-sm" onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>${t('settings.diagnostics.run')}</button>
-        </div>
-      `).join('')}
     </div>
   `
 }
@@ -5666,6 +5645,18 @@ window.changeLanguage = function(lang) {
 window.saveGeneralSettings = async function() {
   const maxRounds = parseInt(document.getElementById('max-rounds-input').value)
   const mode = document.getElementById('mode-input').value
+
+  try {
+    await api('/api/config', 'PUT', {
+      defaults: { maxRounds, mode },
+    })
+    showToast(t('toast.settingsSaved'), 'success')
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.saveAllowedWorkspaces = async function() {
   const allowedWorkspaces = String(document.getElementById('allowed-workspaces-input')?.value || '')
     .split(/\r?\n/)
     .map(item => item.trim())
@@ -5673,7 +5664,6 @@ window.saveGeneralSettings = async function() {
 
   try {
     await api('/api/config', 'PUT', {
-      defaults: { maxRounds, mode },
       policy: { allowedWorkspaces },
     })
     showToast(t('toast.settingsSaved'), 'success')
