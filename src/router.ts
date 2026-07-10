@@ -16,7 +16,7 @@ import {
   DEFAULT_POLICY,
 } from './policy.js'
 import { generateSystemPrompts, generateTaskSystemPrompt } from './prompts.js'
-import { resolveWorkspacePath, WorkspaceAccessError } from './workspace.js'
+import { normalizePathForComparison, resolveWorkspacePath, WorkspaceAccessError } from './workspace.js'
 
 const MAX_HISTORY_MESSAGES = 20
 const DISCUSS_MIN_ROUNDS = 3
@@ -1869,7 +1869,11 @@ export class Router extends EventEmitter {
       const cwd = session.cwd
       const referencedFiles = messages.flatMap((message) => extractReferencedTextFiles(message.content, cwd))
       const changedFiles = latestSnapshot ? extractChangedFiles(latestSnapshot.diffFull).map((filePath) => path.resolve(cwd, filePath)) : []
-      for (const absolutePath of [...new Set([...referencedFiles, ...changedFiles])]) {
+      const dependencyFilePaths = new Map<string, string>()
+      for (const filePath of [...referencedFiles, ...changedFiles]) {
+        dependencyFilePaths.set(normalizePathForComparison(path.resolve(filePath)), filePath)
+      }
+      for (const absolutePath of dependencyFilePaths.values()) {
         if (files.length >= PIPELINE_DEP_MAX_FILES) break
         try {
           if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) continue

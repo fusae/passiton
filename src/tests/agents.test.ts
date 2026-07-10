@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, win32 } from 'node:path'
 import { AgentCatalog, findExecutable, getBundledCodexCandidates, setExtraAgentSearchPathsForTesting, setPlatformForTesting } from '../agents.js'
 import { registerConfiguredAdapters } from '../adapters/factory.js'
 import { Router } from '../router.js'
@@ -48,9 +48,9 @@ test('Codex discovery includes common ChatGPT locations on Windows', () => {
     LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local',
     ProgramFiles: 'C:\\Program Files',
   })
-  assert.ok(candidates.some((candidate) => candidate.endsWith(join('Microsoft', 'WindowsApps', 'codex.exe'))))
-  assert.ok(candidates.some((candidate) => candidate.endsWith(join('Programs', 'ChatGPT', 'resources', 'codex.exe'))))
-  assert.ok(candidates.some((candidate) => candidate.endsWith(join('ChatGPT', 'resources', 'codex.exe'))))
+  assert.ok(candidates.some((candidate) => candidate.endsWith(win32.join('Microsoft', 'WindowsApps', 'codex.exe'))))
+  assert.ok(candidates.some((candidate) => candidate.endsWith(win32.join('Programs', 'ChatGPT', 'resources', 'codex.exe'))))
+  assert.ok(candidates.some((candidate) => candidate.endsWith(win32.join('ChatGPT', 'resources', 'codex.exe'))))
 })
 
 test('discovery repairs a configured Codex path after the app executable moves', async () => {

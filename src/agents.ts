@@ -1,6 +1,6 @@
 import { access, mkdtemp, rm, stat } from 'fs/promises'
 import { constants } from 'fs'
-import { delimiter, dirname, join } from 'path'
+import { delimiter, dirname, join, posix, win32 } from 'path'
 import { homedir, tmpdir } from 'os'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
@@ -366,18 +366,18 @@ export function getBundledCodexCandidates(
   if (platform === 'darwin') {
     return [
       '/Applications/ChatGPT.app/Contents/Resources/codex',
-      join(home, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', 'codex'),
+      posix.join(home, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', 'codex'),
       '/Applications/Codex.app/Contents/Resources/codex',
-      join(home, 'Applications', 'Codex.app', 'Contents', 'Resources', 'codex'),
+      posix.join(home, 'Applications', 'Codex.app', 'Contents', 'Resources', 'codex'),
     ]
   }
 
   if (platform === 'win32') {
     return [
-      env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'codex.exe'),
-      env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'Programs', 'ChatGPT', 'resources', 'codex.exe'),
-      env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'ChatGPT', 'resources', 'codex.exe'),
-      env.ProgramFiles && join(env.ProgramFiles, 'ChatGPT', 'resources', 'codex.exe'),
+      env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'codex.exe'),
+      env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Programs', 'ChatGPT', 'resources', 'codex.exe'),
+      env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'ChatGPT', 'resources', 'codex.exe'),
+      env.ProgramFiles && win32.join(env.ProgramFiles, 'ChatGPT', 'resources', 'codex.exe'),
     ].filter((value): value is string => Boolean(value))
   }
 
