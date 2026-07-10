@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   await agentCatalog.discover()
 
   // Register adapters based on config
-  registerConfiguredAdapters(router, agents)
+  registerConfiguredAdapters(router, agentCatalog.configuredAgentConfigs())
   registerBuiltinAdapters(router)
   registerPersistedUserAgents(router)
   // Register bundled experimental providers/adapters. These are local

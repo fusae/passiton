@@ -690,7 +690,7 @@ async function reloadAgents(router: Router, agentCatalog: AgentCatalog, config: 
   agentCatalog.setLocalCliAgentsEnabled(true)
   agentCatalog.setConfiguredAgents(agents)
   await agentCatalog.discover()
-  registerConfiguredAdapters(router, agents)
+  registerConfiguredAdapters(router, agentCatalog.configuredAgentConfigs())
   registerBuiltinAdapters(router)
 }
 

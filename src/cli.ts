@@ -254,7 +254,7 @@ async function serverStart() {
   const router = new Router(config.policy)
   const agentCatalog = new AgentCatalog(config.agents, true)
   await agentCatalog.discover()
-  registerConfiguredAdapters(router, config.agents)
+  registerConfiguredAdapters(router, agentCatalog.configuredAgentConfigs())
   registerBuiltinAdapters(router)
   registerPersistedUserAgents(router)
   router.recoverTasks()

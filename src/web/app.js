@@ -163,6 +163,17 @@ const MESSAGES = {
 
     // Agent diagnostics modal
     'modal.agentDiagnostics.title': 'Agent Diagnostics',
+    'modal.agentDiagnostics.running': 'Running checks…',
+    'modal.agentDiagnostics.runningDesc': 'Checking the command, version, authentication, and a real model round-trip. This may take up to 45 seconds.',
+    'modal.agentDiagnostics.failed': 'Diagnosis failed',
+    'modal.agentDiagnostics.ready': 'Agent is ready',
+    'modal.agentDiagnostics.notReady': 'Agent is not ready',
+    'modal.agentDiagnostics.commandCheck': 'Command found',
+    'modal.agentDiagnostics.versionCheck': 'Version check',
+    'modal.agentDiagnostics.modelCheck': 'Real model call',
+    'modal.agentDiagnostics.passed': 'Passed',
+    'modal.agentDiagnostics.notRun': 'Not run',
+    'modal.agentDiagnostics.details': 'Technical details',
 
     // Edit Local CLI Agent modal
     'modal.localCli.edit.title': 'Edit Local CLI Agent',
@@ -868,6 +879,17 @@ const MESSAGES = {
 
     // Agent diagnostics modal
     'modal.agentDiagnostics.title': '代理诊断',
+    'modal.agentDiagnostics.running': '正在诊断…',
+    'modal.agentDiagnostics.runningDesc': '正在检查命令、版本、认证并执行一次真实模型调用，最长可能需要 45 秒。',
+    'modal.agentDiagnostics.failed': '诊断失败',
+    'modal.agentDiagnostics.ready': 'Agent 已可用',
+    'modal.agentDiagnostics.notReady': 'Agent 尚不可用',
+    'modal.agentDiagnostics.commandCheck': '找到命令',
+    'modal.agentDiagnostics.versionCheck': '版本检查',
+    'modal.agentDiagnostics.modelCheck': '真实模型调用',
+    'modal.agentDiagnostics.passed': '通过',
+    'modal.agentDiagnostics.notRun': '未执行',
+    'modal.agentDiagnostics.details': '技术详情',
 
     // Edit Local CLI Agent modal
     'modal.localCli.edit.title': '编辑本地 CLI 代理',
@@ -1470,6 +1492,7 @@ const state = {
   taskListHasMore: false,
   taskListLoadingMore: false,
   agents: [],
+  agentDiagnosticsPending: new Set(),
   templates: [],
   pipelineTemplates: [],
   apiKeys: [],
@@ -5376,6 +5399,7 @@ function renderAgentsList() {
     const colors = ['#6366f1', '#22c55e', '#f59e0b', '#3b82f6', '#8b5cf6']
     const color = colors[Math.floor(Math.random() * colors.length)]
     const initial = agent.name.charAt(0).toUpperCase()
+    const diagnosing = state.agentDiagnosticsPending.has(agent.name)
 
     return `
       <div class="agent-item">
@@ -5387,7 +5411,7 @@ function renderAgentsList() {
         </div>
         <span class="badge badge-${statusBadgeClass(agent.status)}">${escapeHtml(statusLabel(agent.status))}</span>
         <div class="agent-actions">
-          <button class="btn btn-ghost btn-sm" onclick='window.showAgentDiagnostics(${jsString(agent.name)})'>${t('settings.agents.verify')}</button>
+          <button class="btn btn-ghost btn-sm" ${diagnosing ? 'disabled' : ''} onclick='window.showAgentDiagnostics(${jsString(agent.name)})'>${diagnosing ? t('modal.agentDiagnostics.running') : t('settings.agents.verify')}</button>
           <button class="btn btn-ghost btn-sm" onclick='window.showAgentModal(${jsString(agent.name)})'>${t('settings.agents.edit')}</button>
           <button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteAgent(${jsString(agent.name)})'>${t('settings.agents.delete')}</button>
         </div>
@@ -5433,6 +5457,7 @@ function renderLocalCliAgentsList() {
     const canAdd = agent.source === 'discovered'
     const canDelete = agent.source === 'configured'
     const badgeClass = statusBadgeClass(agent.status)
+    const diagnosing = state.agentDiagnosticsPending.has(agent.name)
     return `
     <div class="agent-item">
       <div class="agent-icon">${escapeHtml(agent.name.charAt(0).toUpperCase())}</div>
@@ -5443,7 +5468,7 @@ function renderLocalCliAgentsList() {
       <span class="badge badge-${badgeClass}">${escapeHtml(statusLabel(agent.status))}</span>
       <div class="agent-actions">
         ${canAdd ? `<button class="btn btn-primary btn-sm" onclick='window.addLocalCliAgent(${jsString(agent.name)})'>${t('settings.localCli.add')}</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>${t('settings.localCli.diagnose')}</button>
+        <button class="btn btn-ghost btn-sm" ${diagnosing ? 'disabled' : ''} onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>${diagnosing ? t('modal.agentDiagnostics.running') : t('settings.localCli.diagnose')}</button>
         ${canDelete ? `<button class="btn btn-ghost btn-sm" onclick='window.showLocalCliAgentModal(${jsString(agent.name)})'>${t('settings.agents.edit')}</button>` : ''}
         ${canDelete ? `<button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteLocalCliAgent(${jsString(agent.name)})'>${t('settings.agents.delete')}</button>` : ''}
       </div>
@@ -5506,7 +5531,54 @@ window.showLocalCliAgentDiagnostics = async function(name, preface = '') {
   return window.showAgentDiagnostics(name, preface)
 }
 
+function renderAgentDiagnosticResult(diagnostic) {
+  const ready = diagnostic.healthy === true && (diagnostic.source !== 'configured' || diagnostic.smokeOk === true)
+  const check = (label, value) => `
+    <div class="agent-diagnostic-check ${value === true ? 'passed' : value === false ? 'failed' : 'pending'}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${value === true ? t('modal.agentDiagnostics.passed') : value === false ? t('modal.agentDiagnostics.failed') : t('modal.agentDiagnostics.notRun')}</strong>
+    </div>
+  `
+  return `
+    <div class="agent-diagnostic-verdict ${ready ? 'ready' : 'not-ready'}">
+      <strong>${ready ? t('modal.agentDiagnostics.ready') : t('modal.agentDiagnostics.notReady')}</strong>
+      ${diagnostic.error ? `<p>${escapeHtml(diagnostic.error)}</p>` : ''}
+    </div>
+    <div class="agent-diagnostic-checks">
+      ${check(t('modal.agentDiagnostics.commandCheck'), diagnostic.commandExecutable)}
+      ${check(t('modal.agentDiagnostics.versionCheck'), diagnostic.versionOk)}
+      ${check(t('modal.agentDiagnostics.modelCheck'), diagnostic.smokeOk)}
+    </div>
+    <details class="context-details">
+      <summary>${t('modal.agentDiagnostics.details')}</summary>
+      <pre class="code-block" style="white-space: pre-wrap; margin-top: 12px;">${escapeHtml(JSON.stringify(diagnostic, null, 2))}</pre>
+    </details>
+  `
+}
+
 window.showAgentDiagnostics = async function(name, preface = '') {
+  if (state.agentDiagnosticsPending.has(name)) return
+  state.agentDiagnosticsPending.add(name)
+  renderAgentsList()
+  renderLocalCliAgentsList()
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3>${t('modal.agentDiagnostics.title')}</h3>
+          <p>${escapeHtml(name)}</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
+      </div>
+      <div class="agent-diagnostic-progress" role="status">
+        <span class="running-spinner"></span>
+        <div>
+          <strong>${t('modal.agentDiagnostics.running')}</strong>
+          <p>${t('modal.agentDiagnostics.runningDesc')}</p>
+        </div>
+      </div>
+    </div>
+  `)
   try {
     const diagnostic = await api(`/api/agents/${encodeURIComponent(name)}/diagnostics?refresh=1`)
     await loadAgents()
@@ -5522,11 +5594,27 @@ window.showAgentDiagnostics = async function(name, preface = '') {
           <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
         </div>
         ${preface ? `<p style="color: var(--red); margin-bottom: 12px;">${escapeHtml(preface)}</p>` : ''}
-        <pre class="code-block" style="white-space: pre-wrap;">${escapeHtml(JSON.stringify(diagnostic, null, 2))}</pre>
+        ${renderAgentDiagnosticResult(diagnostic)}
       </div>
     `)
   } catch (err) {
     showToast(err.message)
+    showModal(`
+      <div class="modal-card">
+        <div class="modal-head">
+          <div>
+            <h3>${t('modal.agentDiagnostics.failed')}</h3>
+            <p>${escapeHtml(name)}</p>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
+        </div>
+        <pre class="code-block" style="white-space: pre-wrap;">${escapeHtml(err.message)}</pre>
+      </div>
+    `)
+  } finally {
+    state.agentDiagnosticsPending.delete(name)
+    renderAgentsList()
+    renderLocalCliAgentsList()
   }
 }
 

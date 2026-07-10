@@ -11,6 +11,7 @@ import type { Session } from './types.js'
 
 const execFileAsync = promisify(execFile)
 const HEALTH_CACHE_TTL_MS = 60_000
+const AGENT_SMOKE_TIMEOUT_MS = 45_000
 
 // --- Platform injection (for testability) ---
 let platformOverride: string | undefined
@@ -92,6 +93,10 @@ interface ListAgentsOpts {
   refresh?: boolean
 }
 
+interface DiscoverOpts {
+  refresh?: boolean
+}
+
 let searchPathCache: string[] | undefined
 let extraSearchPathEntries: string[] = []
 
@@ -108,6 +113,7 @@ const DISCOVERY_PRESETS: DiscoveryPreset[] = [
 export class AgentCatalog {
   private entries = new Map<string, AgentEntry>()
   private probeCache = new Map<string, ProbeCacheEntry>()
+  private diagnosticRuns = new Map<string, Promise<AgentDiagnostic | undefined>>()
   private localCliAgentsEnabled: boolean
 
   constructor(configuredAgents: Record<string, AgentConfig>, localCliAgentsEnabled = false) {
@@ -135,11 +141,35 @@ export class AgentCatalog {
     this.probeCache.clear()
   }
 
-  async discover(): Promise<void> {
+  async discover(opts: DiscoverOpts = {}): Promise<void> {
     if (!this.localCliAgentsEnabled) return
+    if (opts.refresh) {
+      searchPathCache = undefined
+      for (const [name, entry] of this.entries) {
+        if (entry.source === 'discovered') this.entries.delete(name)
+      }
+    }
+
     for (const preset of DISCOVERY_PRESETS) {
-      if (this.entries.has(preset.name)) continue
-      const command = await findExecutable(preset.commands, preset.envVars)
+      const commands = preset.adapter === 'codex'
+        ? [...preset.commands, ...getBundledCodexCandidates()]
+        : preset.commands
+      const existing = this.entries.get(preset.name)
+      if (existing?.source === 'configured') {
+        const resolved = existing.command ? await resolveCommand(existing.command) : undefined
+        if (resolved) {
+          if (resolved !== existing.command) this.updateConfiguredCommand(existing, resolved)
+          continue
+        }
+
+        // Repair stale paths left behind when Codex moved from Codex.app to
+        // ChatGPT.app, or when an npm shim changed from a bare path to .cmd.
+        const replacement = await findExecutable(commands, preset.envVars)
+        if (replacement) this.updateConfiguredCommand(existing, replacement)
+        continue
+      }
+
+      const command = await findExecutable(commands, preset.envVars)
       if (!command) continue
 
       this.entries.set(preset.name, {
@@ -154,11 +184,26 @@ export class AgentCatalog {
     }
   }
 
+  configuredAgentConfigs(): Record<string, AgentConfig> {
+    return Object.fromEntries(
+      Array.from(this.entries.values())
+        .filter((entry) => entry.source === 'configured' && entry.config)
+        .map((entry) => [entry.name, entry.config!])
+    )
+  }
+
+  private updateConfiguredCommand(entry: AgentEntry, command: string): void {
+    entry.command = command
+    entry.config = { ...entry.config!, command }
+    this.probeCache.clear()
+  }
+
   registerDiscoveredAdapters(router: Router): void {
     void router
   }
 
   async listAgents(opts: ListAgentsOpts = {}): Promise<AgentInfo[]> {
+    if (opts.refresh) await this.discover({ refresh: true })
     const entries = Array.from(this.entries.values()).sort((a, b) => {
       if (a.availableForSessions !== b.availableForSessions) {
         return Number(b.availableForSessions) - Number(a.availableForSessions)
@@ -188,6 +233,20 @@ export class AgentCatalog {
   }
 
   async diagnoseAgent(name: string, refresh = true): Promise<AgentDiagnostic | undefined> {
+    if (!refresh) return this.runAgentDiagnostic(name, false)
+    const existing = this.diagnosticRuns.get(name)
+    if (existing) return existing
+
+    const run = this.runAgentDiagnostic(name, true)
+    this.diagnosticRuns.set(name, run)
+    try {
+      return await run
+    } finally {
+      if (this.diagnosticRuns.get(name) === run) this.diagnosticRuns.delete(name)
+    }
+  }
+
+  private async runAgentDiagnostic(name: string, refresh: boolean): Promise<AgentDiagnostic | undefined> {
     const entry = this.entries.get(name)
     if (!entry) return undefined
     const envKeys = Object.keys(entry.config?.env ?? {}).sort()
@@ -216,6 +275,16 @@ export class AgentCatalog {
       : undefined
     const error = smokeProbe?.error ?? versionProbe.error
     const healthy = commandExecutable && versionProbe.healthy && (smokeProbe?.healthy ?? true) && entry.availableForSessions
+    if (refresh) {
+      this.probeCache.set(this.probeCacheKey(entry), {
+        expiresAt: Date.now() + HEALTH_CACHE_TTL_MS,
+        value: {
+          healthy: commandExecutable && versionProbe.healthy,
+          version: versionProbe.version,
+          verified: Boolean(smokeProbe?.healthy),
+        },
+      })
+    }
     return {
       name: entry.name,
       adapter: entry.adapter,
@@ -237,15 +306,9 @@ export class AgentCatalog {
   }
 
   private async probe(entry: AgentEntry, refresh: boolean): Promise<{ healthy: boolean; version?: string; verified: boolean }> {
-    const cacheKey = [
-      entry.source,
-      entry.name,
-      entry.command,
-      JSON.stringify(entry.config?.args ?? []),
-      JSON.stringify(entry.config?.env ?? {}),
-    ].join(':')
+    const cacheKey = this.probeCacheKey(entry)
     const cached = this.probeCache.get(cacheKey)
-    if (cached && !refresh) {
+    if (cached && cached.expiresAt > Date.now() && !refresh) {
       return cached.value
     }
 
@@ -271,6 +334,16 @@ export class AgentCatalog {
     })
     return value
   }
+
+  private probeCacheKey(entry: AgentEntry): string {
+    return [
+      entry.source,
+      entry.name,
+      entry.command,
+      JSON.stringify(entry.config?.args ?? []),
+      JSON.stringify(entry.config?.env ?? {}),
+    ].join(':')
+  }
 }
 
 export async function findExecutable(candidates: string[], envVars: string[] = []): Promise<string | undefined> {
@@ -283,6 +356,32 @@ export async function findExecutable(candidates: string[], envVars: string[] = [
     if (found) return found
   }
   return undefined
+}
+
+export function getBundledCodexCandidates(
+  platform: string = currentPlatform(),
+  home: string = homedir(),
+  env: NodeJS.ProcessEnv = process.env
+): string[] {
+  if (platform === 'darwin') {
+    return [
+      '/Applications/ChatGPT.app/Contents/Resources/codex',
+      join(home, 'Applications', 'ChatGPT.app', 'Contents', 'Resources', 'codex'),
+      '/Applications/Codex.app/Contents/Resources/codex',
+      join(home, 'Applications', 'Codex.app', 'Contents', 'Resources', 'codex'),
+    ]
+  }
+
+  if (platform === 'win32') {
+    return [
+      env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'codex.exe'),
+      env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'Programs', 'ChatGPT', 'resources', 'codex.exe'),
+      env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'ChatGPT', 'resources', 'codex.exe'),
+      env.ProgramFiles && join(env.ProgramFiles, 'ChatGPT', 'resources', 'codex.exe'),
+    ].filter((value): value is string => Boolean(value))
+  }
+
+  return []
 }
 
 export function setExtraAgentSearchPathsForTesting(entries: string[]): void {
@@ -401,6 +500,7 @@ async function getSearchPathEntries(): Promise<string[]> {
       entries.push(join(process.env.ProgramData, 'chocolatey', 'bin'))
     }
     if (process.env.LOCALAPPDATA) {
+      entries.push(join(process.env.LOCALAPPDATA, 'Microsoft', 'WindowsApps'))
       entries.push(join(process.env.LOCALAPPDATA, 'Programs'))
     }
   }
@@ -470,7 +570,7 @@ async function probeCommand(command: string): Promise<{ healthy: boolean; versio
 async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ healthy: boolean; error?: string }> {
   let cwd: string | undefined
   try {
-    const adapter = createAdapter({ ...config, timeout: Math.min(config.timeout ?? 120_000, 120_000) })
+    const adapter = createAdapter({ ...config, timeout: Math.min(config.timeout ?? AGENT_SMOKE_TIMEOUT_MS, AGENT_SMOKE_TIMEOUT_MS) })
     if (!adapter) return { healthy: false }
     ;(adapter as { name: string }).name = name
     cwd = await mkdtemp(join(tmpdir(), 'turing-agent-smoke-'))
