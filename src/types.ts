@@ -451,6 +451,8 @@ export interface AgentConfig {
   apiKey?: string
   baseUrl?: string
   env?: Record<string, string>
+  lastVerifiedAt?: number
+  lastVerifiedVersion?: string
 }
 
 export interface ApiAgentInfo {

@@ -1,11 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, win32 } from 'node:path'
 import { AgentCatalog, findExecutable, getBundledCodexCandidates, setExtraAgentSearchPathsForTesting, setPlatformForTesting } from '../agents.js'
 import { registerConfiguredAdapters } from '../adapters/factory.js'
 import { Router } from '../router.js'
+import { DEFAULT_CONFIG, getConfigPath, loadConfig, writeConfig } from '../config.js'
 
 test.afterEach(() => {
   setExtraAgentSearchPathsForTesting([])
@@ -155,23 +156,29 @@ test('configured local agents require a successful smoke run to be healthy', asy
   )
 
   try {
-    const catalog = new AgentCatalog({
-      codex: {
-        adapter: 'codex',
-        command,
-        args: ['{prompt}'],
-        timeout: 1_000,
-      },
-    }, true)
-    const diagnostic = await catalog.diagnoseAgent('codex', true)
-    const agents = await catalog.listAgents()
-    const codex = agents.find((agent) => agent.name === 'codex')
+    await withConfigHome(async () => {
+      writeConfig({
+        ...DEFAULT_CONFIG,
+        agents: {
+          codex: {
+            adapter: 'codex',
+            command,
+            args: ['{prompt}'],
+            timeout: 1_000,
+          },
+        },
+      })
+      const catalog = new AgentCatalog(loadConfig().agents, true)
+      const diagnostic = await catalog.diagnoseAgent('codex', true)
+      const agents = await catalog.listAgents()
+      const codex = agents.find((agent) => agent.name === 'codex')
 
-    assert.equal(diagnostic?.smokeOk, true)
-    assert.equal(codex?.source, 'configured')
-    assert.equal(codex?.healthy, true)
-    assert.equal(codex?.verified, true)
-    assert.equal(codex?.version, 'codex-test')
+      assert.equal(diagnostic?.smokeOk, true)
+      assert.equal(codex?.source, 'configured')
+      assert.equal(codex?.healthy, true)
+      assert.equal(codex?.verified, true)
+      assert.equal(codex?.version, 'codex-test')
+    })
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -236,6 +243,132 @@ test('configured local agents stay healthy-but-unverified when smoke run fails',
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('successful local agent smoke persists verification to config', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-agent-persist-smoke-'))
+  const command = writeExecutable(join(dir, 'codex'),
+    'if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi\necho TURING_READY',
+    'if "%~1"=="--version" (echo codex-test & exit /b 0)\necho TURING_READY'
+  )
+
+  await withConfigHome(async () => {
+    writeConfig({
+      ...DEFAULT_CONFIG,
+      agents: {
+        codex: {
+          adapter: 'codex',
+          command,
+          args: ['{prompt}'],
+          timeout: 1_000,
+        },
+      },
+    })
+    const catalog = new AgentCatalog(loadConfig().agents, true)
+    const diagnostic = await catalog.diagnoseAgent('codex', true)
+    const saved = JSON.parse(readFileSync(getConfigPath(), 'utf-8'))
+
+    assert.equal(diagnostic?.smokeOk, true)
+    assert.equal(saved.agents.codex.lastVerifiedVersion, 'codex-test')
+    assert.equal(typeof saved.agents.codex.lastVerifiedAt, 'number')
+    assert.ok(saved.agents.codex.lastVerifiedAt > 0)
+  })
+
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('fresh AgentCatalog trusts persisted verification when binary version still matches', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-agent-persist-restart-'))
+  const command = writeExecutable(join(dir, 'codex'),
+    'if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi\nexit 2',
+    'if "%~1"=="--version" (echo codex-test & exit /b 0)\nexit /b 2'
+  )
+
+  await withConfigHome(async () => {
+    writeConfig({
+      ...DEFAULT_CONFIG,
+      agents: {
+        codex: {
+          adapter: 'codex',
+          command,
+          args: ['{prompt}'],
+          timeout: 1_000,
+          lastVerifiedAt: Date.now(),
+          lastVerifiedVersion: 'codex-test',
+        },
+      },
+    })
+    const restarted = new AgentCatalog(loadConfig().agents, true)
+    const codex = (await restarted.listAgents()).find((agent) => agent.name === 'codex')
+
+    assert.equal(codex?.healthy, true)
+    assert.equal(codex?.verified, true)
+    assert.equal(codex?.version, 'codex-test')
+  })
+
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('persisted verification is ignored when detected version changes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-agent-persist-mismatch-'))
+  const command = writeExecutable(join(dir, 'codex'),
+    'if [ "$1" = "--version" ]; then echo codex-new; exit 0; fi\nexit 2',
+    'if "%~1"=="--version" (echo codex-new & exit /b 0)\nexit /b 2'
+  )
+
+  await withConfigHome(async () => {
+    writeConfig({
+      ...DEFAULT_CONFIG,
+      agents: {
+        codex: {
+          adapter: 'codex',
+          command,
+          args: ['{prompt}'],
+          timeout: 1_000,
+          lastVerifiedAt: Date.now(),
+          lastVerifiedVersion: 'codex-old',
+        },
+      },
+    })
+    const catalog = new AgentCatalog(loadConfig().agents, true)
+    const codex = (await catalog.listAgents()).find((agent) => agent.name === 'codex')
+
+    assert.equal(codex?.healthy, true)
+    assert.equal(codex?.verified, false)
+    assert.equal(codex?.version, 'codex-new')
+  })
+
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('configured local agent without persisted verification is unverified', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-agent-no-persist-'))
+  const command = writeExecutable(join(dir, 'codex'),
+    'if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi\nexit 2',
+    'if "%~1"=="--version" (echo codex-test & exit /b 0)\nexit /b 2'
+  )
+
+  await withConfigHome(async () => {
+    writeConfig({
+      ...DEFAULT_CONFIG,
+      agents: {
+        codex: {
+          adapter: 'codex',
+          command,
+          args: ['{prompt}'],
+          timeout: 1_000,
+        },
+      },
+    })
+    const catalog = new AgentCatalog(loadConfig().agents, true)
+    const codex = (await catalog.listAgents()).find((agent) => agent.name === 'codex')
+
+    assert.equal(codex?.healthy, true)
+    assert.equal(codex?.verified, false)
+    assert.equal(codex?.version, 'codex-test')
+  })
+
+  rmSync(dir, { recursive: true, force: true })
 })
 
 // --- win32 extension resolution tests (run on any OS via platform injection) ---
@@ -351,6 +484,19 @@ test('non-win32: bare name resolution unchanged (no extension appending)', async
 })
 
 const isWin32 = process.platform === 'win32'
+
+async function withConfigHome(run: () => Promise<void>): Promise<void> {
+  const savedHome = process.env.PASSITON_HOME
+  const dir = mkdtempSync(join(tmpdir(), 'turing-agent-config-'))
+  process.env.PASSITON_HOME = dir
+  try {
+    await run()
+  } finally {
+    if (savedHome === undefined) delete process.env.PASSITON_HOME
+    else process.env.PASSITON_HOME = savedHome
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
 
 function writeExecutable(filePath: string, posixBody = 'echo test-version', win32Body?: string): string {
   mkdirSync(dirname(filePath), { recursive: true })

@@ -189,6 +189,12 @@ function validateConfig(config: AppConfig): AppConfig {
         assertNonEmptyString(envValue, `agents.${name}.env.${envKey}`)
       }
     }
+    if (agent.lastVerifiedAt !== undefined) {
+      assertNonNegativeInt(agent.lastVerifiedAt, `agents.${name}.lastVerifiedAt`)
+    }
+    if (agent.lastVerifiedVersion !== undefined) {
+      assertNonEmptyString(agent.lastVerifiedVersion, `agents.${name}.lastVerifiedVersion`)
+    }
   }
 
   return config

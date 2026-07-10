@@ -6,11 +6,13 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import type { AgentConfig } from './types.js'
 import { createAdapter, createDiscoveredAgentConfig } from './adapters/factory.js'
+import { loadConfig, writeConfig } from './config.js'
 import type { Router } from './router.js'
 import type { Session } from './types.js'
 
 const execFileAsync = promisify(execFile)
 const HEALTH_CACHE_TTL_MS = 60_000
+const PERSISTED_VERIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 const AGENT_SMOKE_TIMEOUT_MS = 45_000
 
 // --- Platform injection (for testability) ---
@@ -275,6 +277,13 @@ export class AgentCatalog {
       : undefined
     const error = smokeProbe?.error ?? versionProbe.error
     const healthy = commandExecutable && versionProbe.healthy && (smokeProbe?.healthy ?? true) && entry.availableForSessions
+    if (refresh && smokeProbe !== undefined) {
+      if (smokeProbe.healthy && versionProbe.version) {
+        this.persistSuccessfulVerification(entry, versionProbe.version)
+      } else {
+        this.clearPersistedVerification(entry)
+      }
+    }
     if (refresh) {
       this.probeCache.set(this.probeCacheKey(entry), {
         expiresAt: Date.now() + HEALTH_CACHE_TTL_MS,
@@ -309,7 +318,10 @@ export class AgentCatalog {
     const cacheKey = this.probeCacheKey(entry)
     const cached = this.probeCache.get(cacheKey)
     if (cached && cached.expiresAt > Date.now() && !refresh) {
-      return cached.value
+      return {
+        ...cached.value,
+        verified: this.isPersistedVerificationCurrent(entry, cached.value.version),
+      }
     }
 
     const versionProbe = await probeCommand(entry.command!)
@@ -323,10 +335,19 @@ export class AgentCatalog {
     const smokeProbe = shouldSmoke
       ? await smokeTestAgent(entry.name, entry.config!)
       : undefined
+    if (shouldSmoke) {
+      if (smokeProbe?.healthy && versionProbe.version) {
+        this.persistSuccessfulVerification(entry, versionProbe.version)
+      } else {
+        this.clearPersistedVerification(entry)
+      }
+    }
     const value = {
       healthy: versionProbe.healthy,
       version: versionProbe.version,
-      verified: Boolean(smokeProbe?.healthy),
+      verified: shouldSmoke
+        ? Boolean(smokeProbe?.healthy)
+        : this.isPersistedVerificationCurrent(entry, versionProbe.version),
     }
     this.probeCache.set(cacheKey, {
       expiresAt: Date.now() + HEALTH_CACHE_TTL_MS,
@@ -343,6 +364,55 @@ export class AgentCatalog {
       JSON.stringify(entry.config?.args ?? []),
       JSON.stringify(entry.config?.env ?? {}),
     ].join(':')
+  }
+
+  private isPersistedVerificationCurrent(entry: AgentEntry, version: string | undefined): boolean {
+    if (entry.source !== 'configured' || !entry.config || !version) return false
+    const { lastVerifiedAt, lastVerifiedVersion } = entry.config
+    if (typeof lastVerifiedAt !== 'number' || typeof lastVerifiedVersion !== 'string') return false
+    const age = Date.now() - lastVerifiedAt
+    return age >= 0 && age <= PERSISTED_VERIFICATION_TTL_MS && lastVerifiedVersion === version
+  }
+
+  private persistSuccessfulVerification(entry: AgentEntry, version: string): void {
+    if (entry.source !== 'configured' || !entry.config) return
+    const current = loadConfig()
+    const currentAgent = current.agents[entry.name]
+    if (!currentAgent || currentAgent.adapter !== entry.adapter || currentAgent.command !== entry.command) return
+
+    const nextAgent = {
+      ...currentAgent,
+      lastVerifiedAt: Date.now(),
+      lastVerifiedVersion: version,
+    }
+    writeConfig({
+      ...current,
+      agents: {
+        ...current.agents,
+        [entry.name]: nextAgent,
+      },
+    })
+    entry.config = nextAgent
+  }
+
+  private clearPersistedVerification(entry: AgentEntry): void {
+    if (entry.source !== 'configured' || !entry.config) return
+    const current = loadConfig()
+    const currentAgent = current.agents[entry.name]
+    if (!currentAgent || currentAgent.adapter !== entry.adapter || currentAgent.command !== entry.command) return
+    if (currentAgent.lastVerifiedAt === undefined && currentAgent.lastVerifiedVersion === undefined) return
+
+    const { lastVerifiedAt, lastVerifiedVersion, ...nextAgent } = currentAgent
+    void lastVerifiedAt
+    void lastVerifiedVersion
+    writeConfig({
+      ...current,
+      agents: {
+        ...current.agents,
+        [entry.name]: nextAgent,
+      },
+    })
+    entry.config = nextAgent
   }
 }
 
