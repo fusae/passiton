@@ -250,6 +250,21 @@ test('factory creates Gemini CLI adapter', () => {
   assert.deepEqual(adapter?.config.args, ['-p', '{prompt}'])
 })
 
+test('factory creates custom CLI adapter', async () => {
+  const adapter = createAdapter({
+    adapter: 'custom-cli',
+    command: process.execPath,
+    args: ['-e', 'process.stdout.write(process.argv[1])', '{prompt}'],
+    timeout: 10_000,
+  })
+
+  assert.equal(adapter?.name, 'custom-cli')
+  assert.equal(adapter?.capabilities?.fileSystem, true)
+  assert.equal(adapter?.capabilities?.shell, true)
+  const output = await adapter!.send(session, 'hello custom')
+  assert.match(typeof output === 'string' ? output : output.content, /\[Current Message\]\nhello custom/)
+})
+
 test('withHint adds actionable hints to common adapter failures', () => {
   // 1. Non-zero exit with empty stderr → looks like an auth/subscription issue.
   const auth = withHint('claude-code', '/bin/claude', 1, '', '[claude-code] exited with code 1: ', 60_000)

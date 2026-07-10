@@ -442,8 +442,22 @@ export interface PolicyConfig {
 }
 
 // Agent registration config
+export type AgentAdapterType =
+  | 'codex'
+  | 'claude-code'
+  | 'gemini-cli'
+  | 'opencode'
+  | 'custom-cli'
+  | 'anthropic-api'
+  | 'openai-api'
+  | 'zhipu-api'
+  | 'deepseek-api'
+  | 'qwen-api'
+  | 'moonshot-api'
+  | 'custom-api'
+
 export interface AgentConfig {
-  adapter: string
+  adapter: AgentAdapterType | (string & {})
   command?: string
   args?: string[]
   timeout?: number

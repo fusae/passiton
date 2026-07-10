@@ -50,6 +50,7 @@ const STATIC_CACHE_MAX = 64
 const HANDOFF_OUTPUT_TAIL_CHARS = 4000
 const DEFAULT_OPS_MODEL_AGENT_NAME = '__ops__'
 const API_ADAPTERS = new Set(['anthropic-api', 'openai-api', 'zhipu-api', 'deepseek-api', 'qwen-api', 'moonshot-api', 'custom-api'])
+const LOCAL_CLI_ADAPTERS = new Set(['claude-code', 'codex', 'gemini-cli', 'opencode', 'custom-cli'])
 const PROVIDER_BY_ADAPTER: Record<string, string> = {
   'anthropic-api': 'Anthropic',
   'openai-api': 'OpenAI',
@@ -540,12 +541,33 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
   const name = requireNonEmptyString(data.name, 'name')
   const adapter = requireNonEmptyString(data.adapter, 'adapter')
   const command = requireNonEmptyString(data.command, 'command')
+  if (!LOCAL_CLI_ADAPTERS.has(adapter)) {
+    throw new HttpError(400, '"adapter" must be one of claude-code, codex, gemini-cli, opencode, custom-cli')
+  }
+  const env = parseEnv(data.env, 'env')
+  if (adapter === 'custom-cli') {
+    const args = requireStringArray(data.args, 'args')
+    if (!args.some((arg) => arg.includes('{prompt}'))) {
+      throw new HttpError(400, '"args" must include the {prompt} token for custom-cli')
+    }
+    const timeout = optionalPositiveInt(data.timeout, 'timeout')
+      ?? (existing && existing.adapter === adapter ? existing.timeout : 300_000)
+    return {
+      name,
+      config: {
+        adapter: 'custom-cli',
+        command,
+        args,
+        timeout,
+        ...(env && Object.keys(env).length > 0 ? { env } : {}),
+      },
+    }
+  }
   const defaults = createDiscoveredAgentConfig(adapter, command)
   if (!defaults) {
-    throw new HttpError(400, '"adapter" must be one of claude-code, codex, gemini-cli, opencode')
+    throw new HttpError(400, '"adapter" must be one of claude-code, codex, gemini-cli, opencode, custom-cli')
   }
 
-  const env = parseEnv(data.env, 'env')
   const args = data.args === undefined
     ? (existing && existing.adapter === adapter ? existing.args : defaults.args)
     : requireStringArray(data.args, 'args')
@@ -2822,14 +2844,14 @@ function sessionApiDocs() {
       createCliAgent: {
         method: 'POST',
         path: '/api/config/agents',
-        description: 'Register a local CLI Agent in the server config file.',
+        description: 'Register a local CLI Agent in the server config file. adapter may be codex, claude-code, gemini-cli, opencode, or custom-cli. custom-cli requires command plus args containing {prompt}; env is an optional string map.',
         body: {
-          name: 'my-codex',
-          adapter: 'codex',
-          command: 'codex',
-          args: ['--full-auto'],
+          name: 'my-aider',
+          adapter: 'custom-cli',
+          command: 'aider',
+          args: ['--message', '{prompt}'],
           timeout: 600000,
-          env: {},
+          env: { AIDER_MODEL: 'sonnet' },
         },
       },
       updateCliAgent: {

@@ -131,6 +131,8 @@ const MESSAGES = {
     'settings.localCli.title': 'Local CLI Agents',
     'settings.localCli.desc': 'Discovered on this machine; add the ones you want to use in sessions',
     'settings.localCli.empty': 'No local CLI agents available',
+    'settings.localCli.emptyCustom': 'Nothing was auto-discovered on this machine. Add any CLI agent by command and arguments.',
+    'settings.localCli.addCustom': '+ Add custom agent',
     'settings.localCli.add': 'Add',
     'settings.localCli.diagnose': 'Diagnose',
 
@@ -177,6 +179,13 @@ const MESSAGES = {
 
     // Edit Local CLI Agent modal
     'modal.localCli.edit.title': 'Edit Local CLI Agent',
+    'modal.customCli.add.title': 'Add Custom CLI Agent',
+    'modal.customCli.desc': 'Run any local CLI command. The {prompt} token is replaced with the task prompt.',
+    'modal.customCli.commandPlaceholder': '/usr/local/bin/aider or aider',
+    'modal.customCli.argsHelp': 'One argument per line. Include {prompt} where the task prompt should be inserted.',
+    'modal.customCli.argsPlaceholder': '--message\n{prompt}',
+    'modal.customCli.envHelp': 'Optional KEY=VALUE lines.',
+    'modal.customCli.timeoutHelp': 'Optional idle timeout in milliseconds.',
 
     // Add/Edit Assistant modal
     'modal.agent.add': 'Add Assistant',
@@ -862,6 +871,8 @@ const MESSAGES = {
     'settings.localCli.title': '本地 CLI 代理',
     'settings.localCli.desc': '已在本机发现；添加你想在会话中使用的代理',
     'settings.localCli.empty': '暂无可用的本地 CLI 代理',
+    'settings.localCli.emptyCustom': '本机没有自动发现代理。你可以用命令和参数添加任意 CLI 代理。',
+    'settings.localCli.addCustom': '+ 添加自定义代理',
     'settings.localCli.add': '添加',
     'settings.localCli.diagnose': '诊断',
 
@@ -908,6 +919,13 @@ const MESSAGES = {
 
     // Edit Local CLI Agent modal
     'modal.localCli.edit.title': '编辑本地 CLI 代理',
+    'modal.customCli.add.title': '添加自定义 CLI 代理',
+    'modal.customCli.desc': '运行任意本地 CLI 命令。{prompt} 会替换为任务提示词。',
+    'modal.customCli.commandPlaceholder': '/usr/local/bin/aider 或 aider',
+    'modal.customCli.argsHelp': '每行一个参数。必须包含 {prompt}，用于插入任务提示词。',
+    'modal.customCli.argsPlaceholder': '--message\n{prompt}',
+    'modal.customCli.envHelp': '可选，KEY=VALUE 每行一个。',
+    'modal.customCli.timeoutHelp': '可选，毫秒级空闲超时。',
 
     // Add/Edit Assistant modal
     'modal.agent.add': '添加助手',
@@ -5438,7 +5456,10 @@ async function renderSettings() {
                   <h3>${t('settings.localCli.title')}</h3>
                   <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">${t('settings.localCli.desc')}</p>
                 </div>
-                <button class="btn btn-secondary btn-sm" onclick="window.refreshDiagnostics()">${t('settings.diagnostics.refresh')}</button>
+                <div class="inline-actions">
+                  <button class="btn btn-primary btn-sm" onclick="window.showCustomCliAgentModal()">${t('settings.localCli.addCustom')}</button>
+                  <button class="btn btn-secondary btn-sm" onclick="window.refreshDiagnostics()">${t('settings.diagnostics.refresh')}</button>
+                </div>
               </div>
 
               <div id="agents-deploy-check"></div>
@@ -5607,7 +5628,13 @@ function renderLocalCliAgentsList() {
   if (!container) return
   const agents = state.agents.filter(agent => agent.kind === 'local')
   if (agents.length === 0) {
-    container.innerHTML = `<p style="color: var(--text-muted); text-align: center; padding: 40px;">${t('settings.localCli.empty')}</p>`
+    container.innerHTML = `
+      <div class="empty-state">
+        <p>${t('settings.localCli.empty')}</p>
+        <p>${t('settings.localCli.emptyCustom')}</p>
+        <button class="btn btn-primary btn-sm" onclick="window.showCustomCliAgentModal()">${t('settings.localCli.addCustom')}</button>
+      </div>
+    `
     return
   }
   container.innerHTML = agents.map(agent => {
@@ -5824,6 +5851,74 @@ window.showLocalCliAgentModal = function(name) {
       </form>
     </div>
   `)
+}
+
+window.showCustomCliAgentModal = function() {
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <div>
+          <h3>${t('modal.customCli.add.title')}</h3>
+          <p>${t('modal.customCli.desc')}</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
+      </div>
+      <form onsubmit="window.saveCustomCliAgent(event)">
+        <div class="form-group">
+          <label>${t('common.name')}</label>
+          <input class="input" name="name" required>
+        </div>
+        <div class="form-group">
+          <label>${t('common.command')}</label>
+          <input class="input" name="command" required placeholder="${escapeAttr(t('modal.customCli.commandPlaceholder'))}">
+        </div>
+        <div class="form-group">
+          <label>${t('common.args')}</label>
+          <textarea class="input" name="args" rows="4" required placeholder="${escapeAttr(t('modal.customCli.argsPlaceholder'))}"></textarea>
+          <p class="form-help">${t('modal.customCli.argsHelp')}</p>
+        </div>
+        <div class="form-group">
+          <label>${t('common.env')}</label>
+          <textarea class="input" name="env" rows="3" placeholder="KEY=VALUE"></textarea>
+          <p class="form-help">${t('modal.customCli.envHelp')}</p>
+        </div>
+        <div class="form-group">
+          <label>${t('common.timeout')}</label>
+          <input class="input" name="timeout" type="number" min="1">
+          <p class="form-help">${t('modal.customCli.timeoutHelp')}</p>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('common.cancel')}</button>
+          <button type="submit" class="btn btn-primary">${t('common.save')}</button>
+        </div>
+      </form>
+    </div>
+  `)
+}
+
+window.saveCustomCliAgent = async function(e) {
+  e.preventDefault()
+  const fd = new FormData(e.target)
+  const name = String(fd.get('name') || '').trim()
+  const args = String(fd.get('args') || '').split(/\r?\n/).map(item => item.trim()).filter(Boolean)
+  const body = compactObject({
+    name,
+    adapter: 'custom-cli',
+    command: String(fd.get('command') || '').trim(),
+    args,
+    timeout: parseInt(fd.get('timeout')) || undefined,
+    env: parseEnvLines(String(fd.get('env') || '')),
+  })
+  try {
+    state.config = await api('/api/config/agents', 'POST', body)
+    await loadAgents()
+    closeModal()
+    renderAgentsList()
+    renderLocalCliAgentsList()
+    showToast(t('toast.localCliAdded', { name }), 'success')
+  } catch (err) {
+    showToast(err.message)
+  }
 }
 
 window.saveLocalCliAgent = async function(e, originalName) {

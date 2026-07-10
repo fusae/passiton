@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Custom CLI agents can now be added from Settings with a generic `custom-cli` adapter, including `{prompt}` argument substitution, env vars, timeout, diagnostics, and an empty-state add path.
 - Ops steward now has its own encrypted model configuration in the Ops panel, with API Assistant fallback preserved for existing users.
 
 ## [0.2.1] - 2026-07-10

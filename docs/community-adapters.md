@@ -11,6 +11,10 @@ Passiton ships with adapters for four CLI agents that have usable non-interactiv
 
 API assistants are also supported through Anthropic, OpenAI, DeepSeek, Zhipu, Qwen, Moonshot, and custom OpenAI-compatible adapters.
 
+## Add Any CLI Agent From The UI
+
+Use Settings → Agents → Local CLI Agents → **Add custom agent** for CLIs that are not auto-discovered, such as aider, goose, qwen-code, or cursor-agent. Enter the display name, command, one argument per line, optional `KEY=VALUE` environment variables, and optional timeout. Arguments must include `{prompt}`; Passiton replaces that token with the task prompt before spawning the command.
+
 ## Other Agents We Know About
 
 These CLI agents are not auto-discovered or bundled today because they need a cleaner non-interactive mode, require an editor host, or need adapter work:

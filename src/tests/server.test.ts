@@ -16,6 +16,18 @@ import type { Adapter, AdapterSendOpts, Session } from '../types.js'
 import { encryptSecret } from '../keyvault.js'
 
 class StubAgentCatalog {
+  setLocalCliAgentsEnabled(): void {}
+
+  setConfiguredAgents(): void {}
+
+  async discover(): Promise<unknown[]> {
+    return []
+  }
+
+  configuredAgentConfigs(): Record<string, never> {
+    return {}
+  }
+
   async listAgents(): Promise<unknown[]> {
     return [
       {
@@ -73,7 +85,11 @@ async function withServer(
     PASSITON_ALLOW_REGISTRATION: process.env.PASSITON_ALLOW_REGISTRATION,
     PASSITON_ALLOWED_WORKSPACES: process.env.PASSITON_ALLOWED_WORKSPACES,
     PASSITON_ALLOWED_ORIGINS: process.env.PASSITON_ALLOWED_ORIGINS,
+    PASSITON_HOME: process.env.PASSITON_HOME,
+    TURING_HOME: process.env.TURING_HOME,
   }
+  process.env.PASSITON_HOME = dir
+  delete process.env.TURING_HOME
   process.env.PASSITON_JWT_SECRET = 'server-test-jwt-secret'
   if (options.allowRegistration !== false) {
     process.env.PASSITON_ALLOW_REGISTRATION = '1'
@@ -387,12 +403,68 @@ test('GET /api/docs returns unauthenticated API reference', async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/docs`)
     assert.equal(response.status, 200)
-    const payload = await response.json() as { createSession: { path: string }; handoffTask: { path: string }; agentManagement: { createApiAgent: { path: string }; createCliAgent: { path: string } } }
+    const payload = await response.json() as { createSession: { path: string }; handoffTask: { path: string }; agentManagement: { createApiAgent: { path: string }; createCliAgent: { path: string; body: { adapter: string } } } }
     assert.equal(payload.createSession.path, '/api/sessions')
     assert.equal(payload.handoffTask.path, '/api/tasks/:id/handoff')
     assert.ok(payload.agentManagement, 'docs include agentManagement section')
     assert.equal(payload.agentManagement.createApiAgent.path, '/api/agents')
     assert.equal(payload.agentManagement.createCliAgent.path, '/api/config/agents')
+    assert.equal(payload.agentManagement.createCliAgent.body.adapter, 'custom-cli')
+  })
+})
+
+test('POST /api/config/agents accepts custom CLI agent config', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'custom-cli@example.com')
+    const name = `custom-cli-test-${Date.now()}`
+    const response = await fetch(`${baseUrl}/api/config/agents`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        adapter: 'custom-cli',
+        command: process.execPath,
+        args: ['-e', 'process.stdout.write(process.argv[1])', '{prompt}'],
+        env: { PASSITON_CUSTOM_TEST: '1' },
+        timeout: 10_000,
+      }),
+    })
+
+    assert.equal(response.status, 201)
+    const payload = await response.json() as Record<string, any>
+    assert.equal(payload.agents[name].adapter, 'custom-cli')
+    assert.deepEqual(payload.agents[name].args, ['-e', 'process.stdout.write(process.argv[1])', '{prompt}'])
+  })
+})
+
+test('POST /api/config/agents rejects invalid custom CLI config', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'custom-cli-invalid@example.com')
+    const missingPrompt = await fetch(`${baseUrl}/api/config/agents`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'missing-prompt',
+        adapter: 'custom-cli',
+        command: process.execPath,
+        args: ['-e', 'process.stdout.write("no prompt")'],
+      }),
+    })
+    assert.equal(missingPrompt.status, 400)
+    assert.match(await missingPrompt.text(), /\{prompt\}/)
+
+    const emptyCommand = await fetch(`${baseUrl}/api/config/agents`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'empty-command',
+        adapter: 'custom-cli',
+        command: '',
+        args: ['{prompt}'],
+      }),
+    })
+    assert.equal(emptyCommand.status, 400)
+    assert.match(await emptyCommand.text(), /command/)
   })
 })
 

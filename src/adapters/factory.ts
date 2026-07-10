@@ -2,6 +2,7 @@ import type { AgentConfig, Adapter } from '../types.js'
 import type { Router } from '../router.js'
 import { ClaudeCodeAdapter, defaultClaudeCodeArgs } from './claude-code.js'
 import { CodexAdapter } from './codex.js'
+import { CustomCliAdapter } from './custom-cli.js'
 import { GeminiAdapter } from './gemini.js'
 import { OpenCodeAdapter } from './opencode.js'
 import { AnthropicApiAdapter } from './api/anthropic.js'
@@ -80,6 +81,15 @@ export function createAdapter(agentCfg: AgentConfig): Adapter | undefined {
         args: agentCfg.args,
         timeout: agentCfg.timeout,
         model: agentCfg.model,
+        env: agentCfg.env,
+      })
+      break
+    case 'custom-cli':
+      if (!agentCfg.command || !agentCfg.args) return undefined
+      adapter = new CustomCliAdapter({
+        command: agentCfg.command,
+        args: agentCfg.args,
+        timeout: agentCfg.timeout,
         env: agentCfg.env,
       })
       break
