@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Ops steward now has its own encrypted model configuration in the Ops panel, with API Assistant fallback preserved for existing users.
+
 ## [0.2.1] - 2026-07-10
 
 ### Added

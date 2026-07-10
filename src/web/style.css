@@ -499,6 +499,65 @@ textarea.input { resize: vertical; min-height: 80px; }
   color: var(--text-primary);
   background: var(--bg-card-hover);
 }
+.ops-model-bar,
+.ops-model-form {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  background: var(--bg-base);
+}
+.ops-model-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.ops-model-label,
+.ops-model-form label span:first-child {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.ops-model-current {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.ops-model-actions,
+.ops-model-submit {
+  display: flex;
+  gap: 8px;
+}
+.ops-model-actions button,
+.ops-model-form-head button {
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+.ops-model-form-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.ops-model-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.ops-model-grid label {
+  min-width: 0;
+}
+.ops-model-grid .input {
+  width: 100%;
+  min-height: 32px;
+  font-size: 0.8rem;
+}
+.ops-model-submit {
+  justify-content: flex-end;
+  margin-top: 10px;
+}
 .ops-thread {
   padding: 12px;
   overflow-y: auto;

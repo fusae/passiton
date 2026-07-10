@@ -741,6 +741,21 @@ const MESSAGES = {
     // Ops panel
     'ops_intro': 'I can check platform issues, explain why tasks are stuck, and suggest fixes.',
     'ops_title': 'Platform Steward',
+    'ops_model_label': 'Model',
+    'ops_model_missing': 'No Ops LLM available. Configure one here.',
+    'ops_model_using': 'Using {model}',
+    'ops_model_fallback': 'Fallback: {model}',
+    'ops_model_edit': 'Edit',
+    'ops_model_clear': 'Clear',
+    'ops_model_save': 'Save',
+    'ops_model_verify': 'Verify',
+    'ops_model_adapter': 'Adapter',
+    'ops_model_model': 'Model name',
+    'ops_model_base_url': 'Base URL',
+    'ops_model_api_key': 'API key',
+    'ops_model_keep_key': 'Leave blank to keep current key',
+    'ops_model_saved': 'Ops model saved',
+    'ops_model_cleared': 'Ops model cleared',
     'ops_global_check': 'Global check',
     'ops_current_page_check': 'Check current page',
     'ops_global_question': 'What is wrong with the platform right now?',
@@ -1380,6 +1395,21 @@ const MESSAGES = {
     // Ops panel
     'ops_intro': '我可以检查平台异常、解释任务卡住原因，并给出修复建议。',
     'ops_title': '平台管家',
+    'ops_model_label': '模型',
+    'ops_model_missing': 'Ops LLM 未接入，可在此配置。',
+    'ops_model_using': '使用 {model}',
+    'ops_model_fallback': '回退：{model}',
+    'ops_model_edit': '编辑',
+    'ops_model_clear': '清除',
+    'ops_model_save': '保存',
+    'ops_model_verify': '验证',
+    'ops_model_adapter': '适配器',
+    'ops_model_model': '模型名',
+    'ops_model_base_url': 'Base URL',
+    'ops_model_api_key': 'API Key',
+    'ops_model_keep_key': '留空则保留当前密钥',
+    'ops_model_saved': 'Ops 模型已保存',
+    'ops_model_cleared': 'Ops 模型已清除',
     'ops_global_check': '全局检查',
     'ops_current_page_check': '检查当前页',
     'ops_global_question': '现在平台有什么异常？',
@@ -1509,6 +1539,8 @@ const state = {
   currentPipeline: null,
   opsOpen: false,
   opsBusy: false,
+  opsModel: null,
+  opsModelEditing: false,
   opsMessages: [],
   opsLastReport: null,
   opsPosition: loadOpsPosition(),
@@ -1951,6 +1983,7 @@ function renderOpsWidget() {
           <button onclick="window.askOps(${jsString(t('ops_global_question'))})">${t('ops_global_check')}</button>
           <button onclick="window.askOpsForCurrent()">${t('ops_current_page_check')}</button>
         </div>
+        ${renderOpsModelSettings()}
         <div class="ops-thread" id="ops-thread">
           ${messages.map(message => `
           <div class="ops-message ${message.from === 'user' ? 'user' : 'ops'}">
@@ -1967,6 +2000,66 @@ function renderOpsWidget() {
         </form>
       </section>
     </div>
+  `
+}
+
+function renderOpsModelSettings() {
+  const model = state.opsModel
+  const editing = state.opsModelEditing || (!model?.configured && !model?.effective)
+  const current = model?.model || model?.provider || model?.adapter || ''
+  const status = model?.configured
+    ? t('ops_model_using', { model: current || 'Ops model' })
+    : model?.effective === 'fallback'
+      ? t('ops_model_fallback', { model: current || model.name || 'API Assistant' })
+      : t('ops_model_missing')
+  if (!editing) {
+    return `
+      <div class="ops-model-bar">
+        <div>
+          <div class="ops-model-label">${t('ops_model_label')}</div>
+          <div class="ops-model-current">${escapeHtml(status)}</div>
+        </div>
+        <div class="ops-model-actions">
+          <button type="button" onclick="window.editOpsModel()">${t('ops_model_edit')}</button>
+          ${model?.configured ? `<button type="button" onclick="window.clearOpsModel()">${t('ops_model_clear')}</button>` : ''}
+        </div>
+      </div>
+    `
+  }
+  const provider = providerPresetForAgent(model)
+  const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
+  const selectedModel = model?.model || defaultModelForProvider(provider)
+  return `
+    <form class="ops-model-form" onsubmit="window.saveOpsModel(event)">
+      <div class="ops-model-form-head">
+        <span>${escapeHtml(status)}</span>
+        ${model?.configured || model?.effective ? `<button type="button" onclick="window.cancelOpsModelEdit()">×</button>` : ''}
+      </div>
+      <div class="ops-model-grid">
+        <label>
+          <span>${t('ops_model_adapter')}</span>
+          <select class="input" name="provider" id="ops-model-provider" onchange="window.updateOpsModelProviderOptions()">
+            ${providerPresetOptions(provider)}
+          </select>
+        </label>
+        <label>
+          <span>${t('ops_model_model')}</span>
+          <span id="ops-model-model-control">${modelControl(provider, selectedModel)}</span>
+        </label>
+        <label>
+          <span>${t('ops_model_base_url')}</span>
+          <input class="input" name="baseUrl" id="ops-model-base-url" value="${escapeAttr(model?.baseUrl || preset.baseUrl)}">
+        </label>
+        <label>
+          <span>${t('ops_model_api_key')}</span>
+          <input class="input" name="apiKey" type="password" autocomplete="new-password" ${model?.configured ? '' : 'required'} placeholder="${escapeAttr(model?.configured ? t('ops_model_keep_key') : '')}">
+        </label>
+      </div>
+      <div class="ops-model-submit">
+        <button class="btn btn-secondary btn-sm" type="submit" name="verify" value="1">${t('ops_model_verify')}</button>
+        <button class="btn btn-primary btn-sm" type="submit">${t('ops_model_save')}</button>
+      </div>
+    </form>
   `
 }
 
@@ -2371,6 +2464,15 @@ async function loadApiKeys(signal) {
     if (isAbortedErr(err)) throw err
     console.error('Failed to load API keys:', err)
     state.apiKeys = []
+  }
+}
+
+async function loadOpsModel(signal, refresh = false) {
+  try {
+    state.opsModel = await api(`/api/ops/model${refresh ? '?refresh=1' : ''}`, 'GET', undefined, signal ? { signal } : undefined)
+  } catch (err) {
+    if (isAbortedErr(err)) throw err
+    state.opsModel = null
   }
 }
 
@@ -4887,7 +4989,10 @@ window.toggleOps = function() {
   updateOpsPanel()
   if (state.opsOpen) stopOpsWalker()
   else startOpsWalker()
-  if (state.opsOpen) setTimeout(() => document.getElementById('ops-input')?.focus(), 0)
+  if (state.opsOpen) {
+    loadOpsModel(undefined, true).then(updateOpsPanel).catch(() => {})
+    setTimeout(() => document.getElementById('ops-input')?.focus(), 0)
+  }
 }
 
 window.beginOpsDrag = function(event) {
@@ -5011,6 +5116,58 @@ function updateOpsPanel() {
   initOpsWidget()
   const thread = document.getElementById('ops-thread')
   if (thread) thread.scrollTop = thread.scrollHeight
+}
+
+window.editOpsModel = function() {
+  state.opsModelEditing = true
+  updateOpsPanel()
+}
+
+window.cancelOpsModelEdit = function() {
+  state.opsModelEditing = false
+  updateOpsPanel()
+}
+
+window.saveOpsModel = async function(event) {
+  event.preventDefault()
+  const fd = new FormData(event.target)
+  const provider = String(fd.get('provider') || 'custom')
+  const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
+  const body = compactObject({
+    adapter: preset.adapter,
+    model: String(fd.get('model') || '').trim() || undefined,
+    baseUrl: String(fd.get('baseUrl') || '').trim() || undefined,
+    apiKey: String(fd.get('apiKey') || '').trim() || undefined,
+  })
+  try {
+    state.opsModel = await api('/api/ops/model', 'PUT', body)
+    state.opsModelEditing = false
+    updateOpsPanel()
+    showToast(t('ops_model_saved'), 'success')
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.clearOpsModel = async function() {
+  try {
+    state.opsModel = await api('/api/ops/model', 'DELETE')
+    state.opsModelEditing = false
+    updateOpsPanel()
+    showToast(t('ops_model_cleared'), 'success')
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.updateOpsModelProviderOptions = function() {
+  const providerSelect = document.getElementById('ops-model-provider')
+  const modelControlContainer = document.getElementById('ops-model-model-control')
+  const baseUrlInput = document.getElementById('ops-model-base-url')
+  const provider = providerSelect?.value || 'custom'
+  const preset = PROVIDER_PRESETS[provider] || PROVIDER_PRESETS.custom
+  if (modelControlContainer) modelControlContainer.innerHTML = modelControl(provider, defaultModelForProvider(provider))
+  if (baseUrlInput) baseUrlInput.value = preset.baseUrl
 }
 
 function loadOpsPosition() {
@@ -7825,5 +7982,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (getAuthToken()) {
     connectWs()
+    loadOpsModel().then(updateOpsPanel).catch(() => {})
   }
 })

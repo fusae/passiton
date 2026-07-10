@@ -486,6 +486,12 @@ export interface FeatureConfig {
   localCliAgents: boolean
 }
 
+export interface OpsConfig {
+  model?: {
+    userAgentName?: string
+  }
+}
+
 // Full app config
 export interface AppConfig {
   server: {
@@ -502,6 +508,7 @@ export interface AppConfig {
   agents: Record<string, AgentConfig>
   defaults: DefaultsConfig
   features: FeatureConfig
+  ops?: OpsConfig
   policy: PolicyConfig
 }
 

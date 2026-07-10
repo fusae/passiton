@@ -1083,6 +1083,84 @@ test('POST /api/tasks/:id/stop stops a running task', async () => {
   })
 })
 
+test('dedicated ops model is encrypted, selected, and delete reverts to fallback', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'ops-model@example.com')
+    const fakeApi = http.createServer((_, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({
+        choices: [{ message: { content: 'Ops LLM answer' }, finish_reason: 'stop' }],
+      }))
+    })
+    await new Promise<void>((resolve) => fakeApi.listen(0, resolve))
+    const fakeAddress = fakeApi.address()
+    if (!fakeAddress || typeof fakeAddress === 'string') throw new Error('fake API did not start')
+    const baseUrlApi = `http://127.0.0.1:${fakeAddress.port}/chat/completions`
+    try {
+      const create = await fetch(`${baseUrl}/api/ops/model`, {
+        method: 'PUT',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          adapter: 'custom-api',
+          model: 'ops-test',
+          baseUrl: baseUrlApi,
+          apiKey: 'sk-ops-secret',
+        }),
+      })
+      assert.equal(create.status, 200)
+      const created = await create.json() as { configured: boolean; effective?: string; keyMasked?: string }
+      assert.equal(created.configured, true)
+      assert.equal(created.effective, 'dedicated')
+      assert.equal(created.keyMasked, 'sk-...cret')
+      assert.notEqual(state.getUserAgent(auth.userId, '__ops__')?.encryptedKey, 'sk-ops-secret')
+
+      const agents = await fetch(`${baseUrl}/api/agents`, { headers: authHeaders(auth.token) })
+      assert.equal(agents.status, 200)
+      const agentPayload = await agents.json() as Array<{ name: string }>
+      assert.ok(!agentPayload.some((agent) => agent.name === '__ops__'))
+
+      const diagnose = await fetch(`${baseUrl}/api/ops/diagnose`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '为什么失败' }),
+      })
+      assert.equal(diagnose.status, 200)
+      const dedicatedAnswer = await diagnose.json() as { answerSource?: string; answer?: string; answerError?: string }
+      assert.equal(dedicatedAnswer.answerSource, 'Ops model')
+      assert.match(dedicatedAnswer.answer || '', /Ops LLM answer/)
+
+      state.createUserAgent({
+        id: 'ops-fallback',
+        userId: auth.userId,
+        name: 'ops-fallback',
+        adapter: 'custom-api',
+        model: 'fallback-test',
+        baseUrl: baseUrlApi,
+        ...encryptSecret(auth.userId, 'sk-fallback-secret'),
+      })
+
+      const remove = await fetch(`${baseUrl}/api/ops/model`, {
+        method: 'DELETE',
+        headers: authHeaders(auth.token),
+      })
+      assert.equal(remove.status, 200)
+      assert.equal(state.getUserAgent(auth.userId, '__ops__'), undefined)
+
+      const fallbackDiagnose = await fetch(`${baseUrl}/api/ops/diagnose`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ question: '为什么失败' }),
+      })
+      assert.equal(fallbackDiagnose.status, 200)
+      const fallbackAnswer = await fallbackDiagnose.json() as { answerSource?: string; answer?: string }
+      assert.equal(fallbackAnswer.answerSource, 'ops-fallback')
+      assert.match(fallbackAnswer.answer || '', /Ops LLM answer/)
+    } finally {
+      await new Promise<void>((resolve) => fakeApi.close(() => resolve()))
+    }
+  })
+})
+
 async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {

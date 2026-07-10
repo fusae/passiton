@@ -32,6 +32,11 @@ export const DEFAULT_CONFIG: AppConfig = {
   features: {
     localCliAgents: parseBooleanEnv(env('LOCAL_CLI_AGENTS')) ?? true,
   },
+  ops: {
+    model: {
+      userAgentName: '__ops__',
+    },
+  },
   agents: {},
   policy: {
     maxRounds: 20,
@@ -144,6 +149,19 @@ function validateConfig(config: AppConfig): AppConfig {
   assertPositiveInt(config.policy.sessionTimeout, 'policy.sessionTimeout')
   assertNonNegativeInt(config.policy.retries, 'policy.retries')
   assertStringArray(config.policy.allowedWorkspaces ?? [], 'policy.allowedWorkspaces')
+  if (config.ops !== undefined) {
+    if (!isPlainObject(config.ops)) {
+      throw new Error('[config] "ops" must be an object')
+    }
+    if (config.ops.model !== undefined) {
+      if (!isPlainObject(config.ops.model)) {
+        throw new Error('[config] "ops.model" must be an object')
+      }
+      if (config.ops.model.userAgentName !== undefined) {
+        assertNonEmptyString(config.ops.model.userAgentName, 'ops.model.userAgentName')
+      }
+    }
+  }
 
   if (!isPlainObject(config.agents)) {
     throw new Error('[config] "agents" must be an object')
@@ -220,6 +238,14 @@ function normalizeConfig(config: AppConfig): AppConfig {
     ...config.features,
     localCliAgents: parseBooleanEnv(env('LOCAL_CLI_AGENTS')) ?? config.features?.localCliAgents ?? DEFAULT_CONFIG.features.localCliAgents,
   }
+  const ops = {
+    ...DEFAULT_CONFIG.ops,
+    ...config.ops,
+    model: {
+      ...DEFAULT_CONFIG.ops?.model,
+      ...config.ops?.model,
+    },
+  }
 
   return {
     ...config,
@@ -231,6 +257,7 @@ function normalizeConfig(config: AppConfig): AppConfig {
     auth,
     defaults,
     features,
+    ops,
     agents: config.agents ?? {},
     policy: {
       ...config.policy,

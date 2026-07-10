@@ -48,6 +48,7 @@ const COMPRESSIBLE_EXT = new Set(['.html', '.js', '.css', '.json', '.svg', '.txt
 // Maximum number of entries retained in the static-asset cache.
 const STATIC_CACHE_MAX = 64
 const HANDOFF_OUTPUT_TAIL_CHARS = 4000
+const DEFAULT_OPS_MODEL_AGENT_NAME = '__ops__'
 const API_ADAPTERS = new Set(['anthropic-api', 'openai-api', 'zhipu-api', 'deepseek-api', 'qwen-api', 'moonshot-api', 'custom-api'])
 const PROVIDER_BY_ADAPTER: Record<string, string> = {
   'anthropic-api': 'Anthropic',
@@ -141,6 +142,21 @@ type OpsAction = {
   target: Required<OpsTarget>
   risk: 'low' | 'medium' | 'high'
   requiresConfirmation: boolean
+}
+
+type OpsModelResponse = {
+  configured: boolean
+  effective?: 'dedicated' | 'fallback'
+  name?: string
+  adapter?: string
+  model?: string
+  provider?: string
+  baseUrl?: string
+  hasKey?: boolean
+  keyMasked?: string
+  status?: ApiAgentInfo['status']
+  error?: string
+  checkedAt?: number
 }
 
 const MIME: Record<string, string> = {
@@ -579,6 +595,49 @@ function parseApiAgentConfigBody(body: unknown, existing?: state.UserAgentRecord
   }
 }
 
+function parseOpsModelConfigBody(body: unknown, existing?: state.UserAgentRecord): {
+  adapter: string
+  apiKey?: string
+  model?: string
+  baseUrl?: string
+  timeout?: number
+} {
+  const data = requireRecord(body, 'body')
+  const adapter = normalizeApiAdapter(requireNonEmptyString(data.adapter ?? existing?.adapter, 'adapter'))
+  if (!API_ADAPTERS.has(adapter)) {
+    throw new HttpError(400, '"adapter" must be one of anthropic, openai, zhipu, deepseek, qwen, moonshot, custom')
+  }
+  const baseUrl = optionalString(data.baseUrl, 'baseUrl') ?? existing?.baseUrl
+  if (adapter === 'custom-api' && !baseUrl) {
+    throw new HttpError(400, '"baseUrl" is required for custom')
+  }
+  const apiKey = optionalString(data.apiKey ?? data.key, 'apiKey')
+  if (!apiKey && !existing?.encryptedKey) {
+    throw new HttpError(400, '"apiKey" is required')
+  }
+  return {
+    adapter,
+    apiKey,
+    model: optionalString(data.model, 'model') ?? existing?.model,
+    baseUrl,
+    timeout: optionalPositiveInt(data.timeout, 'timeout') ?? existing?.timeout,
+  }
+}
+
+function normalizeApiAdapter(value: string): string {
+  if (API_ADAPTERS.has(value)) return value
+  const aliases: Record<string, string> = {
+    anthropic: 'anthropic-api',
+    openai: 'openai-api',
+    zhipu: 'zhipu-api',
+    deepseek: 'deepseek-api',
+    qwen: 'qwen-api',
+    moonshot: 'moonshot-api',
+    custom: 'custom-api',
+  }
+  return aliases[value] ?? value
+}
+
 function agentNameFromPath(pathname: string): string | undefined {
   const match = pathname.match(/^\/api\/config\/agents\/([^/]+)$/)
   return match ? decodeURIComponent(match[1]) : undefined
@@ -709,9 +768,18 @@ function decryptUserAgentKey(record: state.UserAgentRecord): string | undefined 
 
 const DECRYPT_MISMATCH_HINT = 'encryption key mismatch — was the database copied from another machine?'
 
+function opsModelAgentName(): string {
+  return loadConfig().ops?.model?.userAgentName ?? DEFAULT_OPS_MODEL_AGENT_NAME
+}
+
+function isOpsModelRecord(record: Pick<state.UserAgentRecord, 'name'>): boolean {
+  return record.name === opsModelAgentName()
+}
+
 function userAgentConfigs(userId: string): Record<string, AgentConfig> {
   const result: Record<string, AgentConfig> = {}
   for (const record of state.listUserAgents(userId)) {
+    if (isOpsModelRecord(record)) continue
     const { key, error } = tryDecryptUserAgentKey(record)
     if (error) {
       console.warn(`[warn] Skipping agent "${record.name}": decryption failed — ${DECRYPT_MISMATCH_HINT}`)
@@ -725,6 +793,7 @@ function userAgentConfigs(userId: string): Record<string, AgentConfig> {
 export function registerPersistedUserAgents(router: Router): void {
   const byUser = new Map<string, Record<string, AgentConfig>>()
   for (const record of state.listAllUserAgents()) {
+    if (isOpsModelRecord(record)) continue
     const { key, error } = tryDecryptUserAgentKey(record)
     if (error) {
       console.warn(`[warn] Skipping persisted agent "${record.name}" (user ${record.userId}): decryption failed — ${DECRYPT_MISMATCH_HINT}. Re-configure the API key in Settings to fix.`)
@@ -752,7 +821,7 @@ async function listAgentModels(
   const currentAgents = current.agents
   const globalApiEntries = Object.entries(current.agents)
     .filter(([, cfg]) => API_ADAPTERS.has(cfg.adapter))
-  const userRecords = state.listUserAgents(userId)
+  const userRecords = state.listUserAgents(userId).filter((record) => !isOpsModelRecord(record))
   const userApiEntries = userRecords.map((record) => {
     const { key, error } = tryDecryptUserAgentKey(record)
     return {
@@ -855,6 +924,7 @@ function providerKeyList(userId: string): ProviderKeyInfo[] {
   }))
   const result: ProviderKeyInfo[] = [...keys]
   for (const record of state.listUserAgents(userId)) {
+    if (isOpsModelRecord(record)) continue
     const { key: apiKey, error } = tryDecryptUserAgentKey(record)
     if (error || !apiKey) continue
     result.push({
@@ -1662,7 +1732,7 @@ async function mcpListAgents(args: unknown, ctx: McpContext): Promise<unknown> {
   const data = requireRecord(args, 'arguments')
   const refresh = optionalBoolean(data.refresh, 'refresh') ?? true
   const catalogAgents = await ctx.agentCatalog.listAgents({ refresh })
-  const assistantRecords = state.listUserAgents(ctx.authUser.userId)
+  const assistantRecords = state.listUserAgents(ctx.authUser.userId).filter((record) => !isOpsModelRecord(record))
   const assistantAgents = await Promise.all(assistantRecords.map(async (agent) => {
     const { key, error } = tryDecryptUserAgentKey(agent)
     const cfg = state.userAgentRecordToConfig(agent, key)
@@ -2264,7 +2334,7 @@ function directOpsAnswer(userId: string, question: string | undefined): string |
     }
     return [
       'No Ops LLM is currently available.',
-      'Add an API Assistant in Settings. Assistants with "ops" in the name are preferred, then DeepSeek/Qwen/OpenAI/Claude.',
+      'Configure an Ops model from the Ops panel, or add an API Assistant as a fallback.',
     ].join('\n')
   }
   if (/能做什么|职责|权限|边界/.test(value)) {
@@ -2288,6 +2358,27 @@ function summarizeOpsIssues(issues: OpsIssue[], input: { question?: string; targ
   return `${prefix} has ${issues.length} issue(s). Top priority: ${first.title}. ${first.recommendation}`
 }
 
+function dedicatedOpsModelAgent(userId: string): { name: string; config: AgentConfig; record: state.UserAgentRecord } | undefined {
+  const record = state.getUserAgent(userId, opsModelAgentName())
+  if (!record) return undefined
+  const { key, error } = tryDecryptUserAgentKey(record)
+  if (error) return undefined
+  const config = state.userAgentRecordToConfig(record, key)
+  if (!API_ADAPTERS.has(config.adapter) || !config.apiKey || !apiConfigHealthy(config)) return undefined
+  return { name: 'Ops model', config, record }
+}
+
+function fallbackOpsModelCandidates(userId: string): Array<{ name: string; config: AgentConfig }> {
+  const candidates: Array<{ name: string; config: AgentConfig }> = []
+  for (const [name, config] of Object.entries(userAgentConfigs(userId))) {
+    if (API_ADAPTERS.has(config.adapter) && config.apiKey && apiConfigHealthy(config)) candidates.push({ name, config })
+  }
+  for (const [name, config] of Object.entries(activeAgents(loadConfig()))) {
+    if (API_ADAPTERS.has(config.adapter) && config.apiKey && apiConfigHealthy(config)) candidates.push({ name, config })
+  }
+  return candidates
+}
+
 async function generateOpsModelAnswer(
   userId: string,
   input: { question?: string; target?: OpsTarget; page?: OpsPageContext },
@@ -2301,7 +2392,7 @@ async function generateOpsModelAnswer(
   }
 ): Promise<{ answer?: string; source?: string; error?: string }> {
   const selected = await selectOpsModelAgent(userId)
-  if (!selected) return { error: 'No verified API Assistant is available. Refresh in Settings or reconfigure a DeepSeek/Qwen/OpenAI API Assistant.' }
+  if (!selected) return { error: 'No Ops LLM is available. Configure an Ops model from the Ops panel, or add an API Assistant as a fallback.' }
   const adapter = createAdapter(selected.config)
   if (!adapter) return { error: `Could not create the ${selected.name} adapter.` }
 
@@ -2331,14 +2422,12 @@ async function generateOpsModelAnswer(
 }
 
 async function selectOpsModelAgent(userId: string): Promise<{ name: string; config: AgentConfig } | undefined> {
-  const candidates: Array<{ name: string; config: AgentConfig }> = []
-  for (const [name, config] of Object.entries(userAgentConfigs(userId))) {
-    if (API_ADAPTERS.has(config.adapter) && config.apiKey && apiConfigHealthy(config)) candidates.push({ name, config })
+  const dedicated = dedicatedOpsModelAgent(userId)
+  if (dedicated) {
+    const result = await verifyApiAgent(dedicated.name, dedicated.config)
+    if (result.ok) return dedicated
   }
-  for (const [name, config] of Object.entries(activeAgents(loadConfig()))) {
-    if (API_ADAPTERS.has(config.adapter) && config.apiKey && apiConfigHealthy(config)) candidates.push({ name, config })
-  }
-  for (const candidate of candidates.sort((a, b) => opsModelPriority(a) - opsModelPriority(b))) {
+  for (const candidate of fallbackOpsModelCandidates(userId).sort((a, b) => opsModelPriority(a) - opsModelPriority(b))) {
     const result = await verifyApiAgent(candidate.name, candidate.config)
     if (result.ok) return candidate
   }
@@ -2346,14 +2435,9 @@ async function selectOpsModelAgent(userId: string): Promise<{ name: string; conf
 }
 
 function selectCachedOpsModelAgent(userId: string): { name: string; config: AgentConfig } | undefined {
-  const candidates: Array<{ name: string; config: AgentConfig }> = []
-  for (const [name, config] of Object.entries(userAgentConfigs(userId))) {
-    if (API_ADAPTERS.has(config.adapter) && config.apiKey && apiConfigHealthy(config)) candidates.push({ name, config })
-  }
-  for (const [name, config] of Object.entries(activeAgents(loadConfig()))) {
-    if (API_ADAPTERS.has(config.adapter) && config.apiKey && apiConfigHealthy(config)) candidates.push({ name, config })
-  }
-  return candidates
+  const dedicated = dedicatedOpsModelAgent(userId)
+  if (dedicated && getApiSmokeResult(dedicated.name, dedicated.config)?.ok) return dedicated
+  return fallbackOpsModelCandidates(userId)
     .filter((candidate) => getApiSmokeResult(candidate.name, candidate.config)?.ok)
     .sort((a, b) => opsModelPriority(a) - opsModelPriority(b))[0]
 }
@@ -2366,6 +2450,84 @@ function opsModelPriority(candidate: { name: string; config: AgentConfig }): num
   if (value.includes('openai')) return 3
   if (value.includes('anthropic') || value.includes('claude')) return 4
   return 9
+}
+
+async function getOpsModelResponse(userId: string, opts: { refresh?: boolean } = {}): Promise<OpsModelResponse> {
+  const record = state.getUserAgent(userId, opsModelAgentName())
+  if (record) {
+    const { key, error } = tryDecryptUserAgentKey(record)
+    const cfg = state.userAgentRecordToConfig(record, key)
+    const smoke = error
+      ? { ok: false, checkedAt: Date.now(), error: `Decryption failed — ${DECRYPT_MISMATCH_HINT}` }
+      : await verifyApiAgent('Ops model', cfg, { force: opts.refresh })
+    return {
+      configured: true,
+      effective: smoke.ok ? 'dedicated' : undefined,
+      name: 'Ops model',
+      adapter: record.adapter,
+      model: record.model,
+      provider: providerForAdapter(record.adapter, record.baseUrl),
+      baseUrl: record.baseUrl ?? DEFAULT_BASE_URLS[record.adapter],
+      hasKey: Boolean(key),
+      keyMasked: key ? maskAgentKey(key) : undefined,
+      status: error ? 'invalid' : smoke.ok ? 'ready' : 'invalid',
+      error: smoke.error,
+      checkedAt: smoke.checkedAt,
+    }
+  }
+  const fallback = opts.refresh ? await selectOpsModelAgent(userId) : selectCachedOpsModelAgent(userId)
+  if (!fallback) return { configured: false }
+  return {
+    configured: false,
+    effective: 'fallback',
+    name: fallback.name,
+    adapter: fallback.config.adapter,
+    model: fallback.config.model,
+    provider: providerForAdapter(fallback.config.adapter, fallback.config.baseUrl),
+    baseUrl: fallback.config.baseUrl ?? DEFAULT_BASE_URLS[fallback.config.adapter],
+    hasKey: Boolean(fallback.config.apiKey),
+    keyMasked: fallback.config.apiKey ? maskAgentKey(fallback.config.apiKey) : undefined,
+    status: 'ready',
+    checkedAt: getApiSmokeResult(fallback.name, fallback.config)?.checkedAt,
+  }
+}
+
+async function saveOpsModel(userId: string, body: unknown): Promise<OpsModelResponse> {
+  const name = opsModelAgentName()
+  const existing = state.getUserAgent(userId, name)
+  const parsed = parseOpsModelConfigBody(body, existing)
+  const existingKey = existing ? decryptUserAgentKey(existing) : undefined
+  const apiKey = parsed.apiKey ?? existingKey
+  const cfg: AgentConfig = {
+    adapter: parsed.adapter,
+    apiKey,
+    model: parsed.model,
+    baseUrl: parsed.baseUrl,
+    timeout: parsed.timeout ?? 120_000,
+  }
+  await assertApiAgentUsable('Ops model', cfg)
+  const encrypted = parsed.apiKey ? encryptSecret(userId, parsed.apiKey) : undefined
+  if (existing) {
+    state.updateUserAgent(userId, name, {
+      adapter: parsed.adapter,
+      model: parsed.model,
+      baseUrl: parsed.baseUrl,
+      timeout: parsed.timeout ?? 120_000,
+      ...(encrypted ? { encryptedKey: encrypted.encryptedKey, iv: encrypted.iv, authTag: encrypted.authTag } : {}),
+    })
+  } else {
+    state.createUserAgent({
+      id: crypto.randomUUID(),
+      userId,
+      name,
+      adapter: parsed.adapter,
+      model: parsed.model,
+      baseUrl: parsed.baseUrl,
+      timeout: parsed.timeout ?? 120_000,
+      ...(encrypted ?? encryptSecret(userId, apiKey!)),
+    })
+  }
+  return getOpsModelResponse(userId)
 }
 
 function opsPseudoSession(agentName: string, agent: AgentConfig): Session {
@@ -2604,6 +2766,29 @@ function sessionApiDocs() {
       list: 'GET /api/agents',
       refreshList: 'GET /api/agents?refresh=1',
       diagnostics: 'GET /api/agents/:name/diagnostics?refresh=1',
+    },
+    opsModel: {
+      get: {
+        method: 'GET',
+        path: '/api/ops/model',
+        description: 'Return the dedicated Ops model configuration with the API key masked, plus the effective fallback when no dedicated model is configured.',
+      },
+      set: {
+        method: 'PUT',
+        path: '/api/ops/model',
+        description: 'Configure and smoke-test the dedicated Ops model. The API key is encrypted in the hidden user_agents record and is never stored in config.json.',
+        body: {
+          adapter: 'openai-api',
+          model: 'gpt-4o-mini',
+          baseUrl: 'https://api.example.com/v1/chat/completions',
+          apiKey: '<provider-api-key>',
+        },
+      },
+      clear: {
+        method: 'DELETE',
+        path: '/api/ops/model',
+        description: 'Clear the dedicated Ops model and revert Ops selection to the API Assistant fallback.',
+      },
     },
     agentManagement: {
       createApiAgent: {
@@ -3237,6 +3422,22 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // GET /api/ops/status
       if (pathname === '/api/ops/status' && method === 'GET') {
         return json(res, 200, await buildOpsReport(authUser!.userId, agentCatalog))
+      }
+
+      // GET /api/ops/model
+      if (pathname === '/api/ops/model' && method === 'GET') {
+        return json(res, 200, await getOpsModelResponse(authUser!.userId, { refresh: url.searchParams.get('refresh') === '1' }))
+      }
+
+      // PUT /api/ops/model
+      if (pathname === '/api/ops/model' && method === 'PUT') {
+        return json(res, 200, await saveOpsModel(authUser!.userId, await parseBody(req)))
+      }
+
+      // DELETE /api/ops/model
+      if (pathname === '/api/ops/model' && method === 'DELETE') {
+        state.deleteUserAgent(authUser!.userId, opsModelAgentName())
+        return json(res, 200, await getOpsModelResponse(authUser!.userId))
       }
 
       // POST /api/ops/diagnose
