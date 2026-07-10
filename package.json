@@ -16,7 +16,7 @@
     "check": "npm run typecheck && npm run build",
     "start": "node dist/index.js",
     "dev": "tsc --watch",
-    "test": "npm run build && node --test dist/tests/*.test.js",
+    "test": "npm run build && node scripts/run-tests.mjs",
     "app": "npm run build && electron .",
     "app:quick": "electron .",
     "deploy:check": "npm run build && node scripts/deploy-check.mjs",
