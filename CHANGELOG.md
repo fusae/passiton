@@ -7,13 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-10
+
+### Added
+
+- Local visitors now skip the marketing landing page and auto-login directly into the app.
+- Settings is reduced from six tabs to two focused tabs: Agents and General.
+
 ### Fixed
 
+- Local CLI agent verification now persists across refreshes and restarts.
 - Windows agent discovery: `resolveCommand` now tries `.exe`, `.cmd`, `.bat` extensions (and respects `PATHEXT`) so agents like `claude.exe` and `codex.cmd` are found instead of only the bare name. Previously `claude` installed at `~/.local/bin/claude.exe` was invisible because the resolver only checked the exact name.
 - Windows spawn correctness: `.cmd` and `.bat` files are now spawned via `shell: true` (required since Node.js CVE-2024-27980). `.exe` files spawn directly.
 - Windows workspace path matching: separators and case are normalized so `C:\Users\X\Projects` matches `c:/users/x/projects`.
 - Added Windows-common search paths: `%APPDATA%\npm`, `~/scoop/shims`, `%ProgramData%\chocolatey\bin`, `%LOCALAPPDATA%\Programs`.
-- Cross-platform build/test scripts: `build` and `test` now use a Node-based `scripts/copy-web.mjs` instead of Unix `mkdir`/`cp`, and the test runner discovers tests via directory path instead of a shell glob.
+- Separator-portable paths are used for bundled agent dependencies.
+- Cross-platform build/test scripts: `build` and `test` now use Node-based scripts instead of Unix-only shell commands, and the test runner discovers tests explicitly instead of relying on shell glob behavior.
 
 ## [0.2.0] - 2026-07-09
 
@@ -55,6 +64,7 @@ Initial public baseline. Local-first agent-to-agent orchestration:
 - **Web UI**, HTTP API, WebSocket events, and `passiton` CLI.
 - **Auth**: JWT with auto-generated secret on first run, encrypted provider key vault, local-access auto-login.
 
-[Unreleased]: https://github.com/fusae/passiton/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/fusae/passiton/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/fusae/passiton/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/fusae/passiton/releases/tag/v0.2.0
 [0.1.0]: https://github.com/fusae/passiton/releases/tag/v0.1.0

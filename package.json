@@ -1,6 +1,6 @@
 {
   "name": "passiton",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Passiton agent-to-agent communication proxy",
   "type": "module",
   "main": "electron/main.cjs",
