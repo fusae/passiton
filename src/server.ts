@@ -29,7 +29,7 @@ import type { Router } from './router.js'
 import * as state from './state.js'
 import type { AdapterResponse, AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, Pipeline, PipelineTemplateRecord, PipelineWithSessions, AgentRef, Message, Session, SessionMode, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType } from './types.js'
 import { pipelineTemplates, templates } from './templates.js'
-import { resolveWorkspacePath, WorkspaceAccessError } from './workspace.js'
+import { resolveWorkspacePath, validateAllowedWorkspaces, WorkspaceAccessError } from './workspace.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(__dirname, 'web')
@@ -1480,6 +1480,10 @@ function optionalStringArray(value: unknown, field: string): string[] | undefine
     throw new HttpError(400, `"${field}" must be a string array`)
   }
   return value.map((item) => item.trim()).filter(Boolean)
+}
+
+function formatAllowedWorkspaceRejections(rejected: { path: string; reason: string }[]): string {
+  return rejected.map((item) => `rejected ${item.path}: ${item.reason}`).join('; ')
 }
 
 function assertAllowedWorkspace(cwd: string | undefined, field = 'cwd'): void {
@@ -3481,6 +3485,10 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       if (pathname === '/api/config' && method === 'PUT') {
         const current = loadConfig()
         const global = parseGlobalConfigBody(await parseBody(req))
+        const allowedWorkspaces = global.allowedWorkspaces === undefined ? undefined : validateAllowedWorkspaces(global.allowedWorkspaces)
+        if (allowedWorkspaces && allowedWorkspaces.ok.length === 0 && allowedWorkspaces.rejected.length > 0) {
+          throw new HttpError(400, `No safe allowedWorkspaces entries were provided; ${formatAllowedWorkspaceRejections(allowedWorkspaces.rejected)}`)
+        }
         const updated: AppConfig = {
           ...current,
           server: { ...current.server, port: global.port },
@@ -3488,11 +3496,14 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           policy: {
             ...current.policy,
             maxRounds: global.maxRounds,
-            ...(global.allowedWorkspaces !== undefined ? { allowedWorkspaces: global.allowedWorkspaces } : {}),
+            ...(allowedWorkspaces !== undefined ? { allowedWorkspaces: allowedWorkspaces.ok } : {}),
           },
         }
         writeConfig(updated)
-        return json(res, 200, loadConfig())
+        const saved = loadConfig()
+        return json(res, 200, allowedWorkspaces && allowedWorkspaces.rejected.length > 0
+          ? { ...saved, warning: `Dropped unsafe allowedWorkspaces entries; ${formatAllowedWorkspaceRejections(allowedWorkspaces.rejected)}` }
+          : saved)
       }
 
       // GET /api/files/content

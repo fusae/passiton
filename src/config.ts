@@ -6,6 +6,7 @@ import crypto from 'crypto'
 import type { AppConfig, SessionMode } from './types.js'
 import { defaultClaudeCodeArgs } from './adapters/claude-code.js'
 import { resolveDataHome } from './paths.js'
+import { validateAllowedWorkspaces } from './workspace.js'
 
 function env(name: string): string | undefined {
   return process.env[`PASSITON_${name}`] ?? process.env[`TURING_${name}`]
@@ -78,7 +79,9 @@ export const LOCAL_CLI_AGENT_DEFAULTS: Record<string, AppConfig['agents'][string
 export function loadConfig(): AppConfig {
   ensureConfigFile()
   const merged = readConfig()
-  return validateConfig(merged)
+  const config = validateConfig(merged)
+  warnUnsafeAllowedWorkspaces(config.policy.allowedWorkspaces ?? [])
+  return config
 }
 
 /**
@@ -216,6 +219,13 @@ function validateConfig(config: AppConfig): AppConfig {
   }
 
   return config
+}
+
+function warnUnsafeAllowedWorkspaces(entries: string[]): void {
+  const { rejected } = validateAllowedWorkspaces(entries)
+  if (rejected.length === 0) return
+  const first = rejected[0]
+  console.warn(`[security] warning: allowedWorkspaces contains a suspicious entry (${first.path}): ${first.reason}. Agents will not be restricted to a safe directory. Review Settings > Agents > Allowed Workspaces.`)
 }
 
 function isApiAdapter(adapter: string): boolean {

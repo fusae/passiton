@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import path, { join } from 'node:path'
 import { checkSessionTimeout } from '../policy.js'
-import { resolveWorkspacePath, WorkspaceAccessError, setWorkspacePlatformForTesting, normalizePathForComparison, isPathInsideRoot } from '../workspace.js'
+import { resolveWorkspacePath, WorkspaceAccessError, setWorkspacePlatformForTesting, normalizePathForComparison, isPathInsideRoot, validateAllowedWorkspaces } from '../workspace.js'
 import type { Session } from '../types.js'
 
 test('session timeout uses last update time so approval waits can resume', () => {
@@ -94,6 +94,24 @@ test('workspace resolver defaults empty allowed roots to process cwd', () => {
       process.chdir(originalCwd)
     }
   })
+})
+
+test('validateAllowedWorkspaces rejects dangerous entries and accepts a normal project dir', () => {
+  const project = path.join(process.cwd(), 'example-project')
+  const result = validateAllowedWorkspaces([
+    'relative-project',
+    path.parse(process.cwd()).root,
+    homedir(),
+    tmpdir(),
+    project,
+    `${project}${path.sep}`,
+  ])
+
+  assert.deepEqual(result.ok, [project])
+  assert.ok(result.rejected.some((item) => item.path === 'relative-project' && /absolute/.test(item.reason)))
+  assert.ok(result.rejected.some((item) => item.path === path.parse(process.cwd()).root && /OS root/.test(item.reason)))
+  assert.ok(result.rejected.some((item) => item.path === path.normalize(homedir()) && /home directory root/.test(item.reason)))
+  assert.ok(result.rejected.some((item) => item.path === path.normalize(tmpdir()) && /temp directory/.test(item.reason)))
 })
 
 function withTempDirs(fn: (root: string, outside: string) => void): void {

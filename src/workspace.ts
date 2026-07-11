@@ -1,4 +1,5 @@
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 
 export class WorkspaceAccessError extends Error {}
@@ -26,6 +27,68 @@ export function isPathInsideRoot(target: string, root: string, platform: string 
   const normRoot = normalizePathForComparison(root, platform)
   const sep = platform === 'win32' ? '\\' : path.sep
   return normTarget === normRoot || normTarget.startsWith(normRoot + sep)
+}
+
+export function validateAllowedWorkspaces(entries: string[]): { ok: string[]; rejected: { path: string; reason: string }[] } {
+  const ok: string[] = []
+  const seen = new Set<string>()
+  const rejected: { path: string; reason: string }[] = []
+
+  for (const entry of entries) {
+    const trimmed = entry.trim()
+    if (!path.isAbsolute(trimmed)) {
+      rejected.push({ path: trimmed, reason: 'workspace path must be absolute' })
+      continue
+    }
+
+    const normalized = path.resolve(trimmed)
+    const reason = unsafeWorkspaceReason(normalized)
+    if (reason) {
+      rejected.push({ path: normalized, reason })
+      continue
+    }
+
+    const comparisonKey = normalizePathForComparison(normalized)
+    if (!seen.has(comparisonKey)) {
+      seen.add(comparisonKey)
+      ok.push(normalized)
+    }
+  }
+
+  return { ok, rejected }
+}
+
+function unsafeWorkspaceReason(workspacePath: string): string | undefined {
+  const platform = currentPlatform()
+  const normalized = path.normalize(workspacePath)
+  const root = path.parse(normalized).root
+  if (normalizePathForComparison(normalized, platform) === normalizePathForComparison(root, platform)) {
+    return 'OS root is not a safe workspace'
+  }
+
+  const home = path.normalize(os.homedir())
+  if (normalizePathForComparison(normalized, platform) === normalizePathForComparison(home, platform)) {
+    return 'home directory root is not a safe workspace'
+  }
+
+  const temp = path.normalize(os.tmpdir())
+  if (isPathInsideRoot(normalized, temp, platform)) {
+    return 'temp directory is not a safe workspace'
+  }
+
+  if (platform !== 'win32') {
+    for (const dangerousRoot of ['/tmp', '/private/tmp']) {
+      if (normalizePathForComparison(normalized, platform) === normalizePathForComparison(path.normalize(dangerousRoot), platform)) {
+        return `${dangerousRoot} is not a safe workspace`
+      }
+    }
+    const varFolders = path.normalize('/var/folders')
+    if (isPathInsideRoot(normalized, varFolders, platform)) {
+      return '/var/folders is not a safe workspace'
+    }
+  }
+
+  return undefined
 }
 
 export function defaultWorkspaceRoots(): string[] {

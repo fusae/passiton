@@ -468,6 +468,47 @@ test('POST /api/config/agents rejects invalid custom CLI config', async () => {
   })
 })
 
+test('PUT /api/config rejects all unsafe allowedWorkspaces entries', async () => {
+  await withServer(async (baseUrl) => {
+    delete process.env.PASSITON_ALLOWED_WORKSPACES
+    const auth = await register(baseUrl, 'config-all-unsafe@example.com')
+    const response = await fetch(`${baseUrl}/api/config`, {
+      method: 'PUT',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        defaults: { maxRounds: 20, mode: 'collaborate' },
+        policy: { allowedWorkspaces: [tmpdir()] },
+      }),
+    })
+
+    assert.equal(response.status, 400)
+    const payload = await response.json() as { error: string }
+    assert.match(payload.error, /rejected .*temp directory is not a safe workspace/)
+  })
+})
+
+test('PUT /api/config keeps valid allowedWorkspaces entries and warns about dropped entries', async () => {
+  await withServer(async (baseUrl) => {
+    delete process.env.PASSITON_ALLOWED_WORKSPACES
+    const auth = await register(baseUrl, 'config-mixed-workspaces@example.com')
+    const project = join(process.cwd(), 'example-project')
+    const response = await fetch(`${baseUrl}/api/config`, {
+      method: 'PUT',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        defaults: { maxRounds: 20, mode: 'collaborate' },
+        policy: { allowedWorkspaces: [tmpdir(), project] },
+      }),
+    })
+
+    assert.equal(response.status, 200)
+    const payload = await response.json() as { policy: { allowedWorkspaces: string[] }; warning?: string }
+    assert.deepEqual(payload.policy.allowedWorkspaces, [project])
+    assert.match(payload.warning ?? '', /Dropped unsafe allowedWorkspaces entries/)
+    assert.match(payload.warning ?? '', /temp directory is not a safe workspace/)
+  })
+})
+
 test('GET /api/pipeline-templates returns reusable workflow templates', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'pipeline-templates@example.com')
