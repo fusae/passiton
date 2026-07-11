@@ -501,10 +501,13 @@ test('win32: discovers the full supported CLI agent set from npm-style .cmd shim
     'qwen', 'cline', 'aider', 'droid', 'amp', 'openhands', 'vibe',
   ]
   for (const command of commands) {
-    writeExecutable(
-      join(dir, `${command}.cmd`),
-      'if [ "$1" = "--version" ]; then echo fake-agent-1.0; exit 0; fi\necho TURING_READY'
-    )
+    const filePath = join(dir, `${command}.cmd`)
+    if (process.platform === 'win32') {
+      writeFileSync(filePath, '@echo off\r\nif "%~1"=="--version" (echo fake-agent-1.0 & exit /b 0)\r\necho TURING_READY\r\n')
+    } else {
+      writeFileSync(filePath, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo fake-agent-1.0; exit 0; fi\necho TURING_READY\n')
+      chmodSync(filePath, 0o755)
+    }
   }
   setExtraAgentSearchPathsForTesting([dir])
   setPlatformForTesting('win32')

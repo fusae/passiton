@@ -934,7 +934,7 @@ test('POST /api/tasks without agent skips non-filesystem candidates for cwd task
       ]),
     })
   } finally {
-    rmSync(cwd, { recursive: true, force: true })
+    rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   }
 })
 
@@ -981,7 +981,7 @@ test('POST /api/tasks/:id/handoff creates a continuation task from an errored cw
       assert.match(created.prompt, /Pre-existing files count: 1/)
       assert.match(created.prompt, /Verify the current state first/)
     } finally {
-      rmSync(cwd, { recursive: true, force: true })
+      rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
   })
 })
@@ -1082,7 +1082,7 @@ test('POST /api/tasks/:id/handoff enforces filesystem-capable agents for cwd tas
         const payload = await response.json() as { error: string }
         assert.match(payload.error, /filesystem-capable/)
       } finally {
-        rmSync(cwd, { recursive: true, force: true })
+        rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
       }
     })
   } finally {
