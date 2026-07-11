@@ -125,6 +125,12 @@ export interface WorkspaceDirtyState {
   preexistingFiles?: string[]
 }
 
+export interface GitCommitRecord {
+  hash: string
+  subject: string
+  committedAt: number
+}
+
 export interface TaskMetadata {
   continuedFromTaskId?: string
 }
@@ -145,6 +151,7 @@ export interface Task {
   errorMessage?: string
   lastAgentOutput?: string
   workspaceState?: WorkspaceDirtyState
+  gitCommits?: GitCommitRecord[]
   metadata?: TaskMetadata
   createdAt: number
   updatedAt: number

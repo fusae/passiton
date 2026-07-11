@@ -2370,6 +2370,33 @@ textarea.input { resize: vertical; min-height: 80px; }
   overflow-wrap: anywhere;
   text-align: right;
 }
+.task-commit-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.task-commit {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+  align-items: baseline;
+  font-size: 0.82rem;
+}
+.task-commit-hash {
+  color: var(--accent);
+  font-weight: 700;
+}
+.task-commit-subject {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.task-commit-time {
+  grid-column: 2;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
 
 /* ============================================================
    Landing-specific

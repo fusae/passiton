@@ -16,7 +16,7 @@ import {
   DEFAULT_POLICY,
 } from './policy.js'
 import { generateSystemPrompts, generateTaskSystemPrompt } from './prompts.js'
-import { normalizePathForComparison, resolveWorkspacePath, WorkspaceAccessError } from './workspace.js'
+import { collectGitCommitsDuringWindow, normalizePathForComparison, resolveWorkspacePath, WorkspaceAccessError } from './workspace.js'
 
 const MAX_HISTORY_MESSAGES = 20
 const DISCUSS_MIN_ROUNDS = 3
@@ -280,9 +280,12 @@ export class Router extends EventEmitter {
     const task = state.getTask(id)
     if (!task) throw new Error(`Task ${id} not found`)
     if (task.status === 'done' || task.status === 'error' || task.status === 'stopped') return task
+    const finishedAt = Date.now()
+    const gitCommits = await this.collectTaskGitCommits(task, finishedAt)
     const stopped = state.updateTask(id, {
       status: 'stopped',
-      finishedAt: Date.now(),
+      finishedAt,
+      gitCommits,
     }, task.userId)
     this.emit('event', { type: 'task:updated', payload: stopped } satisfies WsEvent)
     return stopped
@@ -298,10 +301,13 @@ export class Router extends EventEmitter {
       const currentTask = state.getTask(task.id, task.userId)
       const baseline = currentTask?.workspaceState?.baselineFiles
       const workspaceState = task.cwd ? await checkWorkspaceDirty(task.cwd, baseline) : undefined
+      const finishedAt = Date.now()
+      const gitCommits = await this.collectTaskGitCommits(currentTask ?? task, finishedAt)
       const failed = state.updateTask(task.id, {
         status: 'error',
         errorMessage: `Adapter not found: ${task.agent.adapter}`,
-        finishedAt: Date.now(),
+        finishedAt,
+        gitCommits,
         ...(workspaceState ? { workspaceState } : {}),
       }, task.userId)
       this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
@@ -346,12 +352,15 @@ export class Router extends EventEmitter {
       const result = await this.callTaskWithRetry(adapter, task, opts)
       if (state.getTask(task.id, task.userId)?.status === 'stopped') return
       const output = result.content
+      const finishedAt = Date.now()
+      const gitCommits = await this.collectTaskGitCommits(state.getTask(task.id, task.userId) ?? task, finishedAt)
       const done = state.updateTask(task.id, {
         status: 'done',
         output,
         result: extractResultSummary(output),
         lastAgentOutput: liveOutput || lastOutput || output,
-        finishedAt: Date.now(),
+        finishedAt,
+        gitCommits,
         workspaceState: null,
       }, task.userId)
       this.emit('event', { type: 'task:done', payload: done } satisfies WsEvent)
@@ -360,16 +369,24 @@ export class Router extends EventEmitter {
       const currentTask = state.getTask(task.id, task.userId)
       const baseline = currentTask?.workspaceState?.baselineFiles
       const workspaceState = task.cwd ? await checkWorkspaceDirty(task.cwd, baseline) : undefined
+      const finishedAt = Date.now()
+      const gitCommits = await this.collectTaskGitCommits(currentTask ?? task, finishedAt)
       const failed = state.updateTask(task.id, {
         status: 'error',
         errorMessage: err instanceof Error ? err.message : String(err),
         lastAgentOutput: readLastAgentOutput(err) || liveOutput || lastOutput,
-        finishedAt: Date.now(),
+        finishedAt,
+        gitCommits,
         ...(workspaceState ? { workspaceState } : {}),
       }, task.userId)
       this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
     }
     // Slot release + next-task drain happen in the .finally() of scheduleTask.
+  }
+
+  private async collectTaskGitCommits(task: Task, finishedAt: number): Promise<Task['gitCommits']> {
+    if (!task.cwd) return []
+    return collectGitCommitsDuringWindow(task.cwd, task.startedAt ?? task.createdAt, finishedAt)
   }
 
   private async callTaskWithRetry(adapter: Adapter, task: Task, opts?: AdapterSendOpts): Promise<AdapterResponse> {

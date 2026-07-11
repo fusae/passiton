@@ -397,6 +397,7 @@ const MESSAGES = {
     'task_info_started': 'Started',
     'task_info_finished': 'Finished',
     'task_info_cwd': 'CWD',
+    'task_commits_title': 'COMMITS DURING THIS TASK',
     'task_live_output': 'Live Output',
     'task_live_output_waiting': 'Waiting for output…',
     'task_creation_params': 'Creation Params',
@@ -1060,6 +1061,7 @@ const MESSAGES = {
     'task_info_started': '开始于',
     'task_info_finished': '完成于',
     'task_info_cwd': '工作目录',
+    'task_commits_title': '任务期间的提交',
     'task_live_output': '实时输出',
     'task_live_output_waiting': '等待输出…',
     'task_creation_params': '创建参数',
@@ -3383,6 +3385,28 @@ function renderWorkspaceWarning(task) {
   `
 }
 
+function renderTaskCommits(task) {
+  const commits = Array.isArray(task.gitCommits) ? task.gitCommits : []
+  if (!commits.length) return ''
+  const rows = commits.map((commit) => {
+    const hash = String(commit.hash || '')
+    const shortHash = hash.slice(0, 7)
+    const committedAt = Number.isFinite(commit.committedAt) ? new Date(commit.committedAt).toLocaleString() : ''
+    return `
+      <li class="task-commit">
+        <span class="task-commit-hash mono">${escapeHtml(shortHash)}</span>
+        <span class="task-commit-subject">${escapeHtml(commit.subject || '')}</span>
+        ${committedAt ? `<span class="task-commit-time">${escapeHtml(committedAt)}</span>` : ''}
+      </li>
+    `
+  }).join('')
+  return `
+    <div class="divider"></div>
+    <div class="label mb-8">${t('task_commits_title')}</div>
+    <ul class="task-commit-list">${rows}</ul>
+  `
+}
+
 function renderTaskContent(task) {
   const container = document.getElementById('task-content')
   if (!container || !task) return
@@ -3426,6 +3450,7 @@ function renderTaskContent(task) {
         ${task.cwd ? `<div class="panel-kv-row"><span class="kv-label">${t('task_info_cwd')}</span><span class="kv-value mono">${escapeHtml(task.cwd)}</span></div>` : ''}
       </div>
       ${renderTaskCreationDetails(task)}
+      ${renderTaskCommits(task)}
       ${task.status !== 'queued' && task.status !== 'running' ? `
         <div class="divider"></div>
         <div style="display: grid; gap: 10px;">

@@ -237,6 +237,7 @@ function createTables(): void {
       result            TEXT,
       error_message     TEXT,
       last_agent_output TEXT,
+      git_commits       TEXT,
       metadata          TEXT,
       created_at        INTEGER NOT NULL,
       updated_at        INTEGER NOT NULL,
@@ -393,6 +394,9 @@ function createTables(): void {
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE tasks ADD COLUMN workspace_state TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE tasks ADD COLUMN git_commits TEXT`)
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE tasks ADD COLUMN metadata TEXT`)
@@ -675,6 +679,10 @@ function rowToTask(row: Record<string, unknown>): Task {
   if (row.metadata) {
     try { metadata = JSON.parse(row.metadata as string) } catch { /* ignore */ }
   }
+  let gitCommits: Task['gitCommits'] | undefined
+  if (row.git_commits) {
+    try { gitCommits = JSON.parse(row.git_commits as string) } catch { /* ignore */ }
+  }
   return {
     id: row.id as string,
     userId: (row.user_id as string | null) ?? undefined,
@@ -694,6 +702,7 @@ function rowToTask(row: Record<string, unknown>): Task {
     errorMessage: (row.error_message as string | null) ?? undefined,
     lastAgentOutput: (row.last_agent_output as string | null) ?? undefined,
     ...(workspaceState ? { workspaceState } : {}),
+    ...(gitCommits && gitCommits.length > 0 ? { gitCommits } : {}),
     ...(metadata ? { metadata } : {}),
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
@@ -786,6 +795,7 @@ export function updateTask(id: string, updates: Omit<Partial<Pick<Task,
   'result' |
   'errorMessage' |
   'lastAgentOutput' |
+  'gitCommits' |
   'startedAt' |
   'finishedAt'
 >>, 'workspaceState'> & { workspaceState?: WorkspaceDirtyState | null }, userId?: string): Task {
@@ -797,6 +807,7 @@ export function updateTask(id: string, updates: Omit<Partial<Pick<Task,
   if (updates.result !== undefined) { fields.push('result = ?'); values.push(updates.result) }
   if (updates.errorMessage !== undefined) { fields.push('error_message = ?'); values.push(updates.errorMessage) }
   if (updates.lastAgentOutput !== undefined) { fields.push('last_agent_output = ?'); values.push(updates.lastAgentOutput) }
+  if (updates.gitCommits !== undefined) { fields.push('git_commits = ?'); values.push(JSON.stringify(updates.gitCommits)) }
   if (updates.workspaceState !== undefined) {
     if (updates.workspaceState === null) {
       fields.push('workspace_state = NULL')

@@ -1,8 +1,12 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
+import type { GitCommitRecord } from './types.js'
 
 export class WorkspaceAccessError extends Error {}
+const execFileAsync = promisify(execFile)
 
 // --- Platform injection (for testability) ---
 let platformOverride: string | undefined
@@ -93,6 +97,38 @@ function unsafeWorkspaceReason(workspacePath: string): string | undefined {
 
 export function defaultWorkspaceRoots(): string[] {
   return [process.cwd()]
+}
+
+export async function collectGitCommitsDuringWindow(cwd: string, startedAt: number, finishedAt: number): Promise<GitCommitRecord[]> {
+  try {
+    const since = new Date(startedAt).toISOString()
+    const until = new Date(finishedAt).toISOString()
+    const { stdout } = await execFileAsync('git', [
+      'log',
+      `--since=${since}`,
+      `--until=${until}`,
+      '--format=%H%x1f%cI%x1f%s%x1e',
+    ], {
+      cwd,
+      timeout: 500,
+      maxBuffer: 1024 * 1024,
+    })
+    return stdout
+      .split('\x1e')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const [hash, committedAtRaw, subject = ''] = entry.split('\x1f')
+        return {
+          hash,
+          subject,
+          committedAt: Date.parse(committedAtRaw),
+        }
+      })
+      .filter((commit) => commit.hash && Number.isFinite(commit.committedAt))
+  } catch {
+    return []
+  }
 }
 
 export function allowedWorkspaceRoots(configured: string[] = []): string[] {

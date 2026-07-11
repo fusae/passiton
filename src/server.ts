@@ -2099,6 +2099,7 @@ function summarizeTask(task: Task, includeOutput = false): Record<string, unknow
     cwd: task.cwd,
     result: truncateText(task.result, 4000),
     errorMessage: truncateText(task.errorMessage, 1000),
+    gitCommits: task.gitCommits ?? [],
     ...(includeOutput ? { output: truncateText(task.output, 8000) } : {}),
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,

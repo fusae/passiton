@@ -1,10 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import path, { join } from 'node:path'
 import { checkSessionTimeout } from '../policy.js'
-import { resolveWorkspacePath, WorkspaceAccessError, setWorkspacePlatformForTesting, normalizePathForComparison, isPathInsideRoot, validateAllowedWorkspaces } from '../workspace.js'
+import { collectGitCommitsDuringWindow, resolveWorkspacePath, WorkspaceAccessError, setWorkspacePlatformForTesting, normalizePathForComparison, isPathInsideRoot, validateAllowedWorkspaces } from '../workspace.js'
 import type { Session } from '../types.js'
 
 test('session timeout uses last update time so approval waits can resume', () => {
@@ -37,6 +38,43 @@ test('workspace resolver allows normal child paths', () => {
       requireFile: true,
     }), realpathSync.native(file))
   })
+})
+
+test('collectGitCommitsDuringWindow returns commits in the task window', async () => {
+  const repo = mkdtempSync(join(tmpdir(), 'turing-git-window-'))
+  try {
+    execFileSync('git', ['init'], { cwd: repo, stdio: 'ignore' })
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repo })
+    execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: repo })
+
+    writeFileSync(join(repo, 'before.txt'), 'before')
+    execFileSync('git', ['add', 'before.txt'], { cwd: repo })
+    execFileSync('git', ['commit', '-m', 'Before window'], {
+      cwd: repo,
+      env: { ...process.env, GIT_AUTHOR_DATE: '2026-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2026-01-01T00:00:00Z' },
+      stdio: 'ignore',
+    })
+
+    writeFileSync(join(repo, 'inside.txt'), 'inside')
+    execFileSync('git', ['add', 'inside.txt'], { cwd: repo })
+    execFileSync('git', ['commit', '-m', 'Inside window'], {
+      cwd: repo,
+      env: { ...process.env, GIT_AUTHOR_DATE: '2026-01-01T00:01:00Z', GIT_COMMITTER_DATE: '2026-01-01T00:01:00Z' },
+      stdio: 'ignore',
+    })
+
+    const commits = await collectGitCommitsDuringWindow(
+      repo,
+      Date.parse('2026-01-01T00:00:30Z'),
+      Date.parse('2026-01-01T00:01:30Z')
+    )
+
+    assert.deepEqual(commits.map((commit) => commit.subject), ['Inside window'])
+    assert.match(commits[0]?.hash ?? '', /^[a-f0-9]{40}$/)
+    assert.equal(commits[0]?.committedAt, Date.parse('2026-01-01T00:01:00Z'))
+  } finally {
+    rmSync(repo, { recursive: true, force: true })
+  }
 })
 
 test('workspace resolver blocks parent traversal and absolute escapes', () => {
