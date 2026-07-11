@@ -219,6 +219,15 @@ function validateConfig(config: AppConfig): AppConfig {
     if (agent.lastVerifiedVersion !== undefined) {
       assertNonEmptyString(agent.lastVerifiedVersion, `agents.${name}.lastVerifiedVersion`)
     }
+    if (agent.lastVerificationAttemptAt !== undefined) {
+      assertNonNegativeInt(agent.lastVerificationAttemptAt, `agents.${name}.lastVerificationAttemptAt`)
+    }
+    if (agent.lastVerificationError !== undefined) {
+      assertNonEmptyString(agent.lastVerificationError, `agents.${name}.lastVerificationError`)
+    }
+    if (agent.autoDiscovered !== undefined && typeof agent.autoDiscovered !== 'boolean') {
+      throw new Error(`[config] "agents.${name}.autoDiscovered" must be a boolean`)
+    }
   }
 
   return config

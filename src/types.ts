@@ -454,6 +454,15 @@ export type AgentAdapterType =
   | 'claude-code'
   | 'gemini-cli'
   | 'opencode'
+  | 'copilot-cli'
+  | 'cursor-agent'
+  | 'qwen-code'
+  | 'cline'
+  | 'aider'
+  | 'droid'
+  | 'amp'
+  | 'openhands'
+  | 'mistral-vibe'
   | 'custom-cli'
   | 'anthropic-api'
   | 'openai-api'
@@ -475,6 +484,9 @@ export interface AgentConfig {
   env?: Record<string, string>
   lastVerifiedAt?: number
   lastVerifiedVersion?: string
+  lastVerificationAttemptAt?: number
+  lastVerificationError?: string
+  autoDiscovered?: boolean
 }
 
 export interface ApiAgentInfo {
@@ -485,7 +497,7 @@ export interface ApiAgentInfo {
   baseUrl?: string
   hasKey: boolean
   keyMasked?: string
-  status: 'ready' | 'no_key' | 'invalid' | 'discovered' | 'unverified'
+  status: 'ready' | 'no_key' | 'invalid' | 'discovered' | 'unverified' | 'verifying'
   error?: string
   checkedAt?: number
   kind?: 'api' | 'local'
@@ -496,6 +508,7 @@ export interface ApiAgentInfo {
   priority?: number
   env?: Record<string, string>
   version?: string
+  autoDiscovered?: boolean
 }
 
 export type AgentListResponse = ApiAgentInfo[]

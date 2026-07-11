@@ -200,7 +200,12 @@ export function runCommand({
       if (code === 0) {
         resolve(stdout.trim())
       } else {
-        reject(withLastOutput(new Error(withHint(adapterName, command, code, stderr, `[${adapterName}] exited with code ${code}: ${stderr.trim()}`, currentIdleTimeout())), lastOutput))
+        const diagnosticOutput = [tailText(stdout, 12_000), tailText(stderr, 12_000)]
+          .map((text) => text.trim())
+          .filter(Boolean)
+          .join('\n')
+        const summary = summarizeFailureOutput(diagnosticOutput)
+        reject(withLastOutput(new Error(withHint(adapterName, command, code, diagnosticOutput, `[${adapterName}] exited with code ${code}: ${summary}`, currentIdleTimeout())), lastOutput))
       }
     })
 
@@ -282,6 +287,31 @@ function lastMeaningfulLine(text: string): string {
   return lines.at(-1) ?? ''
 }
 
+function summarizeFailureOutput(text: string): string {
+  const lines = stripAnsi(text).split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    try {
+      const event = JSON.parse(lines[index]) as Record<string, unknown>
+      if (event.is_error === true && typeof event.result === 'string' && event.result.trim()) {
+        return truncateOutput(event.result)
+      }
+      const message = event.message as Record<string, unknown> | undefined
+      const content = message?.content
+      if (Array.isArray(content)) {
+        const value = content
+          .map((part) => typeof part === 'object' && part !== null ? (part as { text?: string }).text : undefined)
+          .filter(Boolean)
+          .join(' ')
+          .trim()
+        if (value && (event.error || event.type === 'assistant')) return truncateOutput(value)
+      }
+    } catch {
+      // Plain-text CLI output.
+    }
+  }
+  return lastMeaningfulLine(text) || 'No diagnostic output'
+}
+
 /**
  * Append a one-line, actionable hint to common adapter failures. The raw
  * message is kept (so logs/classification still work); the hint is the part a
@@ -295,7 +325,7 @@ export function withHint(adapterName: string, command: string, code: number | nu
   }
   // 2. Auth / credentials / subscription. CLI agents (claude-code, codex, …)
   //    commonly exit non-zero with empty or terse stderr when unauthenticated.
-  const quotaCues = ['usage limit', 'usage limit reached', 'quota', 'rate limit', 'too many requests', 'statuscode":429', 'status 429', ' 429', '"code":"1308"', 'insufficient balance', '余额不足']
+  const quotaCues = ['usage limit', 'usage limit reached', 'session limit', 'quota', 'rate limit', 'rate_limit', 'too many requests', 'statuscode":429', 'api_error_status":429', 'status 429', ' 429', '"code":"1308"', 'insufficient balance', '余额不足']
   const authCues = ['unauthorized', 'unauthenticated', 'invalid api key', 'authentication', 'not logged in', 'login', 'no subscription', '401', '403', 'payment required', ...quotaCues]
   const looksLikeAuth = (code !== null && code !== 0 && stderr.trim() === '') || authCues.some((cue) => lower.includes(cue))
   if (looksLikeAuth) {

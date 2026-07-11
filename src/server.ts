@@ -50,7 +50,10 @@ const STATIC_CACHE_MAX = 64
 const HANDOFF_OUTPUT_TAIL_CHARS = 4000
 const DEFAULT_OPS_MODEL_AGENT_NAME = '__ops__'
 const API_ADAPTERS = new Set(['anthropic-api', 'openai-api', 'zhipu-api', 'deepseek-api', 'qwen-api', 'moonshot-api', 'custom-api'])
-const LOCAL_CLI_ADAPTERS = new Set(['claude-code', 'codex', 'gemini-cli', 'opencode', 'custom-cli'])
+const LOCAL_CLI_ADAPTERS = new Set([
+  'claude-code', 'codex', 'gemini-cli', 'opencode', 'copilot-cli', 'cursor-agent',
+  'qwen-code', 'cline', 'aider', 'droid', 'amp', 'openhands', 'mistral-vibe', 'custom-cli',
+])
 const PROVIDER_BY_ADAPTER: Record<string, string> = {
   'anthropic-api': 'Anthropic',
   'openai-api': 'OpenAI',
@@ -542,7 +545,7 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
   const adapter = requireNonEmptyString(data.adapter, 'adapter')
   const command = requireNonEmptyString(data.command, 'command')
   if (!LOCAL_CLI_ADAPTERS.has(adapter)) {
-    throw new HttpError(400, '"adapter" must be one of claude-code, codex, gemini-cli, opencode, custom-cli')
+    throw new HttpError(400, `"adapter" must be one of ${Array.from(LOCAL_CLI_ADAPTERS).join(', ')}`)
   }
   const env = parseEnv(data.env, 'env')
   const priority = optionalAgentPriority(data.priority)
@@ -567,7 +570,7 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
   }
   const defaults = createDiscoveredAgentConfig(adapter, command)
   if (!defaults) {
-    throw new HttpError(400, '"adapter" must be one of claude-code, codex, gemini-cli, opencode, custom-cli')
+    throw new HttpError(400, `"adapter" must be one of ${Array.from(LOCAL_CLI_ADAPTERS).join(', ')}`)
   }
 
   const args = data.args === undefined
@@ -579,11 +582,16 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
   const finalEnv = env ?? inheritedEnv
   return {
     name,
-    config: {
-      ...defaults,
-      args,
-      timeout,
-      ...(priority !== undefined ? { priority } : existing?.priority !== undefined ? { priority: existing.priority } : {}),
+      config: {
+        ...defaults,
+        args,
+        timeout,
+        ...(existing?.autoDiscovered ? { autoDiscovered: true } : {}),
+        ...(existing?.lastVerifiedAt !== undefined ? { lastVerifiedAt: existing.lastVerifiedAt } : {}),
+        ...(existing?.lastVerifiedVersion !== undefined ? { lastVerifiedVersion: existing.lastVerifiedVersion } : {}),
+        ...(existing?.lastVerificationAttemptAt !== undefined ? { lastVerificationAttemptAt: existing.lastVerificationAttemptAt } : {}),
+        ...(existing?.lastVerificationError !== undefined ? { lastVerificationError: existing.lastVerificationError } : {}),
+        ...(priority !== undefined ? { priority } : existing?.priority !== undefined ? { priority: existing.priority } : {}),
       model: existing && existing.adapter === adapter ? existing.model : defaults.model,
       command,
       ...(finalEnv && Object.keys(finalEnv).length > 0 ? { env: finalEnv } : {}),
@@ -890,7 +898,11 @@ async function listAgentModels(
         model: agent.version,
         hasKey: true,
         status: agent.source === 'configured'
-          ? (agent.verified && agent.availableForSessions ? 'ready' : agent.healthy ? 'unverified' : 'invalid')
+          ? (agent.verified && agent.availableForSessions
+              ? 'ready'
+              : agent.autoDiscovered
+                ? (agent.verifying || !agent.verificationAttemptedAt ? 'verifying' : 'invalid')
+                : agent.healthy ? 'unverified' : 'invalid')
           : (agent.healthy ? 'discovered' : 'invalid'),
         kind: 'local',
         source: agent.source,
@@ -900,6 +912,8 @@ async function listAgentModels(
         priority: cfg?.priority,
         env: cfg?.env ?? agent.env,
         version: agent.version,
+        autoDiscovered: agent.autoDiscovered,
+        error: agent.verificationError,
       }
     })
   return sortAgentsByPriority([
@@ -2889,7 +2903,7 @@ function sessionApiDocs() {
       createCliAgent: {
         method: 'POST',
         path: '/api/config/agents',
-        description: 'Register a local CLI Agent in the server config file. adapter may be codex, claude-code, gemini-cli, opencode, or custom-cli. custom-cli requires command plus args containing {prompt}; env is an optional string map.',
+        description: 'Register a supported local CLI Agent in the server config file. custom-cli requires command plus args containing {prompt}; env is an optional string map.',
         body: {
           name: 'my-aider',
           adapter: 'custom-cli',

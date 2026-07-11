@@ -129,7 +129,7 @@ const MESSAGES = {
 
     // Settings — Local CLI Agents
     'settings.localCli.title': 'Local CLI Agents',
-    'settings.localCli.desc': 'Discovered on this machine; add the ones you want to use in sessions',
+    'settings.localCli.desc': 'Installed agents are added and verified automatically',
     'settings.localCli.empty': 'No local CLI agents available',
     'settings.localCli.emptyCustom': 'Nothing was auto-discovered on this machine. Add any CLI agent by command and arguments.',
     'settings.localCli.addCustom': '+ Add custom agent',
@@ -224,6 +224,7 @@ const MESSAGES = {
     'status.ready': 'Available',
     'status.unverified': 'Unverified',
     'status.discovered': 'Discovered',
+    'status.verifying': 'Verifying',
     'status.no_key': 'No Key',
     'status.invalid': 'Invalid',
 
@@ -876,7 +877,7 @@ const MESSAGES = {
 
     // Settings — Local CLI Agents
     'settings.localCli.title': '本地 CLI 代理',
-    'settings.localCli.desc': '已在本机发现；添加你想在会话中使用的代理',
+    'settings.localCli.desc': '自动添加并验证本机已安装的代理',
     'settings.localCli.empty': '暂无可用的本地 CLI 代理',
     'settings.localCli.emptyCustom': '本机没有自动发现代理。你可以用命令和参数添加任意 CLI 代理。',
     'settings.localCli.addCustom': '+ 添加自定义代理',
@@ -971,6 +972,7 @@ const MESSAGES = {
     'status.ready': '可用',
     'status.unverified': '未验证',
     'status.discovered': '已发现',
+    'status.verifying': '验证中',
     'status.no_key': '缺 Key',
     'status.invalid': '不可用',
 
@@ -2468,13 +2470,31 @@ async function loadPipelines(signal, options = {}) {
   }
 }
 
+let agentVerificationPollTimer = null
+
 async function loadAgents(signal) {
   try {
     state.agents = await api('/api/agents', 'GET', undefined, signal ? { signal } : undefined)
+    scheduleAgentVerificationPoll()
   } catch (err) {
     if (isAbortedErr(err)) throw err
     console.error('Failed to load agents:', err)
   }
+}
+
+function scheduleAgentVerificationPoll() {
+  if (!state.agents.some(agent => agent.kind === 'local' && agent.status === 'verifying')) {
+    if (agentVerificationPollTimer) clearTimeout(agentVerificationPollTimer)
+    agentVerificationPollTimer = null
+    return
+  }
+  if (agentVerificationPollTimer) return
+  agentVerificationPollTimer = setTimeout(async () => {
+    agentVerificationPollTimer = null
+    await loadAgents()
+    renderAgentsList()
+    renderLocalCliAgentsList()
+  }, 2000)
 }
 
 async function loadTemplates() {
@@ -3126,7 +3146,7 @@ function renderOnboardingPanel() {
   }
 
   // Agents exist but none verified-ready.
-  const unverified = present.filter((a) => a.status === 'unverified' || a.status === 'discovered')
+  const unverified = present.filter((a) => a.status === 'unverified' || a.status === 'discovered' || a.status === 'verifying')
   const unverifiedList = unverified.length
     ? unverified.map((a) => `<li><span class="onboarding-agent-name">${escapeHtml(a.name)}</span><span class="onboarding-agent-status onboarding-agent-status--${a.status}">${statusLabel(a.status)}</span></li>`).join('')
     : ''
@@ -3150,6 +3170,7 @@ function statusLabel(status) {
     case 'ready': return t('status.ready')
     case 'unverified': return t('status.unverified')
     case 'discovered': return t('status.discovered')
+    case 'verifying': return t('status.verifying')
     case 'no_key': return t('status.no_key')
     case 'invalid': return t('status.invalid')
     default: return status
@@ -3167,6 +3188,7 @@ function statusBadgeClass(status) {
     case 'ready': return 'active'
     case 'unverified':
     case 'discovered':
+    case 'verifying':
     case 'no_key': return 'paused'
     default: return 'error'
   }
@@ -5687,8 +5709,7 @@ function renderLocalCliAgentsList() {
     ? `<p style="font-size: 0.82rem; color: var(--text-muted); margin: 0 0 8px;">${t('settings.localCli.priorityHint')}</p>`
     : ''
   container.innerHTML = priorityHint + agents.map(agent => {
-    const canAdd = agent.source === 'discovered'
-    const canDelete = agent.source === 'configured'
+    const canDelete = agent.source === 'configured' && !agent.autoDiscovered
     const badgeClass = statusBadgeClass(agent.status)
     const diagnosing = state.agentDiagnosticsPending.has(agent.name)
     return `
@@ -5706,7 +5727,6 @@ function renderLocalCliAgentsList() {
         </div>
       ` : ''}
       <div class="agent-actions">
-        ${canAdd ? `<button class="btn btn-primary btn-sm" onclick='window.addLocalCliAgent(${jsString(agent.name)})'>${t('settings.localCli.add')}</button>` : ''}
         <button class="btn btn-ghost btn-sm" ${diagnosing ? 'disabled' : ''} onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>${diagnosing ? t('modal.agentDiagnostics.running') : t('settings.localCli.diagnose')}</button>
         ${canDelete ? `<button class="btn btn-ghost btn-sm" onclick='window.showLocalCliAgentModal(${jsString(agent.name)})'>${t('settings.agents.edit')}</button>` : ''}
         ${canDelete ? `<button class="btn btn-ghost btn-sm" style="color: var(--red);" onclick='window.deleteLocalCliAgent(${jsString(agent.name)})'>${t('settings.agents.delete')}</button>` : ''}

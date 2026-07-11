@@ -3,10 +3,18 @@ import assert from 'node:assert/strict'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, win32 } from 'node:path'
-import { AgentCatalog, findExecutable, getBundledCodexCandidates, setExtraAgentSearchPathsForTesting, setPlatformForTesting } from '../agents.js'
+import { AgentCatalog, findExecutable, getBundledClaudeCandidates, getBundledCodexCandidates, getBundledOpenCodeCandidates, setExtraAgentSearchPathsForTesting, setPlatformForTesting } from '../agents.js'
 import { registerConfiguredAdapters } from '../adapters/factory.js'
 import { Router } from '../router.js'
 import { DEFAULT_CONFIG, getConfigPath, loadConfig, writeConfig } from '../config.js'
+
+async function waitFor(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error('Timed out waiting for condition')
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+}
 
 test.afterEach(() => {
   setExtraAgentSearchPathsForTesting([])
@@ -54,6 +62,34 @@ test('Codex discovery includes common ChatGPT locations on Windows', () => {
   assert.ok(candidates.some((candidate) => candidate.endsWith(win32.join('ChatGPT', 'resources', 'codex.exe'))))
 })
 
+test('Claude discovery includes the latest CLI bundled by Claude App on macOS', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'passiton-claude-home-'))
+  const older = join(home, 'Library', 'Application Support', 'Claude', 'claude-code', '2.1.92', 'claude.app', 'Contents', 'MacOS')
+  const latest = join(home, 'Library', 'Application Support', 'Claude', 'claude-code', '2.1.202', 'claude.app', 'Contents', 'MacOS')
+  mkdirSync(older, { recursive: true })
+  mkdirSync(latest, { recursive: true })
+
+  try {
+    const candidates = await getBundledClaudeCandidates('darwin', home, {})
+    assert.equal(candidates[2], join(latest, 'claude'))
+    assert.ok(candidates.includes(join(older, 'claude')))
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('OpenCode discovery includes its user-local installer paths', () => {
+  assert.deepEqual(
+    getBundledOpenCodeCandidates('darwin', '/Users/test', {}),
+    ['/Users/test/.opencode/bin/opencode']
+  )
+  const windows = getBundledOpenCodeCandidates('win32', 'C:\\Users\\test', {
+    LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local',
+  })
+  assert.ok(windows.includes(win32.join('C:\\Users\\test', '.opencode', 'bin', 'opencode.exe')))
+  assert.ok(windows.includes(win32.join('C:\\Users\\test\\AppData\\Local', 'opencode', 'bin', 'opencode.exe')))
+})
+
 test('discovery repairs a configured Codex path after the app executable moves', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'passiton-codex-moved-'))
   const command = writeExecutable(join(dir, 'codex'), 'echo codex-test')
@@ -96,13 +132,11 @@ test('refresh rescans CLI locations changed after Passiton started', async () =>
   }
 })
 
-test('AgentCatalog discovers bundled CLI agents and ignores unknown binaries', async () => {
+test('AgentCatalog discovers supported CLI agents and ignores unknown binaries', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-discover-'))
   writeExecutable(join(dir, 'codex'), 'echo codex-test')
-  // An agent without a bundled adapter (aider) should NOT be auto-discovered —
-  // only the four shipped CLI presets are. Users can still register custom
-  // adapters explicitly. See docs/community-adapters.md.
   writeExecutable(join(dir, 'aider'), 'echo aider-test')
+  writeExecutable(join(dir, 'unknown-agent'), 'echo unknown-test')
   setExtraAgentSearchPathsForTesting([dir])
 
   const catalog = new AgentCatalog({}, true)
@@ -110,12 +144,60 @@ test('AgentCatalog discovers bundled CLI agents and ignores unknown binaries', a
   const agents = await catalog.listAgents()
   const codex = agents.find((agent) => agent.name === 'codex')
   const aider = agents.find((agent) => agent.name === 'aider')
+  const unknown = agents.find((agent) => agent.name === 'unknown-agent')
 
   try {
     assert.equal(codex?.source, 'discovered')
     assert.equal(codex?.availableForSessions, true)
     assert.equal(codex?.healthy, true)
-    assert.equal(aider, undefined)
+    assert.equal(aider?.source, 'discovered')
+    assert.deepEqual(aider?.args, ['--message', '{prompt}'])
+    assert.equal(unknown, undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('production discovery auto-configures and verifies installed agents', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-agent-auto-config-'))
+  const command = writeExecutable(join(dir, 'codex'),
+    'if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi\necho TURING_READY',
+    'if "%~1"=="--version" (echo codex-test & exit /b 0)\necho TURING_READY'
+  )
+  setExtraAgentSearchPathsForTesting([dir])
+
+  try {
+    await withConfigHome(async () => {
+      writeConfig({ ...DEFAULT_CONFIG, agents: {} })
+      const catalog = new AgentCatalog({}, true, true)
+      await catalog.discover({ refresh: true })
+      await catalog.listAgents()
+      await waitFor(() => Boolean(loadConfig().agents.codex?.lastVerificationAttemptAt))
+      const saved = loadConfig().agents.codex
+
+      assert.equal(saved.command, command)
+      assert.equal(saved.autoDiscovered, true)
+      assert.equal(saved.lastVerifiedVersion, 'codex-test')
+    })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('production discovery migrates previously configured built-ins to automatic management', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-agent-auto-migrate-'))
+  const command = writeExecutable(join(dir, 'codex'), 'echo codex-test')
+  setExtraAgentSearchPathsForTesting([dir])
+
+  try {
+    await withConfigHome(async () => {
+      const codex = { adapter: 'codex' as const, command, args: ['exec', '{prompt}'], timeout: 60_000 }
+      writeConfig({ ...DEFAULT_CONFIG, agents: { codex } })
+      const catalog = new AgentCatalog({ codex }, true, true)
+      await catalog.discover({ refresh: true })
+
+      assert.equal(loadConfig().agents.codex.autoDiscovered, true)
+    })
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -411,6 +493,40 @@ test('configured local agent without persisted verification is unverified', asyn
 })
 
 // --- win32 extension resolution tests (run on any OS via platform injection) ---
+
+test('win32: discovers the full supported CLI agent set from npm-style .cmd shims', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-win32-agent-set-'))
+  const commands = [
+    'codex', 'claude', 'gemini', 'opencode', 'copilot', 'cursor-agent',
+    'qwen', 'cline', 'aider', 'droid', 'amp', 'openhands', 'vibe',
+  ]
+  for (const command of commands) {
+    writeExecutable(
+      join(dir, `${command}.cmd`),
+      'if [ "$1" = "--version" ]; then echo fake-agent-1.0; exit 0; fi\necho TURING_READY'
+    )
+  }
+  setExtraAgentSearchPathsForTesting([dir])
+  setPlatformForTesting('win32')
+
+  try {
+    const catalog = new AgentCatalog({}, true)
+    await catalog.discover({ refresh: true })
+    const discovered = await catalog.listAgents({ refresh: true })
+    const names = discovered.map((agent) => agent.name).sort()
+
+    assert.deepEqual(names, [
+      'aider', 'amp', 'claude-code', 'cline', 'codex', 'copilot',
+      'cursor-agent', 'droid', 'gemini-cli', 'mistral-vibe', 'opencode',
+      'openhands', 'qwen-code',
+    ])
+    assert.ok(discovered.every((agent) => agent.source === 'discovered'))
+    assert.ok(discovered.every((agent) => agent.healthy))
+    assert.ok(discovered.every((agent) => agent.command?.endsWith('.cmd')))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 
 test('win32: resolveCommand prefers .exe over .cmd and bare name', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-win32-exe-'))

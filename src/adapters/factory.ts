@@ -35,6 +35,15 @@ const DISCOVERED_DEFAULTS: Record<string, Omit<AgentConfig, 'command'>> = {
     args: ['-p', '{prompt}'],
     timeout: 600_000,
   },
+  'copilot-cli': { adapter: 'copilot-cli', args: ['-p', '{prompt}', '--silent'], timeout: 600_000 },
+  'cursor-agent': { adapter: 'cursor-agent', args: ['-p', '{prompt}', '--output-format', 'text'], timeout: 600_000 },
+  'qwen-code': { adapter: 'qwen-code', args: ['-p', '{prompt}', '--output-format', 'text'], timeout: 600_000 },
+  cline: { adapter: 'cline', args: ['{prompt}'], timeout: 600_000 },
+  aider: { adapter: 'aider', args: ['--message', '{prompt}'], timeout: 600_000 },
+  droid: { adapter: 'droid', args: ['exec', '--output-format', 'text', '{prompt}'], timeout: 600_000 },
+  amp: { adapter: 'amp', args: ['-x', '{prompt}'], timeout: 600_000 },
+  openhands: { adapter: 'openhands', args: ['--headless', '-t', '{prompt}'], timeout: 600_000 },
+  'mistral-vibe': { adapter: 'mistral-vibe', args: ['--prompt', '{prompt}', '--output', 'streaming'], timeout: 600_000 },
 }
 
 function pickEnv(keys: string[]): Record<string, string> | undefined {
@@ -91,6 +100,24 @@ export function createAdapter(agentCfg: AgentConfig): Adapter | undefined {
         args: agentCfg.args,
         timeout: agentCfg.timeout,
         env: agentCfg.env,
+      })
+      break
+    case 'copilot-cli':
+    case 'cursor-agent':
+    case 'qwen-code':
+    case 'cline':
+    case 'aider':
+    case 'droid':
+    case 'amp':
+    case 'openhands':
+    case 'mistral-vibe':
+      if (!agentCfg.command || !agentCfg.args) return undefined
+      adapter = new CustomCliAdapter({
+        command: agentCfg.command,
+        args: agentCfg.args,
+        timeout: agentCfg.timeout,
+        env: agentCfg.env,
+        permissionProfile: agentCfg.adapter,
       })
       break
     case 'anthropic-api':

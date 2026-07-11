@@ -252,7 +252,7 @@ async function serverStart() {
   validateExposureConfig(config)
   initDb(undefined, { messageRetentionMs: config.policy.messageRetentionMs })
   const router = new Router(config.policy)
-  const agentCatalog = new AgentCatalog(config.agents, true)
+  const agentCatalog = new AgentCatalog(config.agents, true, true)
   await agentCatalog.discover()
   registerConfiguredAdapters(router, agentCatalog.configuredAgentConfigs())
   registerBuiltinAdapters(router)

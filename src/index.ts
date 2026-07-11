@@ -19,7 +19,7 @@ async function main(): Promise<void> {
   // Build router with policy from config
   const router = new Router(config.policy)
   const agents = activeAgents(config)
-  const agentCatalog = new AgentCatalog(agents, true)
+  const agentCatalog = new AgentCatalog(agents, true, true)
   await agentCatalog.discover()
 
   // Register adapters based on config

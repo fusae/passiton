@@ -1,6 +1,6 @@
 import type { Adapter } from './types.js'
 import type { Session, AdapterSendOpts } from '../types.js'
-import { resolveCommandArgs } from './command-args.js'
+import { applyPermissionModeArgs, resolveCommandArgs } from './command-args.js'
 import { buildPrompt, runCommand } from './shared.js'
 
 export interface CustomCliAdapterConfig {
@@ -8,6 +8,7 @@ export interface CustomCliAdapterConfig {
   args: string[]
   timeout?: number
   env?: Record<string, string>
+  permissionProfile?: string
 }
 
 export class CustomCliAdapter implements Adapter {
@@ -17,18 +18,23 @@ export class CustomCliAdapter implements Adapter {
   private args: string[]
   private timeout: number
   private env: Record<string, string>
+  private permissionProfile: string
 
   constructor(cfg: CustomCliAdapterConfig) {
     this.command = cfg.command
     this.args = cfg.args
     this.timeout = cfg.timeout ?? 300_000
     this.env = cfg.env ?? {}
+    this.permissionProfile = cfg.permissionProfile ?? 'custom-cli'
     this.config = { command: this.command, args: this.args, timeout: this.timeout }
   }
 
   async send(session: Session, message: string, opts?: AdapterSendOpts): Promise<string> {
     const fullMessage = buildPrompt(message, opts)
-    const args = resolveCommandArgs(this.args, fullMessage)
+    const args = resolveCommandArgs(
+      applyPermissionModeArgs(this.permissionProfile, this.args, session.permissionMode),
+      fullMessage
+    )
     const raw = await runCommand({
       adapterName: this.name,
       command: this.command,

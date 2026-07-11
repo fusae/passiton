@@ -350,6 +350,17 @@ test('withHint adds actionable hints to common adapter failures', () => {
   assert.match(limited, /status: rate_limited/)
   assert.match(limited, /hit a usage or rate limit/)
   assert.match(limited, /2026-07-07 21:02:30/)
+
+  // 6. Claude Code emits quota failures as stream-json on stdout.
+  const claudeLimited = withHint(
+    'claude-code',
+    'claude',
+    1,
+    '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}\n{"type":"result","is_error":true,"api_error_status":429,"result":"You have hit your session limit"}',
+    '[claude-code] exited with code 1',
+    60_000
+  )
+  assert.match(claudeLimited, /status: rate_limited/)
 })
 
 function mockFetch(handler: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>): void {

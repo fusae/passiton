@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm, stat } from 'fs/promises'
+import { access, mkdtemp, readdir, rm, stat } from 'fs/promises'
 import { constants } from 'fs'
 import { delimiter, dirname, join, posix, win32 } from 'path'
 import { homedir, tmpdir } from 'os'
@@ -13,6 +13,7 @@ import type { Session } from './types.js'
 const execFileAsync = promisify(execFile)
 const HEALTH_CACHE_TTL_MS = 60_000
 const PERSISTED_VERIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1000
+const FAILED_VERIFICATION_RETRY_MS = 6 * 60 * 60 * 1000
 const AGENT_SMOKE_TIMEOUT_MS = 45_000
 
 // --- Platform injection (for testability) ---
@@ -55,6 +56,10 @@ export interface AgentInfo {
    */
   verified?: boolean
   version?: string
+  autoDiscovered?: boolean
+  verificationAttemptedAt?: number
+  verificationError?: string
+  verifying?: boolean
 }
 
 interface AgentEntry {
@@ -107,9 +112,15 @@ const DISCOVERY_PRESETS: DiscoveryPreset[] = [
   { name: 'claude-code', adapter: 'claude-code', commands: ['claude'], envVars: ['PASSITON_CLAUDE_COMMAND', 'TURING_CLAUDE_COMMAND'], supported: true },
   { name: 'gemini-cli', adapter: 'gemini-cli', commands: ['gemini'], envVars: ['PASSITON_GEMINI_COMMAND', 'TURING_GEMINI_COMMAND'], supported: true },
   { name: 'opencode', adapter: 'opencode', commands: ['opencode'], envVars: ['PASSITON_OPENCODE_COMMAND', 'TURING_OPENCODE_COMMAND'], supported: true },
-  // Other CLI agents (aider, goose, amp, cursor, windsurf, ...) are deliberately
-  // not auto-discovered. They have no bundled adapter yet; users who want one can
-  // register a custom adapter or contribute. See docs/community-adapters.md.
+  { name: 'copilot', adapter: 'copilot-cli', commands: ['copilot'], envVars: ['PASSITON_COPILOT_COMMAND'], supported: true },
+  { name: 'cursor-agent', adapter: 'cursor-agent', commands: ['cursor-agent'], envVars: ['PASSITON_CURSOR_COMMAND'], supported: true },
+  { name: 'qwen-code', adapter: 'qwen-code', commands: ['qwen'], envVars: ['PASSITON_QWEN_COMMAND'], supported: true },
+  { name: 'cline', adapter: 'cline', commands: ['cline'], envVars: ['PASSITON_CLINE_COMMAND'], supported: true },
+  { name: 'aider', adapter: 'aider', commands: ['aider', 'aider-chat'], envVars: ['PASSITON_AIDER_COMMAND'], supported: true },
+  { name: 'droid', adapter: 'droid', commands: ['droid'], envVars: ['PASSITON_DROID_COMMAND'], supported: true },
+  { name: 'amp', adapter: 'amp', commands: ['amp'], envVars: ['PASSITON_AMP_COMMAND'], supported: true },
+  { name: 'openhands', adapter: 'openhands', commands: ['openhands'], envVars: ['PASSITON_OPENHANDS_COMMAND'], supported: true },
+  { name: 'mistral-vibe', adapter: 'mistral-vibe', commands: ['vibe'], envVars: ['PASSITON_VIBE_COMMAND'], supported: true },
 ]
 
 export class AgentCatalog {
@@ -118,9 +129,11 @@ export class AgentCatalog {
   private backgroundProbeRuns = new Map<string, Promise<void>>()
   private diagnosticRuns = new Map<string, Promise<AgentDiagnostic | undefined>>()
   private localCliAgentsEnabled: boolean
+  private autoConfigureDiscovered: boolean
 
-  constructor(configuredAgents: Record<string, AgentConfig>, localCliAgentsEnabled = false) {
+  constructor(configuredAgents: Record<string, AgentConfig>, localCliAgentsEnabled = false, autoConfigureDiscovered = false) {
     this.localCliAgentsEnabled = localCliAgentsEnabled
+    this.autoConfigureDiscovered = autoConfigureDiscovered
     this.setConfiguredAgents(configuredAgents)
   }
 
@@ -155,14 +168,15 @@ export class AgentCatalog {
     }
 
     for (const preset of DISCOVERY_PRESETS) {
-      const commands = preset.adapter === 'codex'
-        ? [...preset.commands, ...getBundledCodexCandidates()]
-        : preset.commands
+      const commands = [...preset.commands, ...await getBundledAgentCandidates(preset.adapter)]
       const existing = this.entries.get(preset.name)
       if (existing?.source === 'configured') {
         const resolved = existing.command ? await resolveCommand(existing.command) : undefined
         if (resolved) {
           if (resolved !== existing.command) this.updateConfiguredCommand(existing, resolved)
+          if (this.autoConfigureDiscovered && !existing.config?.autoDiscovered) {
+            this.markAutoConfigured(existing)
+          }
           continue
         }
 
@@ -176,14 +190,27 @@ export class AgentCatalog {
       const command = await findExecutable(commands, preset.envVars)
       if (!command) continue
 
+      const discoveredConfig = createDiscoveredAgentConfig(preset.adapter, command)
+      if (!discoveredConfig) continue
+      const config: AgentConfig = this.autoConfigureDiscovered
+        ? { ...discoveredConfig, autoDiscovered: true }
+        : discoveredConfig
+      if (this.autoConfigureDiscovered) {
+        const current = loadConfig()
+        writeConfig({
+          ...current,
+          agents: { ...current.agents, [preset.name]: config },
+        })
+      }
+
       this.entries.set(preset.name, {
         name: preset.name,
         adapter: preset.adapter,
         command,
-        source: 'discovered',
+        source: this.autoConfigureDiscovered ? 'configured' : 'discovered',
         supported: preset.supported,
         availableForSessions: preset.supported,
-        config: createDiscoveredAgentConfig(preset.adapter, command),
+        config,
       })
     }
   }
@@ -200,6 +227,19 @@ export class AgentCatalog {
     entry.command = command
     entry.config = { ...entry.config!, command }
     this.probeCache.clear()
+  }
+
+  private markAutoConfigured(entry: AgentEntry): void {
+    if (!entry.config) return
+    const current = loadConfig()
+    const currentAgent = current.agents[entry.name]
+    if (!currentAgent) return
+    const nextAgent = { ...currentAgent, autoDiscovered: true }
+    writeConfig({
+      ...current,
+      agents: { ...current.agents, [entry.name]: nextAgent },
+    })
+    entry.config = nextAgent
   }
 
   registerDiscoveredAdapters(router: Router): void {
@@ -234,6 +274,12 @@ export class AgentCatalog {
         args: entry.config?.args,
         timeout: entry.config?.timeout,
         env: entry.config?.env,
+        autoDiscovered: entry.config?.autoDiscovered,
+        verificationAttemptedAt: entry.config?.lastVerificationAttemptAt,
+        verificationError: entry.config?.lastVerificationError,
+        verifying: this.backgroundProbeRuns.has(this.probeCacheKey(entry))
+          && entry.config?.autoDiscovered === true
+          && this.shouldRunAutomaticVerification(entry),
       }
     }))
   }
@@ -285,7 +331,7 @@ export class AgentCatalog {
       if (smokeProbe.healthy && versionProbe.version) {
         this.persistSuccessfulVerification(entry, versionProbe.version)
       } else {
-        this.clearPersistedVerification(entry)
+        this.persistFailedVerification(entry, smokeProbe.error ?? versionProbe.error ?? 'Agent verification failed')
       }
     }
     if (refresh) {
@@ -343,7 +389,7 @@ export class AgentCatalog {
       if (smokeProbe?.healthy && versionProbe.version) {
         this.persistSuccessfulVerification(entry, versionProbe.version)
       } else {
-        this.clearPersistedVerification(entry)
+        this.persistFailedVerification(entry, smokeProbe?.error ?? versionProbe.error ?? 'Agent verification failed')
       }
     }
     const value = {
@@ -385,9 +431,12 @@ export class AgentCatalog {
     const cacheKey = this.probeCacheKey(entry)
     if (this.backgroundProbeRuns.has(cacheKey)) return
 
+    const shouldVerify = entry.source === 'configured'
+      && entry.config?.autoDiscovered === true
+      && this.shouldRunAutomaticVerification(entry)
     const run = new Promise<void>((resolve) => {
       setTimeout(() => {
-        void this.probe(entry, false)
+        void this.probe(entry, shouldVerify)
           .catch(() => undefined)
           .finally(resolve)
       }, 0)
@@ -415,6 +464,19 @@ export class AgentCatalog {
     return age >= 0 && age <= PERSISTED_VERIFICATION_TTL_MS && lastVerifiedVersion === version
   }
 
+  private shouldRunAutomaticVerification(entry: AgentEntry): boolean {
+    const verifiedAt = entry.config?.lastVerifiedAt
+    if (typeof verifiedAt === 'number') {
+      const age = Date.now() - verifiedAt
+      if (age >= 0 && age <= PERSISTED_VERIFICATION_TTL_MS) return false
+    }
+
+    const attemptedAt = entry.config?.lastVerificationAttemptAt
+    if (typeof attemptedAt !== 'number') return true
+    const age = Date.now() - attemptedAt
+    return age < 0 || age > FAILED_VERIFICATION_RETRY_MS
+  }
+
   private persistSuccessfulVerification(entry: AgentEntry, version: string): void {
     if (entry.source !== 'configured' || !entry.config) return
     const current = loadConfig()
@@ -425,13 +487,34 @@ export class AgentCatalog {
       ...currentAgent,
       lastVerifiedAt: Date.now(),
       lastVerifiedVersion: version,
+      lastVerificationAttemptAt: Date.now(),
     }
+    delete nextAgent.lastVerificationError
     writeConfig({
       ...current,
       agents: {
         ...current.agents,
         [entry.name]: nextAgent,
       },
+    })
+    entry.config = nextAgent
+  }
+
+  private persistFailedVerification(entry: AgentEntry, error: string): void {
+    if (entry.source !== 'configured' || !entry.config) return
+    const current = loadConfig()
+    const currentAgent = current.agents[entry.name]
+    if (!currentAgent || currentAgent.adapter !== entry.adapter || currentAgent.command !== entry.command) return
+    const nextAgent = {
+      ...currentAgent,
+      lastVerificationAttemptAt: Date.now(),
+      lastVerificationError: error.slice(0, 1000),
+    }
+    delete nextAgent.lastVerifiedAt
+    delete nextAgent.lastVerifiedVersion
+    writeConfig({
+      ...current,
+      agents: { ...current.agents, [entry.name]: nextAgent },
     })
     entry.config = nextAgent
   }
@@ -493,6 +576,72 @@ export function getBundledCodexCandidates(
   }
 
   return []
+}
+
+export async function getBundledClaudeCandidates(
+  platform: string = currentPlatform(),
+  home: string = homedir(),
+  env: NodeJS.ProcessEnv = process.env
+): Promise<string[]> {
+  if (platform === 'darwin') {
+    const versionRoot = posix.join(home, 'Library', 'Application Support', 'Claude', 'claude-code')
+    return [
+      '/Applications/Claude.app/Contents/Resources/claude',
+      posix.join(home, 'Applications', 'Claude.app', 'Contents', 'Resources', 'claude'),
+      ...await versionedCandidates(versionRoot, posix.join('claude.app', 'Contents', 'MacOS', 'claude')),
+    ]
+  }
+
+  if (platform === 'win32') {
+    const roots = [
+      env.APPDATA && win32.join(env.APPDATA, 'Claude', 'claude-code'),
+      env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Claude', 'claude-code'),
+    ].filter((value): value is string => Boolean(value))
+    const versioned = (await Promise.all(roots.map((root) => versionedCandidates(root, 'claude.exe')))).flat()
+    return [
+      env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Programs', 'Claude', 'resources', 'claude.exe'),
+      env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Programs', 'Claude', 'claude.exe'),
+      ...versioned,
+    ].filter((value): value is string => Boolean(value))
+  }
+
+  return []
+}
+
+export function getBundledOpenCodeCandidates(
+  platform: string = currentPlatform(),
+  home: string = homedir(),
+  env: NodeJS.ProcessEnv = process.env
+): string[] {
+  if (platform === 'win32') {
+    return [
+      win32.join(home, '.opencode', 'bin', 'opencode.exe'),
+      win32.join(home, '.opencode', 'bin', 'opencode.cmd'),
+      env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'opencode', 'bin', 'opencode.exe'),
+    ].filter((value): value is string => Boolean(value))
+  }
+  return [join(home, '.opencode', 'bin', 'opencode')]
+}
+
+async function getBundledAgentCandidates(adapter: string): Promise<string[]> {
+  switch (adapter) {
+    case 'codex': return getBundledCodexCandidates()
+    case 'claude-code': return getBundledClaudeCandidates()
+    case 'opencode': return getBundledOpenCodeCandidates()
+    default: return []
+  }
+}
+
+async function versionedCandidates(root: string, executableSuffix: string): Promise<string[]> {
+  try {
+    const versions = (await readdir(root, { withFileTypes: true }))
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+    return versions.map((version) => join(root, version, executableSuffix))
+  } catch {
+    return []
+  }
 }
 
 export function setExtraAgentSearchPathsForTesting(entries: string[]): void {
@@ -569,6 +718,11 @@ function staticSearchPathEntries(): string[] {
     join(home, 'bin'),
     join(home, '.npm-global', 'bin'),
     join(home, '.npm', 'bin'),
+    join(home, '.opencode', 'bin'),
+    join(home, '.volta', 'bin'),
+    join(home, '.asdf', 'shims'),
+    join(home, '.local', 'share', 'mise', 'shims'),
+    join(home, '.local', 'share', 'pnpm'),
     join(home, '.bun', 'bin'),
     join(home, '.deno', 'bin'),
     join(home, '.cargo', 'bin'),
@@ -587,6 +741,10 @@ function staticSearchPathEntries(): string[] {
 
   if (platform === 'win32') {
     if (process.env.APPDATA) entries.push(join(process.env.APPDATA, 'npm'))
+    if (process.env.LOCALAPPDATA) entries.push(join(process.env.LOCALAPPDATA, 'pnpm'))
+    if (process.env.PNPM_HOME) entries.push(process.env.PNPM_HOME)
+    if (process.env.VOLTA_HOME) entries.push(join(process.env.VOLTA_HOME, 'bin'))
+    if (process.env.NVM_SYMLINK) entries.push(process.env.NVM_SYMLINK)
     entries.push(join(home, 'scoop', 'shims'))
     if (process.env.ProgramData) entries.push(join(process.env.ProgramData, 'chocolatey', 'bin'))
     if (process.env.LOCALAPPDATA) {
@@ -641,9 +799,38 @@ function getExecutableExtensions(): string[] {
 async function getSearchPathEntries(): Promise<string[]> {
   if (searchPathCache) return searchPathCache
 
-  const entries = [...staticSearchPathEntries(), ...await packageManagerBins()]
+  const entries = [
+    ...staticSearchPathEntries(),
+    ...await loginShellPathEntries(),
+    ...await versionManagerBins(),
+    ...await packageManagerBins(),
+  ]
   searchPathCache = Array.from(new Set(entries.filter(Boolean)))
   return searchPathCache
+}
+
+async function loginShellPathEntries(): Promise<string[]> {
+  if (currentPlatform() === 'win32' || process.platform === 'win32') return []
+  const shell = process.env.SHELL || '/bin/sh'
+  try {
+    const marker = '__PASSITON_PATH__'
+    const { stdout } = await execFileAsync(shell, ['-lic', `printf "\\n${marker}%s" "$PATH"`], { timeout: 3_000 })
+    const pathValue = String(stdout).split(marker).at(-1)?.trim() ?? ''
+    return pathValue.split(delimiter).filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+async function versionManagerBins(): Promise<string[]> {
+  const home = homedir()
+  if (currentPlatform() === 'win32') return []
+  const roots: Array<[string, string]> = [
+    [join(home, '.nvm', 'versions', 'node'), 'bin'],
+    [join(home, '.fnm', 'node-versions'), join('installation', 'bin')],
+    [join(home, 'Library', 'Application Support', 'fnm', 'node-versions'), join('installation', 'bin')],
+  ]
+  return (await Promise.all(roots.map(([root, suffix]) => versionedCandidates(root, suffix)))).flat()
 }
 
 async function packageManagerBins(): Promise<string[]> {
