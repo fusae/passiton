@@ -73,6 +73,32 @@ test('PASSITON_HOME isolates the data directory', () => {
   }
 })
 
+test('loadConfig validates local CLI agent priority', () => {
+  const savedHome = process.env.PASSITON_HOME
+  const tempDir = mkdtempSync(join(tmpdir(), 'turing-priority-test-'))
+  process.env.PASSITON_HOME = tempDir
+  try {
+    mkdirSync(tempDir, { recursive: true })
+    writeFileSync(join(tempDir, 'config.json'), JSON.stringify({
+      ...DEFAULT_CONFIG,
+      agents: {
+        codex: {
+          ...LOCAL_CLI_AGENT_DEFAULTS.codex,
+          priority: 0,
+        },
+      },
+    }))
+    assert.throws(() => loadConfig(), /agents\.codex\.priority.*positive integer/)
+  } finally {
+    if (savedHome === undefined) {
+      delete process.env.PASSITON_HOME
+    } else {
+      process.env.PASSITON_HOME = savedHome
+    }
+    rmSync(tempDir, { recursive: true, force: true })
+  }
+})
+
 test('TURING_HOME remains a data directory fallback', () => {
   const savedPassitonHome = process.env.PASSITON_HOME
   const savedTuringHome = process.env.TURING_HOME

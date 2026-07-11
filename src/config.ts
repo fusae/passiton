@@ -190,6 +190,9 @@ function validateConfig(config: AppConfig): AppConfig {
     if (agent.timeout !== undefined) {
       assertPositiveInt(agent.timeout, `agents.${name}.timeout`)
     }
+    if (agent.priority !== undefined) {
+      assertPositiveInt(agent.priority, `agents.${name}.priority`)
+    }
 
     if (agent.model !== undefined) {
       assertNonEmptyString(agent.model, `agents.${name}.model`)

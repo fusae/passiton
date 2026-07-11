@@ -135,6 +135,10 @@ const MESSAGES = {
     'settings.localCli.addCustom': '+ Add custom agent',
     'settings.localCli.add': 'Add',
     'settings.localCli.diagnose': 'Diagnose',
+    'settings.localCli.priority': 'Priority',
+    'settings.localCli.priorityHelp': 'Lower runs first',
+    'settings.localCli.moveUp': 'Move up',
+    'settings.localCli.moveDown': 'Move down',
 
     // Settings — Agents tab extras
     'settings.agents.workspacesHint': 'Security boundary: directories CLI agents may operate in',
@@ -426,6 +430,7 @@ const MESSAGES = {
     'task_modal_desc': 'Assign one lead agent to run the workflow.',
     'task_modal_no_agents': 'No assistants configured yet.',
     'task_modal_add_one': 'Add one first',
+    'task_modal_auto_agent': 'Auto (highest priority)',
     'task_modal_working_dir': 'Working Directory',
     'task_modal_working_dir_placeholder': '/path/to/project',
     'task_modal_prompt_placeholder': 'Describe the task...',
@@ -876,6 +881,10 @@ const MESSAGES = {
     'settings.localCli.addCustom': '+ 添加自定义代理',
     'settings.localCli.add': '添加',
     'settings.localCli.diagnose': '诊断',
+    'settings.localCli.priority': '优先级',
+    'settings.localCli.priorityHelp': '数字越小越优先',
+    'settings.localCli.moveUp': '上移',
+    'settings.localCli.moveDown': '下移',
 
     // Settings — Agents tab extras
     'settings.agents.workspacesHint': '安全边界：CLI 代理可操作的目录范围',
@@ -1090,6 +1099,7 @@ const MESSAGES = {
     'task_modal_desc': '分配一个主 Agent 来运行工作流。',
     'task_modal_no_agents': '暂无已配置的助手。',
     'task_modal_add_one': '先添加一个',
+    'task_modal_auto_agent': '自动（最高优先级）',
     'task_modal_working_dir': '工作目录',
     'task_modal_working_dir_placeholder': '/path/to/project',
     'task_modal_prompt_placeholder': '描述任务...',
@@ -5651,7 +5661,10 @@ function renderApiKeysList() {
 function renderLocalCliAgentsList() {
   const container = document.getElementById('local-cli-list')
   if (!container) return
-  const agents = state.agents.filter(agent => agent.kind === 'local')
+  const localAgents = state.agents.filter(agent => agent.kind === 'local')
+  const configuredAgents = sortAgentsByPriority(localAgents.filter(agent => agent.source === 'configured'))
+  const discoveredAgents = sortAgentsByPriority(localAgents.filter(agent => agent.source !== 'configured'))
+  const agents = [...configuredAgents, ...discoveredAgents]
   if (agents.length === 0) {
     container.innerHTML = `
       <div class="empty-state">
@@ -5675,6 +5688,12 @@ function renderLocalCliAgentsList() {
         <div class="agent-model">${escapeHtml(agent.adapter)} · ${escapeHtml(agent.command || '')}${agent.version ? ` · ${escapeHtml(agent.version)}` : ''}</div>
       </div>
       <span class="badge badge-${badgeClass}">${escapeHtml(statusLabel(agent.status))}</span>
+      ${canDelete ? `
+        <div class="priority-reorder">
+          <button class="btn btn-ghost btn-sm priority-arrow" ${configuredAgents[0]?.name === agent.name ? 'disabled' : ''} aria-label="${escapeAttr(t('settings.localCli.moveUp'))}" title="${escapeAttr(t('settings.localCli.moveUp'))}" onclick='window.moveLocalCliAgentPriority(${jsString(agent.name)}, "up")'>&uarr;</button>
+          <button class="btn btn-ghost btn-sm priority-arrow" ${configuredAgents[configuredAgents.length - 1]?.name === agent.name ? 'disabled' : ''} aria-label="${escapeAttr(t('settings.localCli.moveDown'))}" title="${escapeAttr(t('settings.localCli.moveDown'))}" onclick='window.moveLocalCliAgentPriority(${jsString(agent.name)}, "down")'>&darr;</button>
+        </div>
+      ` : ''}
       <div class="agent-actions">
         ${canAdd ? `<button class="btn btn-primary btn-sm" onclick='window.addLocalCliAgent(${jsString(agent.name)})'>${t('settings.localCli.add')}</button>` : ''}
         <button class="btn btn-ghost btn-sm" ${diagnosing ? 'disabled' : ''} onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>${diagnosing ? t('modal.agentDiagnostics.running') : t('settings.localCli.diagnose')}</button>
@@ -5683,6 +5702,18 @@ function renderLocalCliAgentsList() {
       </div>
     </div>
   `}).join('')
+}
+
+function localCliAgentUpdateBody(agent, priority) {
+  return compactObject({
+    name: agent.name,
+    adapter: agent.adapter,
+    command: agent.command,
+    args: agent.args,
+    timeout: agent.timeout,
+    priority,
+    env: agent.env,
+  })
 }
 
 window.addLocalCliAgent = async function(name) {
@@ -5709,6 +5740,32 @@ window.addLocalCliAgent = async function(name) {
   } catch (err) {
     showToast(err.message)
     window.showLocalCliAgentDiagnostics(name, err.message)
+  }
+}
+
+window.moveLocalCliAgentPriority = async function(name, direction) {
+  const configuredAgents = sortAgentsByPriority(state.agents.filter(agent => agent.kind === 'local' && agent.source === 'configured'))
+  const fromIndex = configuredAgents.findIndex(agent => agent.name === name)
+  const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1
+  if (fromIndex < 0 || toIndex < 0 || toIndex >= configuredAgents.length) return
+
+  const reorderedAgents = [...configuredAgents]
+  ;[reorderedAgents[fromIndex], reorderedAgents[toIndex]] = [reorderedAgents[toIndex], reorderedAgents[fromIndex]]
+  const updates = reorderedAgents
+    .map((agent, index) => ({ agent, priority: index + 1 }))
+    .filter(({ agent, priority }) => agentPriority(agent) !== priority)
+
+  if (updates.length === 0) return
+
+  try {
+    const configs = await Promise.all(updates.map(({ agent, priority }) =>
+      api(`/api/config/agents/${encodeURIComponent(agent.name)}`, 'PUT', localCliAgentUpdateBody(agent, priority))
+    ))
+    state.config = configs[configs.length - 1] || state.config
+    await loadAgents()
+    renderLocalCliAgentsList()
+  } catch (err) {
+    showToast(err.message)
   }
 }
 
@@ -5858,12 +5915,9 @@ window.showLocalCliAgentModal = function(name) {
           <label>${t('common.args')}</label>
           <textarea class="input" name="args" rows="3">${escapeHtml((agent.args || []).join('\\n'))}</textarea>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>${t('common.timeout')}</label>
-            <input class="input" name="timeout" type="number" min="1" value="${escapeAttr(agent.timeout || '')}">
-          </div>
-          <div></div>
+        <div class="form-group">
+          <label>${t('common.timeout')}</label>
+          <input class="input" name="timeout" type="number" min="1" value="${escapeAttr(agent.timeout || '')}">
         </div>
         <div class="form-group">
           <label>${t('common.env')}</label>
@@ -5932,6 +5986,7 @@ window.saveCustomCliAgent = async function(e) {
     command: String(fd.get('command') || '').trim(),
     args,
     timeout: parseInt(fd.get('timeout')) || undefined,
+    priority: parseInt(fd.get('priority')) || undefined,
     env: parseEnvLines(String(fd.get('env') || '')),
   })
   try {
@@ -6085,8 +6140,8 @@ window.showNewSessionModal = async function(templateId = 'custom') {
   if (!state.templates.length) await loadTemplates()
   if (!state.agents.length) await loadAgents()
   const template = state.templates.find(item => item.id === templateId) || state.templates.find(item => item.id === 'custom')
-  const readyAgents = state.agents.filter(agent => agent.status === 'ready')
-  const agents = readyAgents.length ? readyAgents : state.agents
+  const readyAgents = sortAgentsByPriority(state.agents.filter(agent => agent.status === 'ready'))
+  const agents = readyAgents.length ? readyAgents : sortAgentsByPriority(state.agents)
   const defaultFrom = preferredAgentName(agents, template?.config?.preferredAdapters?.from)
   const defaultTo = preferredAgentName(agents, template?.config?.preferredAdapters?.to, defaultFrom)
   const optionHtml = (selected) => agentOptionHtml(agents, selected)
@@ -6233,10 +6288,11 @@ window.createSession = async function(e) {
 
 window.showNewTaskModal = async function() {
   if (!state.agents.length) await loadAgents()
-  const readyAgents = state.agents.filter(agent => agent.status === 'ready')
-  const agents = readyAgents.length ? readyAgents : state.agents
+  const acceptedAgents = state.agents.filter(taskAgentAccepted)
+  const readyAgents = acceptedAgents.filter(agent => agent.status === 'ready')
+  const agents = sortAgentsByPriority(readyAgents.length ? readyAgents : acceptedAgents.filter(agent => agent.status === 'unverified'))
   const noAgents = agents.length === 0
-  const options = agentOptionHtml(agents)
+  const options = `<option value="__auto__" selected>${t('task_modal_auto_agent')}</option>${agentOptionHtml(agents)}`
 
   showModal(`
     <div class="modal-card">
@@ -6299,12 +6355,12 @@ window.createTask = async function(e) {
   const fd = new FormData(e.target)
   const cwd = String(fd.get('cwd') || '').trim()
   const agentName = String(fd.get('agent') || '')
-  if (cwd && !agentHasFilesystem(agentName)) {
+  if (cwd && agentName !== '__auto__' && !agentHasFilesystem(agentName)) {
     showToast(t('task_modal_cwd_requires_filesystem'))
     return
   }
   const body = {
-    agent: { adapter: fd.get('agent') },
+    agent: agentName === '__auto__' ? undefined : { adapter: agentName },
     prompt: String(fd.get('prompt') || '').trim(),
     cwd: cwd || undefined,
     context: buildContextFromForm(fd),
@@ -6349,7 +6405,7 @@ window.showTaskHandoffModal = async function() {
   const task = state.currentTask
   if (!task) return
   if (!state.agents.length) await loadAgents()
-  const agents = state.agents.filter(agent => taskAgentAccepted(agent) && (!task.cwd || agentHasFilesystem(agent.name)))
+  const agents = sortAgentsByPriority(state.agents.filter(agent => taskAgentAccepted(agent) && (!task.cwd || agentHasFilesystem(agent.name))))
   const noAgents = agents.length === 0
   showModal(`
     <div class="modal-card">
@@ -6499,8 +6555,8 @@ window.showNewWorkflowModal = async function() {
   if (!state.config) await loadConfig()
   if (!state.agents.length) await loadAgents()
   if (!state.pipelineTemplates.length) await loadPipelineTemplates()
-  const readyAgents = state.agents.filter(agent => agent.status === 'ready')
-  const agents = readyAgents.length ? readyAgents : state.agents
+  const readyAgents = sortAgentsByPriority(state.agents.filter(agent => agent.status === 'ready'))
+  const agents = readyAgents.length ? readyAgents : sortAgentsByPriority(state.agents)
   const noAgents = agents.length === 0
   const defaultFrom = agents[0]?.name || ''
   const defaultTo = agents[1]?.name || agents[0]?.name || ''
@@ -7867,12 +7923,20 @@ function taskAgentAccepted(agent) {
   return agent.status !== 'invalid' && agent.status !== 'no_key'
 }
 
+function agentPriority(agent) {
+  return Number.isInteger(agent?.priority) ? agent.priority : 1000
+}
+
+function sortAgentsByPriority(agents) {
+  return [...agents].sort((a, b) => agentPriority(a) - agentPriority(b) || (String(a.name) < String(b.name) ? -1 : String(a.name) > String(b.name) ? 1 : 0))
+}
+
 function agentCapabilityLabel(agent) {
   return agent.kind === 'local' ? 'Filesystem' : 'No filesystem'
 }
 
 function agentOptionHtml(agents, selected = '', opts = {}) {
-  return agents.map(agent => `
+  return sortAgentsByPriority(agents).map(agent => `
     <option value="${escapeAttr(agent.name)}" ${agent.name === selected ? 'selected' : ''}>
       ${escapeHtml(agent.name)} · ${escapeHtml(agent.model || agent.adapter)}${opts.includeStatus ? ` · ${escapeHtml(statusLabel(agent.status))}` : ''} · ${agentCapabilityLabel(agent)}
     </option>

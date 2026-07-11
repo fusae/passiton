@@ -468,6 +468,7 @@ export interface AgentConfig {
   command?: string
   args?: string[]
   timeout?: number
+  priority?: number
   model?: string
   apiKey?: string
   baseUrl?: string
@@ -492,6 +493,7 @@ export interface ApiAgentInfo {
   command?: string
   args?: string[]
   timeout?: number
+  priority?: number
   env?: Record<string, string>
   version?: string
 }

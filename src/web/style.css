@@ -2938,6 +2938,26 @@ textarea.input { resize: vertical; min-height: 80px; }
   margin-bottom: 18px;
 }
 
+.priority-reorder {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.priority-arrow {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  line-height: 1;
+}
+
+.priority-arrow:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* ── Onboarding (first-run, shown in place of empty session list) ───────────── */
 .onboarding-panel {
   max-width: 620px;

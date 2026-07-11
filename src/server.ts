@@ -545,6 +545,7 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
     throw new HttpError(400, '"adapter" must be one of claude-code, codex, gemini-cli, opencode, custom-cli')
   }
   const env = parseEnv(data.env, 'env')
+  const priority = optionalAgentPriority(data.priority)
   if (adapter === 'custom-cli') {
     const args = requireStringArray(data.args, 'args')
     if (!args.some((arg) => arg.includes('{prompt}'))) {
@@ -559,6 +560,7 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
         command,
         args,
         timeout,
+        ...(priority !== undefined ? { priority } : existing?.priority !== undefined ? { priority: existing.priority } : {}),
         ...(env && Object.keys(env).length > 0 ? { env } : {}),
       },
     }
@@ -581,11 +583,20 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
       ...defaults,
       args,
       timeout,
+      ...(priority !== undefined ? { priority } : existing?.priority !== undefined ? { priority: existing.priority } : {}),
       model: existing && existing.adapter === adapter ? existing.model : defaults.model,
       command,
       ...(finalEnv && Object.keys(finalEnv).length > 0 ? { env: finalEnv } : {}),
     },
   }
+}
+
+function optionalAgentPriority(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new HttpError(400, '"priority" must be a positive integer; lower = higher priority (1 is first choice)')
+  }
+  return value
 }
 
 function parseApiAgentConfigBody(body: unknown, existing?: state.UserAgentRecord): {
@@ -865,7 +876,7 @@ async function listAgentModels(
     ...userApi,
     ...globalApi.filter((agent) => !userNames.has(agent.name)),
   ]
-  if (!agentCatalog) return apiAgents
+  if (!agentCatalog) return sortAgentsByPriority(apiAgents)
 
   const takenNames = new Set(apiAgents.map((agent) => agent.name))
   const localAgents = (await agentCatalog.listAgents({ refresh: opts.refresh }))
@@ -886,14 +897,15 @@ async function listAgentModels(
         command: agent.command,
         args: cfg?.args ?? agent.args,
         timeout: cfg?.timeout ?? agent.timeout,
+        priority: cfg?.priority,
         env: cfg?.env ?? agent.env,
         version: agent.version,
       }
     })
-  return [
+  return sortAgentsByPriority([
     ...apiAgents,
     ...localAgents,
-  ]
+  ])
 }
 
 function apiAgentInfoFromConfig(name: string, cfg: AgentConfig): ApiAgentInfo {
@@ -912,6 +924,7 @@ function apiAgentInfoFromConfig(name: string, cfg: AgentConfig): ApiAgentInfo {
     error: smoke?.error,
     checkedAt: smoke?.checkedAt,
     kind: 'api',
+    priority: cfg.priority,
   }
 }
 
@@ -1293,7 +1306,7 @@ function parseTaskBody(body: unknown) {
   const data = requireRecord(body, 'body')
   return {
     idempotencyKey: optionalString(data.idempotencyKey, 'idempotencyKey'),
-    agent: parseAgentRef(data.agent, 'agent'),
+    agent: data.agent === undefined ? undefined : parseAgentRef(data.agent, 'agent'),
     prompt: requireNonEmptyString(data.prompt, 'prompt'),
     context: parseSessionContext(data.context, 'context'),
     systemPrompt: optionalString(data.systemPrompt, 'systemPrompt'),
@@ -1318,6 +1331,30 @@ async function assertTaskAgentAccepted(userId: string, router: Router, agentCata
   if (target.status === 'invalid' || target.status === 'no_key') {
     throw new HttpError(400, `Agent is not usable: ${agent.adapter}`)
   }
+}
+
+function agentPriority(agent: Pick<ApiAgentInfo, 'name' | 'priority'>): number {
+  return agent.priority ?? 1000
+}
+
+function sortAgentsByPriority<T extends Pick<ApiAgentInfo, 'name' | 'priority'>>(agents: T[]): T[] {
+  return [...agents].sort((a, b) => agentPriority(a) - agentPriority(b) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+}
+
+async function selectDefaultTaskAgent(userId: string, agentCatalog: AgentCatalog, cwd?: string): Promise<AgentRef> {
+  const agents = await listAgentModels(userId, agentCatalog)
+  const accepted = agents.filter((agent) => {
+    if (agent.status === 'invalid' || agent.status === 'no_key' || agent.status === 'discovered') return false
+    if (cwd && !agentHasFilesystem(userId, { adapter: agent.name })) return false
+    return true
+  })
+  const ready = accepted.filter((agent) => agent.status === 'ready')
+  const candidates = ready.length ? ready : accepted.filter((agent) => agent.status === 'unverified')
+  const selected = sortAgentsByPriority(candidates)[0]
+  if (!selected) {
+    throw new HttpError(400, 'No agent specified and no usable agent found. Configure an agent in Settings > Agents or pass "agent": {"adapter": "<name>"}.')
+  }
+  return { adapter: selected.name }
 }
 
 function buildTaskHandoffPrompt(source: Task): string {
@@ -1895,10 +1932,11 @@ async function mcpCreateTask(args: unknown, ctx: McpContext): Promise<unknown> {
   const params = parseTaskBody(normalizeTaskArgs(args))
   assertAllowedWorkspace(params.cwd)
   assertPermissionModeAllowed(params.permissionMode, params.cwd)
-  assertTaskFilesystemCapability(ctx.authUser.userId, params.agent, params.cwd)
-  await assertMcpAgentUsable(ctx, params.agent, 'agent')
+  const agent = params.agent ?? await selectDefaultTaskAgent(ctx.authUser.userId, ctx.agentCatalog, params.cwd)
+  assertTaskFilesystemCapability(ctx.authUser.userId, agent, params.cwd)
+  await assertMcpAgentUsable(ctx, agent, 'agent')
   const context = resolveSessionContext(params.context, params.cwd)
-  const existing = findReusableMcpTask(ctx.authUser.userId, { ...params, context })
+  const existing = findReusableMcpTask(ctx.authUser.userId, { ...params, agent, context })
   if (existing) {
     return {
       task: summarizeTask(existing),
@@ -1910,6 +1948,7 @@ async function mcpCreateTask(args: unknown, ctx: McpContext): Promise<unknown> {
   const task = ctx.router.startTask({
     userId: ctx.authUser.userId,
     ...params,
+    agent,
     context,
   })
   return {
@@ -2761,6 +2800,7 @@ function sessionApiDocs() {
     createTask: {
       method: 'POST',
       path: '/api/tasks',
+      description: 'If "agent" is omitted, Passiton selects the highest-priority usable agent (lower priority number first, ready before unverified, name tie-break).',
       body: {
         agent: { adapter: 'opencode' },
         prompt: 'Write the article from this brief...',
@@ -3709,10 +3749,12 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         const params = parseTaskBody(await parseBody(req))
         assertAllowedWorkspace(params.cwd)
         assertPermissionModeAllowed(params.permissionMode, params.cwd)
-        await assertTaskAgentAccepted(authUser!.userId, router, agentCatalog, params.agent, params.cwd)
+        const agent = params.agent ?? await selectDefaultTaskAgent(authUser!.userId, agentCatalog, params.cwd)
+        await assertTaskAgentAccepted(authUser!.userId, router, agentCatalog, agent, params.cwd)
         const task = router.startTask({
           userId: authUser!.userId,
           ...params,
+          agent,
           context: resolveSessionContext(params.context, params.cwd),
         })
         return json(res, 201, task)

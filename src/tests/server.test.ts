@@ -16,6 +16,8 @@ import type { Adapter, AdapterSendOpts, Session } from '../types.js'
 import { encryptSecret } from '../keyvault.js'
 
 class StubAgentCatalog {
+  constructor(private readonly agents?: unknown[]) {}
+
   setLocalCliAgentsEnabled(): void {}
 
   setConfiguredAgents(): void {}
@@ -29,7 +31,7 @@ class StubAgentCatalog {
   }
 
   async listAgents(): Promise<unknown[]> {
-    return [
+    return this.agents ?? [
       {
         name: 'codex',
         adapter: 'codex',
@@ -77,7 +79,7 @@ class StubAdapter implements Adapter {
 
 async function withServer(
   fn: (baseUrl: string) => Promise<void>,
-  options: { allowRegistration?: boolean; configureRouter?: (router: Router) => void } = { allowRegistration: true }
+  options: { allowRegistration?: boolean; configureRouter?: (router: Router) => void; agentCatalog?: StubAgentCatalog } = { allowRegistration: true }
 ): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'turing-server-'))
   const originalEnv = {
@@ -98,7 +100,7 @@ async function withServer(
   state.initDb(join(dir, 'turing.db'))
   const router = new Router()
   options.configureRouter?.(router)
-  const server = createServer(router, 0, new StubAgentCatalog() as never)
+  const server = createServer(router, 0, (options.agentCatalog ?? new StubAgentCatalog()) as never)
   await once(server, 'listening')
   const address = server.address()
   if (!address || typeof address === 'string') {
@@ -427,6 +429,7 @@ test('POST /api/config/agents accepts custom CLI agent config', async () => {
         args: ['-e', 'process.stdout.write(process.argv[1])', '{prompt}'],
         env: { PASSITON_CUSTOM_TEST: '1' },
         timeout: 10_000,
+        priority: 2,
       }),
     })
 
@@ -434,6 +437,7 @@ test('POST /api/config/agents accepts custom CLI agent config', async () => {
     const payload = await response.json() as Record<string, any>
     assert.equal(payload.agents[name].adapter, 'custom-cli')
     assert.deepEqual(payload.agents[name].args, ['-e', 'process.stdout.write(process.argv[1])', '{prompt}'])
+    assert.equal(payload.agents[name].priority, 2)
   })
 })
 
@@ -465,6 +469,20 @@ test('POST /api/config/agents rejects invalid custom CLI config', async () => {
     })
     assert.equal(emptyCommand.status, 400)
     assert.match(await emptyCommand.text(), /command/)
+
+    const invalidPriority = await fetch(`${baseUrl}/api/config/agents`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: 'invalid-priority',
+        adapter: 'custom-cli',
+        command: process.execPath,
+        args: ['{prompt}'],
+        priority: 0,
+      }),
+    })
+    assert.equal(invalidPriority.status, 400)
+    assert.match(await invalidPriority.text(), /priority.*positive integer.*lower = higher priority/i)
   })
 })
 
@@ -772,6 +790,152 @@ test('POST /api/tasks runs a lead-agent task and exposes its result', async () =
       }))
     },
   })
+})
+
+test('POST /api/tasks without agent picks the highest-priority ready agent', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'tasks-default-ready@example.com')
+    for (const item of [
+      { name: 'slow-agent', priority: 5 },
+      { name: 'fast-agent', priority: 1 },
+    ]) {
+      const response = await fetch(`${baseUrl}/api/config/agents`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: item.name,
+          adapter: 'custom-cli',
+          command: process.execPath,
+          args: ['{prompt}'],
+          priority: item.priority,
+        }),
+      })
+      assert.equal(response.status, 201)
+    }
+
+    const create = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'default agent' }),
+    })
+    assert.equal(create.status, 201)
+    const task = await create.json() as { agent: { adapter: string } }
+    assert.equal(task.agent.adapter, 'fast-agent')
+  }, {
+    configureRouter: (router) => {
+      router.registerAdapter(new StubAdapter('fast-agent', async () => '[RESULT]fast[/RESULT]'))
+      router.registerAdapter(new StubAdapter('slow-agent', async () => '[RESULT]slow[/RESULT]'))
+    },
+    agentCatalog: new StubAgentCatalog([
+      { name: 'slow-agent', adapter: 'custom-cli', source: 'configured', healthy: true, verified: true, availableForSessions: true, command: process.execPath },
+      { name: 'fast-agent', adapter: 'custom-cli', source: 'configured', healthy: true, verified: true, availableForSessions: true, command: process.execPath },
+    ]),
+  })
+})
+
+test('POST /api/tasks without agent falls back to unverified when no ready agent', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'tasks-default-unverified@example.com')
+    for (const item of [
+      { name: 'unverified-b', priority: 4 },
+      { name: 'unverified-a', priority: 2 },
+    ]) {
+      const response = await fetch(`${baseUrl}/api/config/agents`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: item.name,
+          adapter: 'custom-cli',
+          command: process.execPath,
+          args: ['{prompt}'],
+          priority: item.priority,
+        }),
+      })
+      assert.equal(response.status, 201)
+    }
+
+    const create = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'default unverified' }),
+    })
+    assert.equal(create.status, 201)
+    const task = await create.json() as { agent: { adapter: string } }
+    assert.equal(task.agent.adapter, 'unverified-a')
+  }, {
+    configureRouter: (router) => {
+      router.registerAdapter(new StubAdapter('unverified-a', async () => '[RESULT]a[/RESULT]'))
+      router.registerAdapter(new StubAdapter('unverified-b', async () => '[RESULT]b[/RESULT]'))
+    },
+    agentCatalog: new StubAgentCatalog([
+      { name: 'unverified-b', adapter: 'custom-cli', source: 'configured', healthy: true, verified: false, availableForSessions: true, command: process.execPath },
+      { name: 'unverified-a', adapter: 'custom-cli', source: 'configured', healthy: true, verified: false, availableForSessions: true, command: process.execPath },
+    ]),
+  })
+})
+
+test('POST /api/tasks without agent returns 400 when none usable', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'tasks-default-none@example.com')
+    const response = await fetch(`${baseUrl}/api/tasks`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'no agent' }),
+    })
+    assert.equal(response.status, 400)
+    assert.match(await response.text(), /No agent specified and no usable agent found/)
+  }, {
+    agentCatalog: new StubAgentCatalog([
+      { name: 'broken-agent', adapter: 'custom-cli', source: 'configured', healthy: false, verified: false, availableForSessions: false, command: process.execPath },
+    ]),
+  })
+})
+
+test('POST /api/tasks without agent skips non-filesystem candidates for cwd tasks', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'turing-default-cwd-'))
+  try {
+    await withServer(async (baseUrl) => {
+      const auth = await register(baseUrl, 'tasks-default-cwd@example.com')
+      const local = await fetch(`${baseUrl}/api/config/agents`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'zzz-local',
+          adapter: 'custom-cli',
+          command: process.execPath,
+          args: ['{prompt}'],
+          priority: 10,
+        }),
+      })
+      assert.equal(local.status, 201)
+      state.createUserAgent({
+        id: 'default-cwd-api-agent',
+        userId: auth.userId,
+        name: 'aaa-api',
+        adapter: 'openai-api',
+        model: 'gpt-test',
+        ...encryptSecret(auth.userId, 'sk-test'),
+      })
+
+      const create = await fetch(`${baseUrl}/api/tasks`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'cwd default', cwd }),
+      })
+      assert.equal(create.status, 201)
+      const task = await create.json() as { agent: { adapter: string } }
+      assert.equal(task.agent.adapter, 'zzz-local')
+    }, {
+      configureRouter: (router) => {
+        router.registerAdapter(new StubAdapter('zzz-local', async () => '[RESULT]local[/RESULT]'))
+      },
+      agentCatalog: new StubAgentCatalog([
+        { name: 'zzz-local', adapter: 'custom-cli', source: 'configured', healthy: true, verified: false, availableForSessions: true, command: process.execPath },
+      ]),
+    })
+  } finally {
+    rmSync(cwd, { recursive: true, force: true })
+  }
 })
 
 test('POST /api/tasks/:id/handoff creates a continuation task from an errored cwd task', async () => {
@@ -1318,9 +1482,10 @@ test('agent CRUD stores user API model configs', async () => {
       })
       assert.equal(create.status, 201)
       const created = await create.json() as Array<{ name: string; status: string; keyMasked: string }>
-      assert.equal(created[0].name, 'ops-openai')
-      assert.equal(created[0].status, 'ready')
-      assert.equal(created[0].keyMasked, 'sk-...1234')
+      const createdAgent = created.find((agent) => agent.name === 'ops-openai')
+      assert.ok(createdAgent)
+      assert.equal(createdAgent.status, 'ready')
+      assert.equal(createdAgent.keyMasked, 'sk-...1234')
       assert.notEqual(state.getUserAgent(auth.userId, 'ops-openai')?.encryptedKey, 'sk-test1234')
 
       const remove = await fetch(`${baseUrl}/api/agents/ops-openai`, {
