@@ -2,17 +2,19 @@
 
 [简体中文](./README.zh-CN.md)
 
-Passiton is local-first multi-agent orchestration: run tasks across the CLI agents and API models you already have, and when one agent dies from quota, timeout, or interruption, pass the task on to another.
+Passiton is a local-first control plane for the CLI coding agents you already have — Claude Code, Codex, Gemini, and more. Run single tasks, two-agent sessions, or multi-step workflows with human review. Operate it by hand through the web UI, or entirely over a self-describing HTTP API that another AI can drive.
 
 ![Agent handoff demo: a task fails on one agent and is continued by another, which verifies the workspace and finishes only the remaining work](https://raw.githubusercontent.com/fusae/passiton/main/docs/assets/handoff-demo.gif)
 
 ## Key Features
 
 - **Task / Session / Workflow**: run one agent, pair two agents, or chain multi-step workflows with dependencies and approvals.
-- **Agent handoff**: continue errored or stopped tasks with another ready agent, including the previous output tail and verified git workspace state when available.
+- **Operate by UI or API**: every action -- create agents, dispatch tasks, run workflows, hand off failed work -- is available in the web UI and over a self-describing HTTP API (`GET /api/docs`) that an AI operator can drive.
+- **Any CLI agent**: the four above are auto-discovered; register anything else (aider, goose, qwen-code, ...) as a custom CLI agent via the UI or `POST /api/config/agents`.
 - **Human-in-the-loop**: pause, resume, inject feedback, approve workflow steps, and rerun downstream steps after changes.
 - **Local-first SQLite**: defaults to `127.0.0.1`, stores config and state under `~/.passiton/`, and keeps the legacy `turing.db` filename for compatibility.
 - **CLI and API agents**: Codex, Claude Code, Gemini CLI, OpenCode, Anthropic, OpenAI, DeepSeek, Zhipu, Qwen, Moonshot, and OpenAI-compatible endpoints.
+- **Agent handoff**: continue errored or stopped tasks with another ready agent, including the previous output tail and verified git workspace state when available.
 - **i18n**: English is the default UI language; Simplified Chinese is available in Settings.
 
 ## Quick Start

@@ -2,15 +2,19 @@
 
 [English](./README.md)
 
-Passiton 是 local-first 的多 Agent 编排工具：把任务交给你已有的 CLI agent 和 API 模型；当某个 agent 因额度、超时或中断失败时，把任务传给另一个 agent 继续。
+Passiton 是一个本地优先的控制台，用来编排你已经装好的 CLI 编程 agent——Claude Code、Codex、Gemini 等。跑单个任务、两个 agent 协作、或带人工审核的多步工作流。既能在 Web UI 里手动操作，也能完全通过自描述的 HTTP API 交给另一个 AI 来驱动。
+
+![Agent handoff demo: a task fails on one agent and is continued by another, which verifies the workspace and finishes only the remaining work](https://raw.githubusercontent.com/fusae/passiton/main/docs/assets/handoff-demo.gif)
 
 ## 核心能力
 
 - **Task / Session / Workflow**：运行单 agent、让两个 agent 协作，或把多步骤任务串成带依赖和审批的工作流。
-- **Agent handoff**：失败或停止的任务可交给另一个 ready agent 继续，并带上上一轮输出尾部和可用的 git 工作区状态。
+- **UI 或 API 操作**：创建 agents、分派任务、运行 workflows、handoff 失败任务等所有操作，都可在 Web UI 中完成，也可通过 AI operator 能驱动的自描述 HTTP API（`GET /api/docs`）完成。
+- **任意 CLI agent**：上面四类会自动发现；其他 agent（aider、goose、qwen-code 等）可在 UI 中注册为 custom CLI agent，也可通过 `POST /api/config/agents` 注册。
 - **Human-in-the-loop**：暂停、恢复、插入反馈、审批工作流步骤，并在修改上游后重跑下游。
 - **Local-first SQLite**：默认监听 `127.0.0.1`，配置和状态保存在 `~/.passiton/`，数据库文件名为兼容保留的 `turing.db`。
 - **CLI 与 API agents**：Codex、Claude Code、Gemini CLI、OpenCode、Anthropic、OpenAI、DeepSeek、智谱、Qwen、Moonshot 以及 OpenAI-compatible 端点。
+- **Agent handoff**：失败或停止的任务可交给另一个 ready agent 继续，并带上上一轮输出尾部和可用的 git 工作区状态。
 - **i18n**：界面默认英文，Settings 中可切换简体中文。
 
 ## 快速开始
