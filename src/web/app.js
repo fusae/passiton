@@ -139,6 +139,7 @@ const MESSAGES = {
     'settings.localCli.priorityHelp': 'Lower runs first',
     'settings.localCli.moveUp': 'Move up',
     'settings.localCli.moveDown': 'Move down',
+    'settings.localCli.priorityHint': "Order sets priority — the top agent is picked first when a new task doesn't specify one. Use the arrows to reorder.",
 
     // Settings — Agents tab extras
     'settings.agents.workspacesHint': 'Security boundary: directories CLI agents may operate in',
@@ -885,6 +886,7 @@ const MESSAGES = {
     'settings.localCli.priorityHelp': '数字越小越优先',
     'settings.localCli.moveUp': '上移',
     'settings.localCli.moveDown': '下移',
+    'settings.localCli.priorityHint': '顺序即优先级——新任务未指定 agent 时，优先派给最顶部的。用箭头调整顺序。',
 
     // Settings — Agents tab extras
     'settings.agents.workspacesHint': '安全边界：CLI 代理可操作的目录范围',
@@ -5681,7 +5683,10 @@ function renderLocalCliAgentsList() {
     `
     return
   }
-  container.innerHTML = agents.map(agent => {
+  const priorityHint = configuredAgents.length >= 2
+    ? `<p style="font-size: 0.82rem; color: var(--text-muted); margin: 0 0 8px;">${t('settings.localCli.priorityHint')}</p>`
+    : ''
+  container.innerHTML = priorityHint + agents.map(agent => {
     const canAdd = agent.source === 'discovered'
     const canDelete = agent.source === 'configured'
     const badgeClass = statusBadgeClass(agent.status)

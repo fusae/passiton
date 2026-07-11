@@ -184,7 +184,7 @@ test('configured local agents require a successful smoke run to be healthy', asy
   }
 })
 
-test('configured local agents reflect installed (version probe) health without refresh', async () => {
+test('configured local agents use executable existence without refresh', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-no-probe-'))
   const command = writeExecutable(join(dir, 'codex'),
     'if [ "$1" = "--version" ]; then exit 2; fi\nexit 2',
@@ -203,12 +203,51 @@ test('configured local agents reflect installed (version probe) health without r
     const agents = await catalog.listAgents()
     const codex = agents.find((agent) => agent.name === 'codex')
 
-    // --version exits 2 → version probe fails → not healthy (not installed),
-    // and without refresh there is no smoke run, so verified stays false.
     assert.equal(codex?.source, 'configured')
-    assert.equal(codex?.healthy, false)
+    assert.equal(codex?.healthy, true)
     assert.equal(codex?.verified, false)
     assert.equal(codex?.version, undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('listAgents without refresh does not invoke version probe, while refresh does', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-agent-version-probe-'))
+  const counter = join(dir, 'counter')
+  const noRefreshCommand = writeExecutable(join(dir, 'codex-no-refresh'),
+    `if [ "$1" = "--version" ]; then echo hit >> "${counter}"; echo codex-test; exit 0; fi\nexit 0`,
+    `if "%~1"=="--version" (echo hit>>"${counter}" & echo codex-test & exit /b 0)\nexit /b 0`
+  )
+  const refreshCommand = writeExecutable(join(dir, 'codex-refresh'),
+    `if [ "$1" = "--version" ]; then echo hit >> "${counter}"; echo codex-test; exit 0; fi\nexit 0`,
+    `if "%~1"=="--version" (echo hit>>"${counter}" & echo codex-test & exit /b 0)\nexit /b 0`
+  )
+
+  try {
+    const noRefreshCatalog = new AgentCatalog({
+      codex: {
+        adapter: 'codex',
+        command: noRefreshCommand,
+        args: ['{prompt}'],
+        timeout: 1_000,
+      },
+    }, true)
+    const agents = await noRefreshCatalog.listAgents()
+    const codex = agents.find((agent) => agent.name === 'codex')
+    assert.equal(codex?.healthy, true)
+    assert.throws(() => readFileSync(counter, 'utf-8'), /ENOENT/)
+
+    const refreshCatalog = new AgentCatalog({
+      codex: {
+        adapter: 'codex',
+        command: refreshCommand,
+        args: ['{prompt}'],
+        timeout: 1_000,
+      },
+    }, true)
+    await refreshCatalog.listAgents({ refresh: true })
+    assert.match(readFileSync(counter, 'utf-8'), /hit/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -309,7 +348,7 @@ test('fresh AgentCatalog trusts persisted verification when binary version still
   rmSync(dir, { recursive: true, force: true })
 })
 
-test('persisted verification is ignored when detected version changes', async () => {
+test('cold listAgents returns stored verification before background version refresh', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-persist-mismatch-'))
   const command = writeExecutable(join(dir, 'codex'),
     'if [ "$1" = "--version" ]; then echo codex-new; exit 0; fi\nexit 2',
@@ -334,8 +373,8 @@ test('persisted verification is ignored when detected version changes', async ()
     const codex = (await catalog.listAgents()).find((agent) => agent.name === 'codex')
 
     assert.equal(codex?.healthy, true)
-    assert.equal(codex?.verified, false)
-    assert.equal(codex?.version, 'codex-new')
+    assert.equal(codex?.verified, true)
+    assert.equal(codex?.version, 'codex-old')
   })
 
   rmSync(dir, { recursive: true, force: true })
@@ -365,7 +404,7 @@ test('configured local agent without persisted verification is unverified', asyn
 
     assert.equal(codex?.healthy, true)
     assert.equal(codex?.verified, false)
-    assert.equal(codex?.version, 'codex-test')
+    assert.equal(codex?.version, undefined)
   })
 
   rmSync(dir, { recursive: true, force: true })

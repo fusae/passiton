@@ -115,6 +115,7 @@ const DISCOVERY_PRESETS: DiscoveryPreset[] = [
 export class AgentCatalog {
   private entries = new Map<string, AgentEntry>()
   private probeCache = new Map<string, ProbeCacheEntry>()
+  private backgroundProbeRuns = new Map<string, Promise<void>>()
   private diagnosticRuns = new Map<string, Promise<AgentDiagnostic | undefined>>()
   private localCliAgentsEnabled: boolean
 
@@ -141,6 +142,7 @@ export class AgentCatalog {
       })
     }
     this.probeCache.clear()
+    this.backgroundProbeRuns.clear()
   }
 
   async discover(opts: DiscoverOpts = {}): Promise<void> {
@@ -221,7 +223,9 @@ export class AgentCatalog {
         }
       }
 
-      const probe = await this.probe(entry, opts.refresh === true)
+      const probe = opts.refresh === true
+        ? await this.probe(entry, true)
+        : await this.nonBlockingProbe(entry)
       return {
         ...entry,
         healthy: probe.healthy,
@@ -354,6 +358,43 @@ export class AgentCatalog {
       value,
     })
     return value
+  }
+
+  private async nonBlockingProbe(entry: AgentEntry): Promise<{ healthy: boolean; version?: string; verified: boolean }> {
+    const cacheKey = this.probeCacheKey(entry)
+    const cached = this.probeCache.get(cacheKey)
+    if (cached) {
+      if (cached.expiresAt <= Date.now()) this.scheduleBackgroundProbe(entry)
+      return {
+        ...cached.value,
+        verified: this.isPersistedVerificationCurrent(entry, cached.value.version),
+      }
+    }
+
+    const storedVersion = entry.config?.lastVerifiedVersion
+    const value = {
+      healthy: await commandExists(entry.command!),
+      version: storedVersion,
+      verified: this.isPersistedVerificationCurrent(entry, storedVersion),
+    }
+    this.scheduleBackgroundProbe(entry)
+    return value
+  }
+
+  private scheduleBackgroundProbe(entry: AgentEntry): void {
+    const cacheKey = this.probeCacheKey(entry)
+    if (this.backgroundProbeRuns.has(cacheKey)) return
+
+    const run = new Promise<void>((resolve) => {
+      setTimeout(() => {
+        void this.probe(entry, false)
+          .catch(() => undefined)
+          .finally(resolve)
+      }, 0)
+    }).finally(() => {
+      if (this.backgroundProbeRuns.get(cacheKey) === run) this.backgroundProbeRuns.delete(cacheKey)
+    })
+    this.backgroundProbeRuns.set(cacheKey, run)
   }
 
   private probeCacheKey(entry: AgentEntry): string {
@@ -492,6 +533,71 @@ async function resolveCommand(command: string): Promise<string | undefined> {
   return undefined
 }
 
+async function commandExists(command: string): Promise<boolean> {
+  const platform = currentPlatform()
+
+  if (isPathLike(command, platform)) {
+    if (platform === 'win32') {
+      return Boolean(await resolvePathWithExtensions(command))
+    }
+    return isExecutable(command)
+  }
+
+  if (platform === 'win32') {
+    for (const entry of staticSearchPathEntries()) {
+      for (const ext of getExecutableExtensions()) {
+        if (await isExecutable(join(entry, command + ext))) return true
+      }
+    }
+    return false
+  }
+
+  for (const entry of staticSearchPathEntries()) {
+    if (await isExecutable(join(entry, command))) return true
+  }
+  return false
+}
+
+function staticSearchPathEntries(): string[] {
+  const home = homedir()
+  const platform = currentPlatform()
+  const entries = [
+    ...extraSearchPathEntries,
+    ...(process.env.PATH ?? '').split(delimiter),
+    dirname(process.execPath),
+    join(home, '.local', 'bin'),
+    join(home, 'bin'),
+    join(home, '.npm-global', 'bin'),
+    join(home, '.npm', 'bin'),
+    join(home, '.bun', 'bin'),
+    join(home, '.deno', 'bin'),
+    join(home, '.cargo', 'bin'),
+    join(home, '.yarn', 'bin'),
+    join(home, 'Library', 'pnpm'),
+    join(home, 'Library', 'Application Support', 'fnm', 'aliases', 'default', 'bin'),
+    '/opt/homebrew/bin',
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',
+    '/usr/local/sbin',
+    '/usr/bin',
+    '/bin',
+    '/usr/sbin',
+    '/sbin',
+  ]
+
+  if (platform === 'win32') {
+    if (process.env.APPDATA) entries.push(join(process.env.APPDATA, 'npm'))
+    entries.push(join(home, 'scoop', 'shims'))
+    if (process.env.ProgramData) entries.push(join(process.env.ProgramData, 'chocolatey', 'bin'))
+    if (process.env.LOCALAPPDATA) {
+      entries.push(join(process.env.LOCALAPPDATA, 'Microsoft', 'WindowsApps'))
+      entries.push(join(process.env.LOCALAPPDATA, 'Programs'))
+    }
+  }
+
+  return Array.from(new Set(entries.filter(Boolean)))
+}
+
 function isPathLike(command: string, platform: string = currentPlatform()): boolean {
   if (command.includes('/')) return true
   if (platform === 'win32') {
@@ -535,48 +641,7 @@ function getExecutableExtensions(): string[] {
 async function getSearchPathEntries(): Promise<string[]> {
   if (searchPathCache) return searchPathCache
 
-  const home = homedir()
-  const platform = currentPlatform()
-  const entries = [
-    ...extraSearchPathEntries,
-    ...(process.env.PATH ?? '').split(delimiter),
-    dirname(process.execPath),
-    join(home, '.local', 'bin'),
-    join(home, 'bin'),
-    join(home, '.npm-global', 'bin'),
-    join(home, '.npm', 'bin'),
-    join(home, '.bun', 'bin'),
-    join(home, '.deno', 'bin'),
-    join(home, '.cargo', 'bin'),
-    join(home, '.yarn', 'bin'),
-    join(home, 'Library', 'pnpm'),
-    join(home, 'Library', 'Application Support', 'fnm', 'aliases', 'default', 'bin'),
-    '/opt/homebrew/bin',
-    '/opt/homebrew/sbin',
-    '/usr/local/bin',
-    '/usr/local/sbin',
-    '/usr/bin',
-    '/bin',
-    '/usr/sbin',
-    '/sbin',
-  ]
-
-  if (platform === 'win32') {
-    if (process.env.APPDATA) {
-      entries.push(join(process.env.APPDATA, 'npm'))
-    }
-    entries.push(join(home, 'scoop', 'shims'))
-    if (process.env.ProgramData) {
-      entries.push(join(process.env.ProgramData, 'chocolatey', 'bin'))
-    }
-    if (process.env.LOCALAPPDATA) {
-      entries.push(join(process.env.LOCALAPPDATA, 'Microsoft', 'WindowsApps'))
-      entries.push(join(process.env.LOCALAPPDATA, 'Programs'))
-    }
-  }
-
-  entries.push(...await packageManagerBins())
-
+  const entries = [...staticSearchPathEntries(), ...await packageManagerBins()]
   searchPathCache = Array.from(new Set(entries.filter(Boolean)))
   return searchPathCache
 }
