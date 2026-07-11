@@ -15,6 +15,29 @@ API assistants are also supported through Anthropic, OpenAI, DeepSeek, Zhipu, Qw
 
 Use Settings → Agents → Local CLI Agents → **Add custom agent** for CLIs that are not auto-discovered, such as aider, goose, qwen-code, or cursor-agent. Enter the display name, command, one argument per line, optional `KEY=VALUE` environment variables, and optional timeout. Arguments must include `{prompt}`; Passiton replaces that token with the task prompt before spawning the command.
 
+## Add Any CLI Agent Over The API
+
+The same custom CLI registration is available over `POST /api/config/agents`:
+
+```bash
+BASE=http://127.0.0.1:4590
+TOKEN="$(curl -s -X POST "$BASE/api/auth/local" | node -pe "JSON.parse(fs.readFileSync(0, 'utf8')).token")"
+
+curl -s -X POST "$BASE/api/config/agents" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-aider",
+    "adapter": "custom-cli",
+    "command": "aider",
+    "args": ["--message", "{prompt}"],
+    "timeout": 600000,
+    "env": { "AIDER_MODEL": "sonnet" }
+  }'
+```
+
+For `custom-cli`, `args` must include the `{prompt}` token. If it is missing, the API rejects the request with a validation error so the agent definition can be corrected before use.
+
 ## Other Agents We Know About
 
 These CLI agents are not auto-discovered or bundled today because they need a cleaner non-interactive mode, require an editor host, or need adapter work:

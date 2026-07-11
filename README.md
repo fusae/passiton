@@ -42,8 +42,40 @@ npm test
 3. Click `Add`; it becomes `unverified`.
 4. Click `Diagnose`; a usable agent becomes `ready`.
 5. Open `Tasks`, choose the agent, enter a prompt, and optionally set `cwd`.
+6. Agents that are not auto-discovered can be added as a custom CLI agent in `Settings` → `Agents` → `Add custom agent`, or with `POST /api/config/agents` using adapter `custom-cli`; see [Community adapters](./docs/community-adapters.md).
 
 Tasks with `cwd` require a filesystem-capable local CLI agent. API assistants can plan and review, but they cannot read or write local files directly.
+
+## Drive It Your Way: UI Or API
+
+Passiton can be operated by clicking the web UI, or entirely over the self-describing HTTP API that an AI operator such as Claude Code, ChatGPT, or any HTTP-capable agent can drive by reading `GET /api/docs`.
+
+```bash
+BASE=http://127.0.0.1:4590
+TOKEN="$(curl -s -X POST "$BASE/api/auth/local" | node -pe "JSON.parse(fs.readFileSync(0, 'utf8')).token")"
+
+curl -s "$BASE/api/docs"
+
+curl -s -X POST "$BASE/api/config/agents" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-aider",
+    "adapter": "custom-cli",
+    "command": "aider",
+    "args": ["--message", "{prompt}"],
+    "timeout": 600000,
+    "env": { "AIDER_MODEL": "sonnet" }
+  }'
+
+curl -s -X POST "$BASE/api/tasks" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent": { "adapter": "my-aider" },
+    "prompt": "Summarize this repository."
+  }'
+```
 
 ## Configuration
 
@@ -88,7 +120,7 @@ Use `trusted` permission mode only for trusted agents and narrowly scoped `cwd` 
 
 ## HTTP API
 
-The server exposes JSON endpoints for agents, tasks, sessions, workflows, provider keys, auth tokens, file previews, logs, and stats. Start with the machine-readable reference:
+The server exposes JSON endpoints for every UI operation, including agents, tasks, sessions, workflows, provider keys, auth tokens, file previews, logs, and stats. Use `GET /api/docs` as the self-describing reference:
 
 ```text
 GET /api/docs

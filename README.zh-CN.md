@@ -40,8 +40,40 @@ npm test
 3. 点击 `Add`，状态变为 `unverified`。
 4. 点击 `Diagnose`，可用 agent 会变为 `ready`。
 5. 打开 `Tasks`，选择 agent，输入任务，并按需设置 `cwd`。
+6. 未被自动发现的 agent 可在 `Settings` → `Agents` → `Add custom agent` 中添加为 custom CLI agent，也可用 `POST /api/config/agents` 和 adapter `custom-cli` 添加；详见 [Community adapters](./docs/community-adapters.md)。
 
 带 `cwd` 的任务需要具备文件系统能力的本地 CLI agent。API assistant 可以规划和评审，但不能直接读写本地文件。
+
+## 按你的方式驱动：UI 或 API
+
+Passiton 可通过点击 Web UI 操作，也可完全通过自描述 HTTP API 操作；Claude Code、ChatGPT 或任何能发 HTTP 请求的 AI operator 都可以先读取 `GET /api/docs` 再驱动它。
+
+```bash
+BASE=http://127.0.0.1:4590
+TOKEN="$(curl -s -X POST "$BASE/api/auth/local" | node -pe "JSON.parse(fs.readFileSync(0, 'utf8')).token")"
+
+curl -s "$BASE/api/docs"
+
+curl -s -X POST "$BASE/api/config/agents" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-aider",
+    "adapter": "custom-cli",
+    "command": "aider",
+    "args": ["--message", "{prompt}"],
+    "timeout": 600000,
+    "env": { "AIDER_MODEL": "sonnet" }
+  }'
+
+curl -s -X POST "$BASE/api/tasks" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent": { "adapter": "my-aider" },
+    "prompt": "Summarize this repository."
+  }'
+```
 
 ## 配置
 
@@ -86,7 +118,7 @@ Passiton 面向单个可信用户的本地使用场景。默认行为：
 
 ## HTTP API
 
-服务提供 agents、tasks、sessions、workflows、provider keys、auth tokens、文件预览、日志和统计等 JSON 接口。入口参考：
+服务为每个 UI 操作都提供 JSON 接口，包括 agents、tasks、sessions、workflows、provider keys、auth tokens、文件预览、日志和统计等。`GET /api/docs` 是自描述参考：
 
 ```text
 GET /api/docs
