@@ -111,6 +111,7 @@ async function withServer(
     await fn(`http://127.0.0.1:${address.port}`)
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()))
+    router.dispose()
     state.closeDb()
     rmSync(dir, { recursive: true, force: true })
     restoreEnv(originalEnv)
@@ -969,7 +970,7 @@ test('POST /api/tasks/:id/handoff creates a continuation task from an errored cw
         body: JSON.stringify({ agent: { adapter: 'codex' } }),
       })
       assert.equal(response.status, 201)
-      const created = await response.json() as { status: string; agent: { adapter: string }; prompt: string; cwd: string; metadata?: { continuedFromTaskId?: string } }
+      const created = await response.json() as { id: string; status: string; agent: { adapter: string }; prompt: string; cwd: string; metadata?: { continuedFromTaskId?: string } }
       assert.equal(created.status, 'queued')
       assert.equal(created.agent.adapter, 'codex')
       assert.equal(created.cwd, cwd)
@@ -980,6 +981,11 @@ test('POST /api/tasks/:id/handoff creates a continuation task from an errored cw
       assert.match(created.prompt, /M src\/server\.ts/)
       assert.match(created.prompt, /Pre-existing files count: 1/)
       assert.match(created.prompt, /Verify the current state first/)
+      await waitFor(async () => {
+        const taskResponse = await fetch(`${baseUrl}/api/tasks/${created.id}`, { headers: authHeaders(auth.token) })
+        const task = await taskResponse.json() as { status: string }
+        return task.status !== 'queued' && task.status !== 'running'
+      })
     } finally {
       rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }

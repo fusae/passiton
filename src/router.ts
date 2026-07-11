@@ -60,6 +60,18 @@ export class Router extends EventEmitter {
     this.startActiveSessionWatchdog()
   }
 
+  dispose(): void {
+    if (this.activeSessionWatchdog) {
+      clearInterval(this.activeSessionWatchdog)
+      this.activeSessionWatchdog = undefined
+    }
+    for (const timer of this.externalJobTimers.values()) clearTimeout(timer)
+    this.externalJobTimers.clear()
+    for (const controller of this.turnControllers.values()) controller.abort()
+    this.turnControllers.clear()
+    this.removeAllListeners()
+  }
+
   // ── External task provider registry ─────────────────────────────────────────
 
   registerExternalTaskProvider(provider: ExternalTaskProvider): void {

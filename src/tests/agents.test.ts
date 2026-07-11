@@ -212,19 +212,23 @@ test('discovered local agents are not registered until configured', async () => 
     const discovered = new AgentCatalog({}, true)
     await discovered.discover()
     const router = new Router()
-    discovered.registerDiscoveredAdapters(router)
-    assert.equal(router.getAdapter('codex'), undefined)
+    try {
+      discovered.registerDiscoveredAdapters(router)
+      assert.equal(router.getAdapter('codex'), undefined)
 
-    const agents = {
-      codex: {
-        adapter: 'codex',
-        command: join(dir, 'codex'),
-        args: ['exec', '{prompt}'],
-        timeout: 1_000,
-      },
+      const agents = {
+        codex: {
+          adapter: 'codex',
+          command: join(dir, 'codex'),
+          args: ['exec', '{prompt}'],
+          timeout: 1_000,
+        },
+      }
+      registerConfiguredAdapters(router, agents)
+      assert.equal(router.getAdapter('codex')?.name, 'codex')
+    } finally {
+      router.dispose()
     }
-    registerConfiguredAdapters(router, agents)
-    assert.equal(router.getAdapter('codex')?.name, 'codex')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

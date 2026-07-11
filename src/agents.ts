@@ -620,7 +620,7 @@ export function getBundledOpenCodeCandidates(
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'opencode', 'bin', 'opencode.exe'),
     ].filter((value): value is string => Boolean(value))
   }
-  return [join(home, '.opencode', 'bin', 'opencode')]
+  return [posix.join(home, '.opencode', 'bin', 'opencode')]
 }
 
 async function getBundledAgentCandidates(adapter: string): Promise<string[]> {
