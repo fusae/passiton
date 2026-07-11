@@ -28,6 +28,17 @@ interface StreamEvent {
   result?: string
 }
 
+type StreamContent = NonNullable<StreamEvent['message']>['content']
+
+function extractContentText(content: StreamContent): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content
+    .filter((b) => b.type === 'text' && b.text)
+    .map((b) => b.text!)
+    .join('')
+}
+
 export class ClaudeCodeAdapter implements Adapter {
   readonly name = 'claude-code'
   readonly config: Record<string, unknown>
@@ -92,22 +103,19 @@ export class ClaudeCodeAdapter implements Adapter {
         if (evt.type === 'result' && evt.result) {
           resultText = evt.result
         }
+        if (evt.type === 'assistant') {
+          const text = extractContentText(evt.message?.content)
+          if (text) lastAssistantText = text
+        }
         if (evt.type === 'message' && evt.message?.role === 'assistant') {
-          const content = evt.message.content
-          if (typeof content === 'string') {
-            lastAssistantText = content
-          } else if (Array.isArray(content)) {
-            const texts = content
-              .filter((b) => b.type === 'text' && b.text)
-              .map((b) => b.text!)
-            if (texts.length > 0) lastAssistantText = texts.join('')
-          }
+          const text = extractContentText(evt.message.content)
+          if (text) lastAssistantText = text
         }
       } catch {
-        // non-JSON line (e.g. version output) — ignore
+        if (line.trim()) lastAssistantText = line.trim()
       }
     }
 
-    return (resultText || lastAssistantText || raw).trim()
+    return (resultText || lastAssistantText).trim()
   }
 }

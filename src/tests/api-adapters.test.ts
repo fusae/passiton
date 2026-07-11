@@ -1,11 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AnthropicApiAdapter } from '../adapters/api/anthropic.js'
 import { OpenAIApiAdapter } from '../adapters/api/openai.js'
 import { ZhipuApiAdapter } from '../adapters/api/zhipu.js'
+import { ClaudeCodeAdapter } from '../adapters/claude-code.js'
 import { createAdapter } from '../adapters/factory.js'
 import { withHint } from '../adapters/shared.js'
 import { Router } from '../router.js'
@@ -17,6 +18,57 @@ const originalFetch = globalThis.fetch
 
 test.afterEach(() => {
   globalThis.fetch = originalFetch
+})
+
+test('Claude Code adapter extracts modern stream-json without protocol noise', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-claude-stream-'))
+  try {
+    const script = join(dir, 'claude-stream.mjs')
+    writeFileSync(script, [
+      'const events = [',
+      '  { type: "system", subtype: "init" },',
+      '  { type: "assistant", message: { content: [{ type: "text", text: "clean " }, { type: "text", text: "progress" }] } },',
+      '  { type: "user", message: { content: [{ type: "text", text: "hidden user prompt" }] } },',
+      '  { type: "system", subtype: "task_progress" },',
+      '  { type: "result", result: "final clean result" }',
+      ']',
+      'for (const event of events) console.log(JSON.stringify(event))',
+      'console.log("{malformed")',
+    ].join('\n'))
+    const streamed: string[] = []
+    const adapter = new ClaudeCodeAdapter({
+      command: process.execPath,
+      args: [script, '{prompt}'],
+    })
+
+    const result = await adapter.send(session, 'prompt', {
+      onOutput: (line) => streamed.push(line),
+    })
+
+    assert.equal(result, 'final clean result')
+    assert.deepEqual(streamed, ['clean progress', 'final clean result', '{malformed'])
+    assert.equal(streamed.some((line) => /system|task_progress|hidden user prompt/.test(line)), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('Claude Code adapter keeps legacy assistant message extraction', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-claude-legacy-'))
+  try {
+    const script = join(dir, 'claude-legacy.mjs')
+    writeFileSync(script, [
+      'console.log(JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "legacy clean" }] } }))',
+    ].join('\n'))
+    const adapter = new ClaudeCodeAdapter({
+      command: process.execPath,
+      args: [script, '{prompt}'],
+    })
+
+    assert.equal(await adapter.send(session, 'prompt'), 'legacy clean')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('Anthropic API adapter formats streaming requests', async () => {

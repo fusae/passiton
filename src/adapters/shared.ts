@@ -235,6 +235,7 @@ function normalizeOutputLine(line: string): string {
 
   try {
     const evt = JSON.parse(trimmed) as Record<string, unknown>
+    if (evt.type === 'system' || evt.type === 'user') return ''
     const message = evt.message as Record<string, unknown> | undefined
     const content = message?.content
     if (Array.isArray(content)) {
@@ -248,10 +249,7 @@ function normalizeOutputLine(line: string): string {
     if (typeof content === 'string' && content.trim()) return truncateOutput(content)
     if (typeof evt.result === 'string' && evt.result.trim()) return truncateOutput(evt.result)
     if (typeof evt.text === 'string' && evt.text.trim()) return truncateOutput(evt.text)
-    if (typeof evt.type === 'string') {
-      const subtype = typeof evt.subtype === 'string' ? `:${evt.subtype}` : ''
-      return truncateOutput(`${evt.type}${subtype}`)
-    }
+    if (typeof evt.type === 'string') return ''
   } catch {
     // Plain text output.
   }
