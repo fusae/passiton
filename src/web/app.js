@@ -1553,6 +1553,12 @@ const state = {
   taskListLoadingMore: false,
   agents: [],
   agentDiagnosticsPending: new Set(),
+  localCliPriorityPersist: {
+    timer: null,
+    inFlight: false,
+    needsPersist: false,
+    version: 0,
+  },
   templates: [],
   pipelineTemplates: [],
   apiKeys: [],
@@ -5716,6 +5722,69 @@ function localCliAgentUpdateBody(agent, priority) {
   })
 }
 
+const LOCAL_CLI_PRIORITY_DEBOUNCE_MS = 300
+
+function configuredLocalCliAgents() {
+  return sortAgentsByPriority(state.agents.filter(agent => agent.kind === 'local' && agent.source === 'configured'))
+}
+
+function applyLocalCliAgentPriorityOrder(orderedAgents) {
+  const priorities = new Map(orderedAgents.map((agent, index) => [agent.name, index + 1]))
+  state.agents = state.agents.map(agent => (
+    agent.kind === 'local' && priorities.has(agent.name)
+      ? { ...agent, priority: priorities.get(agent.name) }
+      : agent
+  ))
+  state.localCliPriorityPersist.version += 1
+}
+
+function scheduleLocalCliPriorityPersist() {
+  const persist = state.localCliPriorityPersist
+  if (persist.timer) clearTimeout(persist.timer)
+  persist.timer = setTimeout(() => {
+    persist.timer = null
+    persistLocalCliPriorityOrder()
+  }, LOCAL_CLI_PRIORITY_DEBOUNCE_MS)
+}
+
+async function persistLocalCliPriorityOrder() {
+  const persist = state.localCliPriorityPersist
+  if (persist.inFlight) {
+    persist.needsPersist = true
+    return
+  }
+
+  const version = persist.version
+  const orderedAgents = configuredLocalCliAgents()
+  if (orderedAgents.length === 0) return
+
+  persist.inFlight = true
+  persist.needsPersist = false
+  try {
+    const configs = await Promise.all(orderedAgents.map((agent, index) =>
+      api(`/api/config/agents/${encodeURIComponent(agent.name)}`, 'PUT', localCliAgentUpdateBody(agent, index + 1))
+    ))
+    state.config = configs[configs.length - 1] || state.config
+    if (persist.version === version) {
+      await loadAgents()
+      renderLocalCliAgentsList()
+    } else {
+      persist.needsPersist = true
+    }
+  } catch (err) {
+    persist.needsPersist = false
+    await loadAgents()
+    renderLocalCliAgentsList()
+    showToast(err.message)
+  } finally {
+    persist.inFlight = false
+    if (persist.needsPersist) {
+      persist.needsPersist = false
+      scheduleLocalCliPriorityPersist()
+    }
+  }
+}
+
 window.addLocalCliAgent = async function(name) {
   const agent = state.agents.find(item => item.kind === 'local' && item.name === name)
   if (!agent?.command) return
@@ -5743,30 +5812,17 @@ window.addLocalCliAgent = async function(name) {
   }
 }
 
-window.moveLocalCliAgentPriority = async function(name, direction) {
-  const configuredAgents = sortAgentsByPriority(state.agents.filter(agent => agent.kind === 'local' && agent.source === 'configured'))
+window.moveLocalCliAgentPriority = function(name, direction) {
+  const configuredAgents = configuredLocalCliAgents()
   const fromIndex = configuredAgents.findIndex(agent => agent.name === name)
   const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1
   if (fromIndex < 0 || toIndex < 0 || toIndex >= configuredAgents.length) return
 
   const reorderedAgents = [...configuredAgents]
   ;[reorderedAgents[fromIndex], reorderedAgents[toIndex]] = [reorderedAgents[toIndex], reorderedAgents[fromIndex]]
-  const updates = reorderedAgents
-    .map((agent, index) => ({ agent, priority: index + 1 }))
-    .filter(({ agent, priority }) => agentPriority(agent) !== priority)
-
-  if (updates.length === 0) return
-
-  try {
-    const configs = await Promise.all(updates.map(({ agent, priority }) =>
-      api(`/api/config/agents/${encodeURIComponent(agent.name)}`, 'PUT', localCliAgentUpdateBody(agent, priority))
-    ))
-    state.config = configs[configs.length - 1] || state.config
-    await loadAgents()
-    renderLocalCliAgentsList()
-  } catch (err) {
-    showToast(err.message)
-  }
+  applyLocalCliAgentPriorityOrder(reorderedAgents)
+  renderLocalCliAgentsList()
+  scheduleLocalCliPriorityPersist()
 }
 
 function renderDiagnosticsPanel() {
