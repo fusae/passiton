@@ -1024,7 +1024,7 @@ test('POST /api/tasks/:id/handoff accepts unverified agents and rejects nonexist
   })
 })
 
-test('POST /api/tasks/:id/handoff rejects running source tasks', async () => {
+test('POST /api/tasks/:id/handoff stops a running source task before creating a continuation task', async () => {
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'task-handoff-running@example.com')
     state.createTask({
@@ -1033,14 +1033,57 @@ test('POST /api/tasks/:id/handoff rejects running source tasks', async () => {
       agent: { adapter: 'opencode' },
       prompt: 'still running',
     })
-    state.updateTask('handoff-running', { status: 'running' }, auth.userId)
+    state.updateTask('handoff-running', {
+      status: 'running',
+      lastAgentOutput: 'first chunk\nsource output tail',
+    }, auth.userId)
 
     const response = await fetch(`${baseUrl}/api/tasks/handoff-running/handoff`, {
       method: 'POST',
       headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
       body: JSON.stringify({ agent: { adapter: 'codex' } }),
     })
+    assert.equal(response.status, 201)
+    const created = await response.json() as { id: string; status: string; prompt: string; metadata?: { continuedFromTaskId?: string } }
+    assert.equal(created.status, 'queued')
+    assert.equal(created.metadata?.continuedFromTaskId, 'handoff-running')
+    assert.match(created.prompt, /still running/)
+    assert.match(created.prompt, /Ended: stopped/)
+    assert.match(created.prompt, /source output tail/)
+
+    const sourceResponse = await fetch(`${baseUrl}/api/tasks/handoff-running`, { headers: authHeaders(auth.token) })
+    assert.equal(sourceResponse.status, 200)
+    const source = await sourceResponse.json() as { status: string; finishedAt?: number }
+    assert.equal(source.status, 'stopped')
+    assert.equal(typeof source.finishedAt, 'number')
+
+    await waitFor(async () => {
+      const taskResponse = await fetch(`${baseUrl}/api/tasks/${created.id}`, { headers: authHeaders(auth.token) })
+      const task = await taskResponse.json() as { status: string }
+      return task.status !== 'queued' && task.status !== 'running'
+    })
+  })
+})
+
+test('POST /api/tasks/:id/handoff rejects done source tasks', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'task-handoff-done@example.com')
+    state.createTask({
+      id: 'handoff-done',
+      userId: auth.userId,
+      agent: { adapter: 'opencode' },
+      prompt: 'already finished',
+    })
+    state.updateTask('handoff-done', { status: 'done', output: '[RESULT]finished[/RESULT]' }, auth.userId)
+
+    const response = await fetch(`${baseUrl}/api/tasks/handoff-done/handoff`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: { adapter: 'codex' } }),
+    })
     assert.equal(response.status, 400)
+    const payload = await response.json() as { error: string }
+    assert.match(payload.error, /running, error, or stopped/)
   })
 })
 

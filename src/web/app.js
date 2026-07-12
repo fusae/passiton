@@ -453,11 +453,14 @@ const MESSAGES = {
     'task_feedback_create_new': 'Create New Task',
     'task_feedback_creating': 'Creating…',
     'handoff_button': 'Continue with another agent',
+    'handoff_running_button': 'Stop & hand off to another agent',
     'handoff_title': 'Continue Task',
     'handoff_desc': 'Create a new task that continues from this stopped or failed attempt.',
+    'handoff_running_desc': 'Stop this running task, then create a new task that continues from its current output.',
     'handoff_agent': 'Agent',
     'handoff_no_agents': 'No compatible task agents.',
     'handoff_create': 'Continue',
+    'handoff_running_create': 'Stop & Continue',
     'handoff_creating': 'Creating…',
     'handoff_source': 'Continued from',
     'handoff_continued_from': 'Continued from {id}',
@@ -1124,11 +1127,14 @@ const MESSAGES = {
     'task_feedback_create_new': '创建新任务',
     'task_feedback_creating': '创建中…',
     'handoff_button': '换个 Agent 继续',
+    'handoff_running_button': '停止并换一个 agent 继续',
     'handoff_title': '继续任务',
     'handoff_desc': '基于这次停止或失败的尝试创建一个继续任务。',
+    'handoff_running_desc': '先停止这个运行中的任务，再基于当前输出创建一个继续任务。',
     'handoff_agent': 'Agent',
     'handoff_no_agents': '没有兼容的任务 Agent。',
     'handoff_create': '继续',
+    'handoff_running_create': '停止并继续',
     'handoff_creating': '创建中…',
     'handoff_source': '继续自',
     'handoff_continued_from': '继续自 {id}',
@@ -3329,9 +3335,13 @@ async function renderTask(id) {
 
 function renderTaskActions(task) {
   if (task.status === 'queued' || task.status === 'running') {
+    const handoffButton = task.status === 'running'
+      ? `<button class="btn btn-primary btn-sm" onclick="window.showTaskHandoffModal()">${t('handoff_running_button')}</button>`
+      : ''
     return `
       <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">${t('task_ask_ops')}</button>
       <button class="btn btn-danger btn-sm" onclick="window.stopCurrentTask()">${t('task_stop')}</button>
+      ${handoffButton}
     `
   }
   const handoffButton = (task.status === 'error' || task.status === 'stopped')
@@ -3491,6 +3501,12 @@ function renderTaskContent(task) {
       </div>
       ${renderTaskCreationDetails(task)}
       ${renderTaskCommits(task)}
+      ${task.status === 'running' ? `
+        <div class="divider"></div>
+        <div style="display: grid; gap: 10px;">
+          <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="window.showTaskHandoffModal()">${t('handoff_running_button')}</button>
+        </div>
+      ` : ''}
       ${task.status !== 'queued' && task.status !== 'running' ? `
         <div class="divider"></div>
         <div style="display: grid; gap: 10px;">
@@ -6488,12 +6504,13 @@ window.showTaskHandoffModal = async function() {
   if (!state.agents.length) await loadAgents()
   const agents = sortAgentsByPriority(state.agents.filter(agent => taskAgentAccepted(agent) && (!task.cwd || agentHasFilesystem(agent.name))))
   const noAgents = agents.length === 0
+  const isRunning = task.status === 'running'
   showModal(`
     <div class="modal-card">
       <div class="modal-head">
         <div>
           <h3>${t('handoff_title')}</h3>
-          <p>${t('handoff_desc')}</p>
+          <p>${t(isRunning ? 'handoff_running_desc' : 'handoff_desc')}</p>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
       </div>
@@ -6505,7 +6522,7 @@ window.showTaskHandoffModal = async function() {
         </div>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('common.cancel')}</button>
-          <button type="submit" class="btn btn-primary" data-submit ${noAgents ? 'disabled' : ''}>${t('handoff_create')}</button>
+          <button type="submit" class="btn btn-primary" data-submit ${noAgents ? 'disabled' : ''}>${t(isRunning ? 'handoff_running_create' : 'handoff_create')}</button>
         </div>
       </form>
     </div>
@@ -6538,7 +6555,7 @@ window.handoffCurrentTask = async function(e) {
     showToast(err.message)
     if (submit) {
       submit.disabled = false
-      submit.textContent = t('handoff_create')
+      submit.textContent = t(task.status === 'running' ? 'handoff_running_create' : 'handoff_create')
     }
   }
 }

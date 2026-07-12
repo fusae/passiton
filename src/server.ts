@@ -2829,7 +2829,7 @@ function sessionApiDocs() {
     handoffTask: {
       method: 'POST',
       path: '/api/tasks/:id/handoff',
-      description: 'Continue an errored or stopped task as a new task with an accepted task agent.',
+      description: 'Continue a running, errored, or stopped task as a new task with an accepted task agent. Running source tasks are stopped automatically before handoff.',
       body: {
         agent: { adapter: 'codex' },
       },
@@ -3817,10 +3817,15 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       // POST /api/tasks/:id/handoff
       const taskHandoffMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/handoff$/)
       if (taskHandoffMatch && method === 'POST') {
-        const source = state.getTask(taskHandoffMatch[1], authUser!.userId)
+        let source = state.getTask(taskHandoffMatch[1], authUser!.userId)
         if (!source) return json(res, 404, { error: 'Not found' })
+        if (source.status === 'running') {
+          await router.stopTask(source.id)
+          source = state.getTask(source.id, authUser!.userId)
+          if (!source) return json(res, 404, { error: 'Not found' })
+        }
         if (source.status !== 'error' && source.status !== 'stopped') {
-          throw new HttpError(400, 'Task handoff requires an error or stopped source task')
+          throw new HttpError(400, 'Task handoff requires a running, error, or stopped source task')
         }
         const params = parseTaskHandoffBody(await parseBody(req))
         assertAllowedWorkspace(source.cwd)
