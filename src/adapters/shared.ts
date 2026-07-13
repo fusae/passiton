@@ -31,10 +31,24 @@ function currentPlatform(): string {
  *   2. Node.js ≥18 does apply limited quoting to arguments containing spaces.
  *   3. .exe files spawn directly without shell, so only .cmd/.bat need this path.
  */
-function shouldUseShell(command: string): boolean {
-  if (currentPlatform() !== 'win32') return false
+function shouldUseShell(command: string, platform: string = currentPlatform()): boolean {
+  if (platform !== 'win32') return false
   const lower = command.toLowerCase()
   return lower.endsWith('.cmd') || lower.endsWith('.bat')
+}
+
+export function prepareCommandForSpawn(command: string, args: string[], platform: string = currentPlatform()): {
+  command: string
+  args: string[]
+  shell?: boolean
+} {
+  if (platform === 'win32' && command.toLowerCase().endsWith('.ps1')) {
+    return {
+      command: process.env.SystemRoot ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe` : 'powershell.exe',
+      args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', command, ...args],
+    }
+  }
+  return { command, args, ...(shouldUseShell(command, platform) ? { shell: true } : {}) }
 }
 
 interface RunCommandOptions {
@@ -80,11 +94,12 @@ export function runCommand({
   getTimeoutExtensionMs,
 }: RunCommandOptions): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = spawn(command, args, {
+    const invocation = prepareCommandForSpawn(command, args)
+    const proc = spawn(invocation.command, invocation.args, {
       cwd: cwd ?? process.cwd(),
       env: { ...process.env, ...env },
       stdio: [stdinMode, 'pipe', 'pipe'],
-      ...(shouldUseShell(command) ? { shell: true } : {}),
+      ...(invocation.shell ? { shell: true } : {}),
     })
 
     if (stdinMode === 'pipe') {
@@ -323,18 +338,27 @@ export function withHint(adapterName: string, command: string, code: number | nu
   if (message.includes('spawn error') && (lower.includes('enoent') || lower.includes('not found') || lower.includes('eacces'))) {
     return `${message}\nstatus: not_installed\nhint: Could not find or execute \`${command}\`. Check this agent's command path in Settings, or add it to PATH.`
   }
-  // 2. Auth / credentials / subscription. CLI agents (claude-code, codex, …)
+  // 2. Persistent-state failures are not authentication failures. OpenCode
+  //    commonly reports SQLite problems through its structured logs.
+  const storageCues = ['disk i/o error', 'sqlite_ioerr', 'database is locked', 'database disk image is malformed']
+  if (storageCues.some((cue) => lower.includes(cue))) {
+    return `${message}\nstatus: storage_error\nhint: \`${adapterName}\` could not open its local state database. Check its data-directory permissions and SQLite WAL/SHM files; do not copy a live database between profiles.`
+  }
+  // 3. Auth / credentials / subscription. CLI agents (claude-code, codex, …)
   //    commonly exit non-zero with empty or terse stderr when unauthenticated.
   const quotaCues = ['usage limit', 'usage limit reached', 'session limit', 'quota', 'rate limit', 'rate_limit', 'too many requests', 'statuscode":429', 'api_error_status":429', 'status 429', ' 429', '"code":"1308"', 'insufficient balance', '余额不足']
   const authCues = ['unauthorized', 'unauthenticated', 'invalid api key', 'authentication', 'not logged in', 'login', 'no subscription', '401', '403', 'payment required', ...quotaCues]
-  const looksLikeAuth = (code !== null && code !== 0 && stderr.trim() === '') || authCues.some((cue) => lower.includes(cue))
+  const looksLikeAuth = authCues.some((cue) => lower.includes(cue))
   if (looksLikeAuth) {
     const status = quotaCues.some((cue) => lower.includes(cue)) ? 'rate_limited' : lower.includes('api key') ? 'api_key_missing' : 'auth_required'
     const resetMatch = stripAnsi(stderr + ' ' + message).match(/reset at ([^"}\n]+)/i)
     const resetHint = resetMatch?.[1] ? ` Reset time: ${resetMatch[1]}.` : ''
     return `${message}\nstatus: ${status}\nhint: \`${adapterName}\` ${status === 'rate_limited' ? `hit a usage or rate limit.${resetHint}` : 'failed to start. Common causes: not logged in, expired credentials, or an inactive subscription.'} Run this agent once in its own terminal to confirm, or check its env / API key in Settings.`
   }
-  // 3. Timeout — point at the timeout knob.
+  if (code !== null && code !== 0 && stderr.trim() === '') {
+    return `${message}\nstatus: unavailable\nhint: \`${adapterName}\` exited without diagnostic output. On Windows this commonly means the discovered .cmd/.ps1 shim or the Passiton process environment differs from the terminal where the agent works.`
+  }
+  // 4. Timeout — point at the timeout knob.
   if (lower.includes('timed out')) {
     const seconds = Math.round(timeoutMs / 1000)
     const mode = lower.includes('idle timed out') ? 'produced no output for' : lower.includes('hard timed out') ? 'ran longer than' : 'waited longer than'

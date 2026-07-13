@@ -6,6 +6,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import type { AgentConfig } from './types.js'
 import { createAdapter, createDiscoveredAgentConfig } from './adapters/factory.js'
+import { prepareCommandForSpawn } from './adapters/shared.js'
 import { loadConfig, writeConfig } from './config.js'
 import type { Router } from './router.js'
 import type { Session } from './types.js'
@@ -875,18 +876,22 @@ async function isExecutable(filePath: string): Promise<boolean> {
 }
 
 async function probeCommand(command: string): Promise<{ healthy: boolean; version?: string; error?: string }> {
-  try {
-    const isWin32 = currentPlatform() === 'win32'
-    const needsShell = isWin32 && /\.(cmd|bat)$/i.test(command)
-    const { stdout, stderr } = await execFileAsync(command, ['--version'], {
-      timeout: 10_000,
-      ...(needsShell ? { shell: true } : {}),
-    })
-    const version = parseVersion(stdout || stderr)
-    return { healthy: true, version }
-  } catch (err) {
-    return { healthy: false, error: err instanceof Error ? err.message : String(err) }
+  const attempts = [['--version'], ['version'], ['-v']]
+  let lastError = ''
+  for (const args of attempts) {
+    try {
+      const invocation = prepareCommandForSpawn(command, args, currentPlatform())
+      const { stdout, stderr } = await execFileAsync(invocation.command, invocation.args, {
+        timeout: 10_000,
+        ...(invocation.shell ? { shell: true } : {}),
+      })
+      const version = parseVersion(stdout || stderr)
+      return { healthy: true, version }
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err)
+    }
   }
+  return { healthy: false, error: lastError }
 }
 
 async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ healthy: boolean; error?: string }> {

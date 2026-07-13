@@ -1,14 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AnthropicApiAdapter } from '../adapters/api/anthropic.js'
 import { OpenAIApiAdapter } from '../adapters/api/openai.js'
 import { ZhipuApiAdapter } from '../adapters/api/zhipu.js'
 import { ClaudeCodeAdapter } from '../adapters/claude-code.js'
+import { OpenCodeAdapter } from '../adapters/opencode.js'
 import { createAdapter } from '../adapters/factory.js'
-import { withHint } from '../adapters/shared.js'
+import { prepareCommandForSpawn, withHint } from '../adapters/shared.js'
 import { Router } from '../router.js'
 import * as state from '../state.js'
 import type { Adapter, AdapterResponse, AdapterSendOpts, Session } from '../types.js'
@@ -66,6 +67,36 @@ test('Claude Code adapter keeps legacy assistant message extraction', async () =
     })
 
     assert.equal(await adapter.send(session, 'prompt'), 'legacy clean')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('OpenCode uses the spawn cwd without adding a duplicate --dir argument', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-opencode-cwd-'))
+  try {
+    const script = join(dir, 'opencode-args.mjs')
+    const captured = join(dir, 'captured.json')
+    writeFileSync(script, [
+      'import { writeFileSync } from "node:fs"',
+      'writeFileSync(process.env.CAPTURED_ARGS, JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) }))',
+      'process.stdout.write("TURING_READY")',
+    ].join('\n'))
+    const adapter = new OpenCodeAdapter({
+      command: process.execPath,
+      args: [script, '{prompt}'],
+      model: 'test-model',
+      env: { CAPTURED_ARGS: captured },
+    })
+
+    assert.equal(await adapter.send({ ...session, cwd: dir }, 'prompt'), 'TURING_READY')
+    const invocation = JSON.parse(await import('node:fs/promises').then(({ readFile }) => readFile(captured, 'utf8'))) as {
+      cwd: string
+      args: string[]
+    }
+    assert.equal(realpathSync(invocation.cwd), realpathSync(dir))
+    assert.equal(invocation.args.includes('--dir'), false)
+    assert.deepEqual(invocation.args.slice(-2), ['--model', 'test-model'])
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -318,10 +349,11 @@ test('factory creates custom CLI adapter', async () => {
 })
 
 test('withHint adds actionable hints to common adapter failures', () => {
-  // 1. Non-zero exit with empty stderr → looks like an auth/subscription issue.
-  const auth = withHint('claude-code', '/bin/claude', 1, '', '[claude-code] exited with code 1: ', 60_000)
-  assert.match(auth, /exited with code 1/)            // raw message preserved
-  assert.match(auth, /not logged in|expired credentials|inactive subscription/) // actionable hint added
+  // 1. Non-zero exit with empty stderr is not enough evidence to claim auth failure.
+  const silent = withHint('claude-code', '/bin/claude', 1, '', '[claude-code] exited with code 1: ', 60_000)
+  assert.match(silent, /exited with code 1/)
+  assert.match(silent, /status: unavailable/)
+  assert.doesNotMatch(silent, /status: auth_required/)
 
   // 2. spawn ENOENT → binary not found.
   const missing = withHint('codex', 'codex', null, '', '[codex] spawn error: ENOENT', 60_000)
@@ -361,6 +393,34 @@ test('withHint adds actionable hints to common adapter failures', () => {
     60_000
   )
   assert.match(claudeLimited, /status: rate_limited/)
+
+  // 7. SQLite failures must not be presented as authentication failures.
+  const storage = withHint(
+    'opencode',
+    'opencode',
+    1,
+    'SQLiteError: disk I/O error',
+    '[opencode] exited with code 1',
+    60_000,
+  )
+  assert.match(storage, /status: storage_error/)
+  assert.doesNotMatch(storage, /status: auth_required/)
+})
+
+test('Windows PowerShell shims run through powershell with argument boundaries preserved', () => {
+  const invocation = prepareCommandForSpawn(
+    'C:\\Users\\test\\AppData\\Roaming\\npm\\opencode.ps1',
+    ['run', 'Reply exactly with TURING_READY'],
+    'win32',
+  )
+
+  assert.match(invocation.command.toLowerCase(), /powershell\.exe$/)
+  assert.deepEqual(invocation.args.slice(-3), [
+    'C:\\Users\\test\\AppData\\Roaming\\npm\\opencode.ps1',
+    'run',
+    'Reply exactly with TURING_READY',
+  ])
+  assert.equal(invocation.shell, undefined)
 })
 
 function mockFetch(handler: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>): void {

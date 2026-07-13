@@ -40,9 +40,6 @@ export class OpenCodeAdapter implements Adapter {
     if (this.model) {
       args.push('--model', this.model)
     }
-    if (session.cwd) {
-      args.push('--dir', session.cwd)
-    }
 
     const raw = await runCommand({
       adapterName: this.name,
