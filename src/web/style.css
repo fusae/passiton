@@ -2975,6 +2975,9 @@ textarea.input { resize: vertical; min-height: 80px; }
 
 /* ── Onboarding (first-run, shown in place of empty session list) ───────────── */
 .onboarding-panel {
+  grid-column: 1 / -1;
+  width: min(620px, 100%);
+  box-sizing: border-box;
   max-width: 620px;
   margin: 32px auto;
   padding: 36px 32px;
@@ -2996,7 +2999,7 @@ textarea.input { resize: vertical; min-height: 80px; }
 .onboarding-panel h3 { margin: 0 0 8px; font-size: 1.2rem; }
 .onboarding-panel p { margin: 0 0 16px; color: var(--text-secondary); line-height: 1.55; }
 .onboarding-tiles {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  display: grid; grid-template-columns: minmax(0, 420px); justify-content: center; gap: 14px;
   margin: 20px 0; text-align: left;
 }
 .onboarding-tile {

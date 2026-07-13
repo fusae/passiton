@@ -470,7 +470,7 @@ const MESSAGES = {
     'sessions.onboarding.readyDesc': 'Ready with <strong>{count}</strong> agent(s). Start your first session!',
     'sessions.onboarding.manageAgents': 'Manage Agents',
     'sessions.onboarding.welcome': 'Welcome to Passiton',
-    'sessions.onboarding.welcomeDesc': 'Connect an AI model to get started. Pick your path:',
+    'sessions.onboarding.welcomeDesc': 'Installed local CLI agents are discovered and verified automatically.',
     'sessions.onboarding.apiModel': 'API Model (Fastest)',
     'sessions.onboarding.apiModelDesc': 'Add a provider key — no install needed. Supports Anthropic, OpenAI, Zhipu, DeepSeek, Qwen, Moonshot.',
     'sessions.onboarding.addApiKey': 'Add API Key',
@@ -479,7 +479,7 @@ const MESSAGES = {
     'sessions.onboarding.viewDiscovered': 'View Discovered Agents',
     'sessions.onboarding.settingsHint': 'You can add or remove agents and keys in Settings anytime.',
     'sessions.onboarding.unverifiedTitle': 'Agents Not Verified',
-    'sessions.onboarding.unverifiedDesc': 'Found <strong>{apiCount}</strong> API agent(s) and <strong>{cliCount}</strong> CLI agent(s), but none are confirmed working yet.',
+    'sessions.onboarding.unverifiedDesc': 'Found <strong>{cliCount}</strong> local CLI agent(s), but none are confirmed working yet.',
     'sessions.onboarding.unverifiedHint': 'Common causes: not logged in, expired credentials, lapsed subscription, or wrong binary path. Re-test or check in Settings.',
     'sessions.onboarding.retest': 'Re-test',
     'sessions.onboarding.goToSettings': 'Go to Settings',
@@ -1144,7 +1144,7 @@ const MESSAGES = {
     'sessions.onboarding.readyDesc': '已有 <strong>{count}</strong> 个可用的 Agent。开始你的第一个会话吧。',
     'sessions.onboarding.manageAgents': '管理 Agent',
     'sessions.onboarding.welcome': '欢迎使用 Passiton',
-    'sessions.onboarding.welcomeDesc': '开始前需要先连接一个 AI 模型。下面两条路任选其一：',
+    'sessions.onboarding.welcomeDesc': '系统会自动发现并验证本机已安装的 CLI Agent。',
     'sessions.onboarding.apiModel': '用 API 模型（最快）',
     'sessions.onboarding.apiModelDesc': '填一个 Provider Key 即可，无需安装任何东西。支持 Anthropic、OpenAI、智谱、DeepSeek、Qwen、Moonshot。',
     'sessions.onboarding.addApiKey': '添加 API Key',
@@ -1153,7 +1153,7 @@ const MESSAGES = {
     'sessions.onboarding.viewDiscovered': '查看已发现的 Agent',
     'sessions.onboarding.settingsHint': '在 Settings 页可以随时增删 Agent 和 Key。',
     'sessions.onboarding.unverifiedTitle': 'Agent 尚未验证可用',
-    'sessions.onboarding.unverifiedDesc': '检测到 <strong>{apiCount}</strong> 个 API Agent、<strong>{cliCount}</strong> 个 CLI Agent，但没有一个确认能调通模型。',
+    'sessions.onboarding.unverifiedDesc': '检测到 <strong>{cliCount}</strong> 个本地 CLI Agent，但没有一个确认可以正常使用。',
     'sessions.onboarding.unverifiedHint': '常见原因：未登录、凭证失效、订阅过期或二进制路径不对。重新检测或去 Settings 检查配置。',
     'sessions.onboarding.retest': '重新检测',
     'sessions.onboarding.goToSettings': '去 Settings 检查',
@@ -3088,7 +3088,7 @@ function renderSessionStats() {
   const doneToday = sessions.filter(s => s.status === 'done' && isSameLocalDay(s.updatedAt)).length
   const totalRounds = sessions.reduce((sum, s) => sum + (Number(s.currentRound) || 0), 0)
   const avgRounds = sessions.length > 0 ? totalRounds / sessions.length : 0
-  const configuredAgents = (state.agents || []).filter(a => a.status !== 'invalid' && a.status !== 'discovered').length
+  const configuredAgents = (state.agents || []).filter(a => a.kind === 'local' && a.status !== 'invalid' && a.status !== 'discovered').length
 
   if (statActive) statActive.textContent = active
   if (statDone) statDone.textContent = doneToday
@@ -3099,18 +3099,16 @@ function renderSessionStats() {
 /**
  * First-run onboarding. Shown in place of the empty sessions list. Adapts to the
  * agent landscape so a new user always has an obvious next step:
- *   - no agents at all       → "connect a model" (API key or CLI)
+ *   - no local agents        → explain local CLI auto-discovery
  *   - agents but none ready  → "verify your agents" (run diagnostics)
  *   - at least one ready     → "you're all set, start a session"
  * No backend endpoint is needed — it derives state from the existing /api/agents
  * status field (ready / unverified / discovered / invalid / no_key).
  */
 function renderOnboardingPanel() {
-  const agents = state.agents || []
+  const agents = (state.agents || []).filter((agent) => agent.kind === 'local')
   const ready = agents.filter((a) => a.status === 'ready')
   const present = agents.filter((a) => a.status !== 'invalid')
-  const apiAgents = present.filter((a) => a.kind === 'api')
-  const cliAgents = present.filter((a) => a.kind === 'local')
 
   if (ready.length > 0) {
     return `
@@ -3134,12 +3132,6 @@ function renderOnboardingPanel() {
         <p>${t('sessions.onboarding.welcomeDesc')}</p>
         <div class="onboarding-tiles">
           <div class="onboarding-tile">
-            <div class="onboarding-tile-icon">🔑</div>
-            <h4>${t('sessions.onboarding.apiModel')}</h4>
-            <p>${t('sessions.onboarding.apiModelDesc')}</p>
-            <button class="btn btn-primary btn-sm" onclick="window.navigate('/settings')">${t('sessions.onboarding.addApiKey')}</button>
-          </div>
-          <div class="onboarding-tile">
             <div class="onboarding-tile-icon">⌨️</div>
             <h4>${t('sessions.onboarding.localCli')}</h4>
             <p>${t('sessions.onboarding.localCliDesc')}</p>
@@ -3160,7 +3152,7 @@ function renderOnboardingPanel() {
     <div class="onboarding-panel">
       <div class="onboarding-icon">!</div>
       <h3>${t('sessions.onboarding.unverifiedTitle')}</h3>
-      <p>${t('sessions.onboarding.unverifiedDesc', { apiCount: apiAgents.length, cliCount: cliAgents.length })}</p>
+      <p>${t('sessions.onboarding.unverifiedDesc', { cliCount: present.length })}</p>
       ${unverifiedList ? `<ul class="onboarding-agent-list">${unverifiedList}</ul>` : ''}
       <p class="onboarding-hint">${t('sessions.onboarding.unverifiedHint')}</p>
       <div class="onboarding-actions">
@@ -5708,7 +5700,9 @@ function renderLocalCliAgentsList() {
   const container = document.getElementById('local-cli-list')
   if (!container) return
   const localAgents = state.agents.filter(agent => agent.kind === 'local')
-  const configuredAgents = sortAgentsByPriority(localAgents.filter(agent => agent.source === 'configured'))
+  const configuredReadyAgents = sortAgentsByPriority(localAgents.filter(agent => agent.source === 'configured' && agent.status === 'ready'))
+  const configuredOtherAgents = sortAgentsForSettings(localAgents.filter(agent => agent.source === 'configured' && agent.status !== 'ready'))
+  const configuredAgents = [...configuredReadyAgents, ...configuredOtherAgents]
   const discoveredAgents = sortAgentsByPriority(localAgents.filter(agent => agent.source !== 'configured'))
   const agents = [...configuredAgents, ...discoveredAgents]
   if (agents.length === 0) {
@@ -5721,11 +5715,12 @@ function renderLocalCliAgentsList() {
     `
     return
   }
-  const priorityHint = configuredAgents.length >= 2
+  const priorityHint = configuredReadyAgents.length >= 2
     ? `<p style="font-size: 0.82rem; color: var(--text-muted); margin: 0 0 8px;">${t('settings.localCli.priorityHint')}</p>`
     : ''
   container.innerHTML = priorityHint + agents.map(agent => {
     const canDelete = agent.source === 'configured' && !agent.autoDiscovered
+    const canReorder = agent.source === 'configured' && agent.status === 'ready'
     const badgeClass = statusBadgeClass(agent.status)
     const diagnosing = state.agentDiagnosticsPending.has(agent.name)
     return `
@@ -5736,10 +5731,10 @@ function renderLocalCliAgentsList() {
         <div class="agent-model">${escapeHtml(agent.adapter)} · ${escapeHtml(agent.command || '')}${agent.version ? ` · ${escapeHtml(agent.version)}` : ''}</div>
       </div>
       <span class="badge badge-${badgeClass}">${escapeHtml(statusLabel(agent.status))}</span>
-      ${canDelete ? `
+      ${canReorder ? `
         <div class="priority-reorder">
-          <button class="btn btn-ghost btn-sm priority-arrow" ${configuredAgents[0]?.name === agent.name ? 'disabled' : ''} aria-label="${escapeAttr(t('settings.localCli.moveUp'))}" title="${escapeAttr(t('settings.localCli.moveUp'))}" onclick='window.moveLocalCliAgentPriority(${jsString(agent.name)}, "up")'>&uarr;</button>
-          <button class="btn btn-ghost btn-sm priority-arrow" ${configuredAgents[configuredAgents.length - 1]?.name === agent.name ? 'disabled' : ''} aria-label="${escapeAttr(t('settings.localCli.moveDown'))}" title="${escapeAttr(t('settings.localCli.moveDown'))}" onclick='window.moveLocalCliAgentPriority(${jsString(agent.name)}, "down")'>&darr;</button>
+          <button class="btn btn-ghost btn-sm priority-arrow" ${configuredReadyAgents[0]?.name === agent.name ? 'disabled' : ''} aria-label="${escapeAttr(t('settings.localCli.moveUp'))}" title="${escapeAttr(t('settings.localCli.moveUp'))}" onclick='window.moveLocalCliAgentPriority(${jsString(agent.name)}, "up")'>&uarr;</button>
+          <button class="btn btn-ghost btn-sm priority-arrow" ${configuredReadyAgents[configuredReadyAgents.length - 1]?.name === agent.name ? 'disabled' : ''} aria-label="${escapeAttr(t('settings.localCli.moveDown'))}" title="${escapeAttr(t('settings.localCli.moveDown'))}" onclick='window.moveLocalCliAgentPriority(${jsString(agent.name)}, "down")'>&darr;</button>
         </div>
       ` : ''}
       <div class="agent-actions">
@@ -5766,7 +5761,7 @@ function localCliAgentUpdateBody(agent, priority) {
 const LOCAL_CLI_PRIORITY_DEBOUNCE_MS = 300
 
 function configuredLocalCliAgents() {
-  return sortAgentsByPriority(state.agents.filter(agent => agent.kind === 'local' && agent.source === 'configured'))
+  return sortAgentsByPriority(state.agents.filter(agent => agent.kind === 'local' && agent.source === 'configured' && agent.status === 'ready'))
 }
 
 function applyLocalCliAgentPriorityOrder(orderedAgents) {
@@ -6237,8 +6232,9 @@ window.showNewSessionModal = async function(templateId = 'custom') {
   if (!state.templates.length) await loadTemplates()
   if (!state.agents.length) await loadAgents()
   const template = state.templates.find(item => item.id === templateId) || state.templates.find(item => item.id === 'custom')
-  const readyAgents = sortAgentsByPriority(state.agents.filter(agent => agent.status === 'ready'))
-  const agents = readyAgents.length ? readyAgents : sortAgentsByPriority(state.agents)
+  const localAgents = state.agents.filter(agent => agent.kind === 'local')
+  const readyAgents = sortAgentsByPriority(localAgents.filter(agent => agent.status === 'ready'))
+  const agents = readyAgents.length ? readyAgents : sortAgentsByPriority(localAgents)
   const defaultFrom = preferredAgentName(agents, template?.config?.preferredAdapters?.from)
   const defaultTo = preferredAgentName(agents, template?.config?.preferredAdapters?.to, defaultFrom)
   const optionHtml = (selected) => agentOptionHtml(agents, selected)
@@ -6248,7 +6244,7 @@ window.showNewSessionModal = async function(templateId = 'custom') {
   const templateBadge = template && template.id !== 'custom'
     ? `<div class="template-selected-badge">${t('newSession.templateBadge', { name: escapeHtml(template.nameEn || template.name) })}</div>`
     : ''
-  const noAgents = state.agents.length === 0
+  const noAgents = agents.length === 0
 
   showModal(`
     <div class="modal-card">
@@ -6385,7 +6381,7 @@ window.createSession = async function(e) {
 
 window.showNewTaskModal = async function() {
   if (!state.agents.length) await loadAgents()
-  const acceptedAgents = state.agents.filter(taskAgentAccepted)
+  const acceptedAgents = state.agents.filter(agent => agent.kind === 'local' && taskAgentAccepted(agent))
   const readyAgents = acceptedAgents.filter(agent => agent.status === 'ready')
   const agents = sortAgentsByPriority(readyAgents.length ? readyAgents : acceptedAgents.filter(agent => agent.status === 'unverified'))
   const noAgents = agents.length === 0
@@ -6502,7 +6498,7 @@ window.showTaskHandoffModal = async function() {
   const task = state.currentTask
   if (!task) return
   if (!state.agents.length) await loadAgents()
-  const agents = sortAgentsByPriority(state.agents.filter(agent => taskAgentAccepted(agent) && (!task.cwd || agentHasFilesystem(agent.name))))
+  const agents = sortAgentsByPriority(state.agents.filter(agent => agent.kind === 'local' && taskAgentAccepted(agent) && (!task.cwd || agentHasFilesystem(agent.name))))
   const noAgents = agents.length === 0
   const isRunning = task.status === 'running'
   showModal(`
@@ -6653,8 +6649,9 @@ window.showNewWorkflowModal = async function() {
   if (!state.config) await loadConfig()
   if (!state.agents.length) await loadAgents()
   if (!state.pipelineTemplates.length) await loadPipelineTemplates()
-  const readyAgents = sortAgentsByPriority(state.agents.filter(agent => agent.status === 'ready'))
-  const agents = readyAgents.length ? readyAgents : sortAgentsByPriority(state.agents)
+  const localAgents = state.agents.filter(agent => agent.kind === 'local')
+  const readyAgents = sortAgentsByPriority(localAgents.filter(agent => agent.status === 'ready'))
+  const agents = readyAgents.length ? readyAgents : sortAgentsByPriority(localAgents)
   const noAgents = agents.length === 0
   const defaultFrom = agents[0]?.name || ''
   const defaultTo = agents[1]?.name || agents[0]?.name || ''
@@ -8027,6 +8024,15 @@ function agentPriority(agent) {
 
 function sortAgentsByPriority(agents) {
   return [...agents].sort((a, b) => agentPriority(a) - agentPriority(b) || (String(a.name) < String(b.name) ? -1 : String(a.name) > String(b.name) ? 1 : 0))
+}
+
+function sortAgentsForSettings(agents) {
+  const statusRank = { ready: 0, verifying: 1, unverified: 2, discovered: 2, no_key: 3, invalid: 4 }
+  return [...agents].sort((a, b) =>
+    (statusRank[a.status] ?? 3) - (statusRank[b.status] ?? 3)
+    || agentPriority(a) - agentPriority(b)
+    || String(a.name).localeCompare(String(b.name)),
+  )
 }
 
 function agentCapabilityLabel(agent) {
