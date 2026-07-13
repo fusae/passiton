@@ -655,6 +655,21 @@ test('win32: resolveCommand prefers .cmd over bare name when .exe absent', async
   }
 })
 
+test('win32: resolveCommand prefers .ps1 over .cmd when .exe absent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-win32-ps1-'))
+  writeFileSync(join(dir, 'codex.ps1'), 'fake ps1')
+  writeFileSync(join(dir, 'codex.cmd'), 'fake cmd')
+  setExtraAgentSearchPathsForTesting([dir])
+  setPlatformForTesting('win32')
+
+  try {
+    const result = await findExecutable(['codex'])
+    assert.equal(result, join(dir, 'codex.ps1'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('win32: resolveCommand tries bare name LAST', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-win32-bare-'))
   writeFileSync(join(dir, 'gemini'), 'fake bare')

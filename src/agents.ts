@@ -787,7 +787,7 @@ function isPathLike(command: string, platform: string = currentPlatform()): bool
 
 async function resolvePathWithExtensions(commandPath: string): Promise<string | undefined> {
   const lower = commandPath.toLowerCase()
-  if (lower.endsWith('.exe') || lower.endsWith('.cmd') || lower.endsWith('.bat')) {
+  if (lower.endsWith('.exe') || lower.endsWith('.ps1') || lower.endsWith('.cmd') || lower.endsWith('.bat')) {
     return await isSpawnableExecutable(commandPath) ? commandPath : undefined
   }
   for (const ext of getExecutableExtensions()) {
@@ -811,13 +811,13 @@ async function isSpawnableExecutable(filePath: string): Promise<boolean> {
 }
 
 function getExecutableExtensions(): string[] {
-  const ourPriority = ['.exe', '.cmd', '.bat']
+  const ourPriority = ['.exe', '.ps1', '.cmd', '.bat']
   const pathext = process.env.PATHEXT
   if (pathext) {
     const userExts = pathext.split(';').filter(Boolean).map((e) => e.toLowerCase())
     const result: string[] = []
     for (const ext of ourPriority) {
-      if (userExts.includes(ext) && !result.includes(ext)) result.push(ext)
+      if (!result.includes(ext)) result.push(ext)
     }
     for (const ext of userExts) {
       if (!result.includes(ext)) result.push(ext)
