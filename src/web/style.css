@@ -2578,7 +2578,11 @@ textarea.input { resize: vertical; min-height: 80px; }
    ============================================================ */
 .agent-list { display: flex; flex-direction: column; gap: 12px; }
 .agent-item {
-  display: flex; align-items: center; gap: 16px;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) max-content 78px minmax(210px, max-content);
+  grid-template-areas: "icon info status reorder actions";
+  align-items: center;
+  gap: 16px;
   background: var(--bg-card); border: 1px solid var(--border);
   border-radius: var(--radius-card); padding: 18px 22px;
   transition: var(--transition);
@@ -2588,14 +2592,29 @@ textarea.input { resize: vertical; min-height: 80px; }
   border-color: var(--border-hover);
 }
 .agent-icon {
+  grid-area: icon;
   width: 40px; height: 40px; border-radius: 10px;
   display: flex; align-items: center; justify-content: center;
   font-size: 0.85rem; font-weight: 700; color: #fff; flex-shrink: 0;
 }
-.agent-info { flex: 1; }
+.agent-info { grid-area: info; min-width: 0; }
 .agent-info .agent-name { font-weight: 600; font-size: 0.95rem; }
-.agent-info .agent-model { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
-.agent-actions { display: flex; gap: 8px; }
+.agent-info .agent-model {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-item > .badge { grid-area: status; justify-self: end; }
+.agent-actions {
+  grid-area: actions;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
 
 .key-masked {
   font-family: 'SF Mono', monospace;
@@ -2939,10 +2958,15 @@ textarea.input { resize: vertical; min-height: 80px; }
 }
 
 .priority-reorder {
+  grid-area: reorder;
   display: flex;
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+}
+
+.priority-reorder-placeholder {
+  width: 78px;
 }
 
 .priority-arrow {
@@ -3113,6 +3137,17 @@ textarea.input { resize: vertical; min-height: 80px; }
   }
   .topbar-right { justify-content: flex-start; }
   .content { padding: 20px 16px; }
+  .agent-item {
+    grid-template-columns: 40px minmax(0, 1fr) max-content;
+    grid-template-areas:
+      "icon info status"
+      ". reorder actions";
+  }
+  .agent-actions {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .priority-reorder-placeholder { display: none; }
   .session-layout {
     grid-template-columns: 1fr;
     height: auto;

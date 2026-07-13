@@ -5728,7 +5728,7 @@ function renderLocalCliAgentsList() {
       <div class="agent-icon">${escapeHtml(agent.name.charAt(0).toUpperCase())}</div>
       <div class="agent-info">
         <div class="agent-name">${escapeHtml(agent.name)}</div>
-        <div class="agent-model">${escapeHtml(agent.adapter)} · ${escapeHtml(agent.command || '')}${agent.version ? ` · ${escapeHtml(agent.version)}` : ''}</div>
+        <div class="agent-model" title="${escapeAttr(`${agent.adapter} · ${agent.command || ''}${agent.version ? ` · ${agent.version}` : ''}`)}">${escapeHtml(agent.adapter)} · ${escapeHtml(agent.command || '')}${agent.version ? ` · ${escapeHtml(agent.version)}` : ''}</div>
       </div>
       <span class="badge badge-${badgeClass}">${escapeHtml(statusLabel(agent.status))}</span>
       ${canReorder ? `
@@ -5736,7 +5736,7 @@ function renderLocalCliAgentsList() {
           <button class="btn btn-ghost btn-sm priority-arrow" ${configuredReadyAgents[0]?.name === agent.name ? 'disabled' : ''} aria-label="${escapeAttr(t('settings.localCli.moveUp'))}" title="${escapeAttr(t('settings.localCli.moveUp'))}" onclick='window.moveLocalCliAgentPriority(${jsString(agent.name)}, "up")'>&uarr;</button>
           <button class="btn btn-ghost btn-sm priority-arrow" ${configuredReadyAgents[configuredReadyAgents.length - 1]?.name === agent.name ? 'disabled' : ''} aria-label="${escapeAttr(t('settings.localCli.moveDown'))}" title="${escapeAttr(t('settings.localCli.moveDown'))}" onclick='window.moveLocalCliAgentPriority(${jsString(agent.name)}, "down")'>&darr;</button>
         </div>
-      ` : ''}
+      ` : '<div class="priority-reorder priority-reorder-placeholder" aria-hidden="true"></div>'}
       <div class="agent-actions">
         <button class="btn btn-ghost btn-sm" ${diagnosing ? 'disabled' : ''} onclick='window.showLocalCliAgentDiagnostics(${jsString(agent.name)})'>${diagnosing ? t('modal.agentDiagnostics.running') : t('settings.localCli.diagnose')}</button>
         ${canDelete ? `<button class="btn btn-ghost btn-sm" onclick='window.showLocalCliAgentModal(${jsString(agent.name)})'>${t('settings.agents.edit')}</button>` : ''}
