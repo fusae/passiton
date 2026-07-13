@@ -775,7 +775,7 @@ test('configured local agent without persisted verification is unverified', asyn
 
 // --- win32 extension resolution tests (run on any OS via platform injection) ---
 
-test('win32: discovers the full supported CLI agent set from npm-style .cmd shims', async () => {
+test('win32: discovers the full supported CLI agent set from npm-style PowerShell shims', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'passiton-win32-agent-set-'))
   const oldAppData = process.env.APPDATA
   const oldLocalAppData = process.env.LOCALAPPDATA
@@ -784,9 +784,9 @@ test('win32: discovers the full supported CLI agent set from npm-style .cmd shim
     'qwen', 'cline', 'aider', 'droid', 'amp', 'openhands', 'vibe',
   ]
   for (const command of commands) {
-    const filePath = join(dir, `${command}.cmd`)
+    const filePath = join(dir, `${command}.ps1`)
     if (process.platform === 'win32') {
-      writeFileSync(filePath, '@echo off\r\nif "%~1"=="--version" (echo fake-agent-1.0 & exit /b 0)\r\necho TURING_READY\r\n')
+      writeFileSync(filePath, 'if ($args[0] -eq "--version") { Write-Output "fake-agent-1.0"; exit 0 }\r\nWrite-Output "TURING_READY"\r\n')
     } else {
       writeFileSync(filePath, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo fake-agent-1.0; exit 0; fi\necho TURING_READY\n')
       chmodSync(filePath, 0o755)
@@ -800,7 +800,7 @@ test('win32: discovers the full supported CLI agent set from npm-style .cmd shim
   try {
     const catalog = new AgentCatalog({}, true)
     await catalog.discover({ refresh: true })
-    const discovered = await catalog.listAgents({ refresh: true })
+    const discovered = await catalog.listAgents()
     const names = discovered.map((agent) => agent.name).sort()
 
     assert.deepEqual(names, [
@@ -810,7 +810,7 @@ test('win32: discovers the full supported CLI agent set from npm-style .cmd shim
     ])
     assert.ok(discovered.every((agent) => agent.source === 'discovered'))
     assert.ok(discovered.every((agent) => agent.healthy))
-    assert.ok(discovered.every((agent) => agent.command?.endsWith('.cmd')))
+    assert.ok(discovered.every((agent) => agent.command?.endsWith('.ps1')))
   } finally {
     if (oldAppData === undefined) delete process.env.APPDATA
     else process.env.APPDATA = oldAppData
@@ -820,9 +820,10 @@ test('win32: discovers the full supported CLI agent set from npm-style .cmd shim
   }
 })
 
-test('win32: resolveCommand prefers .exe over .cmd and bare name', async () => {
+test('win32: resolveCommand prefers .exe over PowerShell and cmd shims', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-win32-exe-'))
   writeFileSync(join(dir, 'claude.exe'), 'fake exe')
+  writeFileSync(join(dir, 'claude.ps1'), 'fake ps1')
   writeFileSync(join(dir, 'claude.cmd'), 'fake cmd')
   writeFileSync(join(dir, 'claude'), 'fake bare')
   setExtraAgentSearchPathsForTesting([dir])
@@ -831,6 +832,20 @@ test('win32: resolveCommand prefers .exe over .cmd and bare name', async () => {
   try {
     const result = await findExecutable(['claude'])
     assert.equal(result, join(dir, 'claude.exe'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('win32: resolveCommand prefers PowerShell over cmd shim', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-win32-ps1-'))
+  writeFileSync(join(dir, 'codex.ps1'), 'fake ps1')
+  writeFileSync(join(dir, 'codex.cmd'), 'fake cmd')
+  setExtraAgentSearchPathsForTesting([dir])
+  setPlatformForTesting('win32')
+
+  try {
+    assert.equal(await findExecutable(['codex']), join(dir, 'codex.ps1'))
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

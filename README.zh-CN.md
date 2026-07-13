@@ -48,6 +48,8 @@ npm test
 
 带 `cwd` 的任务需要具备文件系统能力的本地 CLI agent。API assistant 可以规划和评审，但不能直接读写本地文件。
 
+Windows 自定义 Agent 应优先填写 `.exe`、npm 生成的 `.ps1`，或 `node.exe + CLI JavaScript 入口`；Passiton 会把带有同名 `.ps1` 的 `.cmd` 自动切换到 PowerShell shim，避免多行 Prompt 被 `cmd.exe` 拆分。
+
 ## 按你的方式驱动：UI 或 API
 
 Passiton 可通过点击 Web UI 操作，也可完全通过自描述 HTTP API 操作；Claude Code、ChatGPT 或任何能发 HTTP 请求的 AI operator 都可以先读取 `GET /api/docs` 再驱动它。

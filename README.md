@@ -48,6 +48,8 @@ npm test
 
 Tasks with `cwd` require a filesystem-capable local CLI agent. API assistants can plan and review, but they cannot read or write local files directly.
 
+On Windows, custom agents should use a native `.exe`, an npm-generated `.ps1` shim, or `node.exe` plus the CLI JavaScript entrypoint. Passiton automatically switches a `.cmd` shim to its matching `.ps1` sibling so `cmd.exe` cannot split multi-line prompts.
+
 ## Drive It Your Way: UI Or API
 
 Passiton can be operated by clicking the web UI, or entirely over the self-describing HTTP API that an AI operator such as Claude Code, ChatGPT, or any HTTP-capable agent can drive by reading `GET /api/docs`.

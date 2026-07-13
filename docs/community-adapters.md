@@ -38,6 +38,8 @@ curl -s -X POST "$BASE/api/config/agents" \
 
 For `custom-cli`, `args` must include the `{prompt}` token. If it is missing, the API rejects the request with a validation error so the agent definition can be corrected before use.
 
+On Windows, prefer a native `.exe`, an npm-generated `.ps1` shim, or `node.exe` plus the CLI JavaScript entrypoint. Passiton does not execute a standalone `.cmd`/`.bat` shim because `cmd.exe` cannot safely preserve arbitrary multi-line prompt arguments; when a matching `.ps1` sibling exists, Passiton uses it automatically.
+
 ## Other Agents We Know About
 
 These CLI agents are not auto-discovered or bundled today because they need a cleaner non-interactive mode, require an editor host, or need adapter work:

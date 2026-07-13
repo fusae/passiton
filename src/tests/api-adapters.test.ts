@@ -423,6 +423,38 @@ test('Windows PowerShell shims run through powershell with argument boundaries p
   assert.equal(invocation.shell, undefined)
 })
 
+test('Windows npm cmd shims use their PowerShell sibling instead of shell:true', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-win-shim-'))
+  try {
+    const cmd = join(dir, 'agent.cmd')
+    const ps1 = join(dir, 'agent.ps1')
+    writeFileSync(cmd, '@echo off\r\n')
+    writeFileSync(ps1, 'node agent.js $args\r\n')
+
+    const invocation = prepareCommandForSpawn(cmd, ['run', 'line one\nline "two" & more'], 'win32')
+
+    assert.match(invocation.command.toLowerCase(), /powershell\.exe$/)
+    assert.deepEqual(invocation.args.slice(-3), [ps1, 'run', 'line one\nline "two" & more'])
+    assert.equal(invocation.shell, undefined)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('Windows cmd shims without a safe sibling fail with an actionable error', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-win-unsafe-shim-'))
+  try {
+    const cmd = join(dir, 'agent.cmd')
+    writeFileSync(cmd, '@echo off\r\n')
+    assert.throws(
+      () => prepareCommandForSpawn(cmd, ['multi line\nprompt'], 'win32'),
+      /Configure the sibling \.ps1 shim, a native \.exe, or node\.exe/,
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 function mockFetch(handler: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>): void {
   globalThis.fetch = handler as typeof fetch
 }

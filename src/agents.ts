@@ -684,6 +684,7 @@ export function getBundledOpenCodeCandidates(
     return [
       env.APPDATA && win32.join(env.APPDATA, 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe'),
       win32.join(home, '.opencode', 'bin', 'opencode.exe'),
+      win32.join(home, '.opencode', 'bin', 'opencode.ps1'),
       win32.join(home, '.opencode', 'bin', 'opencode.cmd'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'opencode', 'bin', 'opencode.exe'),
     ].filter((value): value is string => Boolean(value))
@@ -858,6 +859,8 @@ async function isSpawnableExecutable(filePath: string): Promise<boolean> {
 }
 
 function getExecutableExtensions(): string[] {
+  // PowerShell npm shims preserve argument boundaries; cmd.exe cannot safely
+  // transport arbitrary multi-line prompts.
   const ourPriority = ['.exe', '.ps1', '.cmd', '.bat']
   const pathext = process.env.PATHEXT
   if (pathext) {

@@ -1,4 +1,5 @@
 import { spawn } from 'child_process'
+import { existsSync } from 'fs'
 import type { AdapterSendOpts } from '../types.js'
 
 const HARD_TIMEOUT_MS = 2 * 60 * 60 * 1000
@@ -14,41 +15,33 @@ function currentPlatform(): string {
   return platformOverride ?? process.platform
 }
 
-/**
- * On win32, .cmd/.bat files cannot be spawned directly by Node.js
- * (CVE-2024-27980 patched Node to reject bare .cmd/.bat spawn).
- * We use { shell: true } which lets Node internally wrap via cmd.exe /d /s /c.
- *
- * Quoting rationale: { shell: true } passes the argument ARRAY to Node.js which
- * internally joins them into a single cmd.exe command string.  Node.js handles
- * the outer quoting for the command itself, but does NOT individually quote each
- * argument.  For fixed adapter args (flags like --ephemeral, -p) this is safe.
- * The {prompt} argument is interpolated into args by each adapter and may contain
- * spaces, quotes, or newlines.  Using shell:true is still the safest practical
- * choice because:
- *   1. The alternative (manual cmd.exe /c "..." quoting) is MORE dangerous —
- *      cmd.exe quoting rules are broken for arbitrary content (strip-and-requote).
- *   2. Node.js ≥18 does apply limited quoting to arguments containing spaces.
- *   3. .exe files spawn directly without shell, so only .cmd/.bat need this path.
- */
-function shouldUseShell(command: string, platform: string = currentPlatform()): boolean {
-  if (platform !== 'win32') return false
-  const lower = command.toLowerCase()
-  return lower.endsWith('.cmd') || lower.endsWith('.bat')
-}
-
 export function prepareCommandForSpawn(command: string, args: string[], platform: string = currentPlatform()): {
   command: string
   args: string[]
   shell?: boolean
 } {
-  if (platform === 'win32' && command.toLowerCase().endsWith('.ps1')) {
+  if (platform !== 'win32') return { command, args }
+
+  const lower = command.toLowerCase()
+  if (lower.endsWith('.ps1')) {
     return {
       command: process.env.SystemRoot ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe` : 'powershell.exe',
       args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', command, ...args],
     }
   }
-  return { command, args, ...(shouldUseShell(command, platform) ? { shell: true } : {}) }
+
+  if (lower.endsWith('.cmd') || lower.endsWith('.bat')) {
+    const powershellShim = command.replace(/\.(?:cmd|bat)$/i, '.ps1')
+    if (existsSync(powershellShim)) {
+      return prepareCommandForSpawn(powershellShim, args, platform)
+    }
+    throw new Error(
+      `Unsafe Windows command shim \`${command}\`: .cmd/.bat cannot safely receive prompts containing spaces, quotes, or newlines. ` +
+      'Configure the sibling .ps1 shim, a native .exe, or node.exe with the CLI JavaScript entrypoint.'
+    )
+  }
+
+  return { command, args }
 }
 
 interface RunCommandOptions {
