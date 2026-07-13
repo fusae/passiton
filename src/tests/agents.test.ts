@@ -54,12 +54,50 @@ test('Codex discovery includes the executable bundled with ChatGPT on macOS', ()
 
 test('Codex discovery includes common ChatGPT locations on Windows', () => {
   const candidates = getBundledCodexCandidates('win32', 'C:\\Users\\test', {
+    APPDATA: 'C:\\Users\\test\\AppData\\Roaming',
     LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local',
     ProgramFiles: 'C:\\Program Files',
   })
+  assert.ok(candidates.includes(win32.join('C:\\Users\\test\\AppData\\Roaming', 'npm', 'codex.ps1')))
+  assert.ok(candidates.includes(win32.join('C:\\Users\\test\\AppData\\Roaming', 'npm', 'codex.cmd')))
   assert.ok(candidates.some((candidate) => candidate.endsWith(win32.join('Microsoft', 'WindowsApps', 'codex.exe'))))
   assert.ok(candidates.some((candidate) => candidate.endsWith(win32.join('Programs', 'ChatGPT', 'resources', 'codex.exe'))))
   assert.ok(candidates.some((candidate) => candidate.endsWith(win32.join('ChatGPT', 'resources', 'codex.exe'))))
+})
+
+test('win32: Codex discovery prefers npm PowerShell shim over AppX path', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'passiton-codex-npm-win32-'))
+  const appData = join(root, 'Roaming')
+  const localAppData = join(root, 'Local')
+  const ps1Path = win32.join(appData, 'npm', 'codex.ps1')
+  const appxPath = win32.join(localAppData, 'Microsoft', 'WindowsApps', 'codex.exe')
+  const oldPath = process.env.PATH
+  const oldAppData = process.env.APPDATA
+  const oldLocalAppData = process.env.LOCALAPPDATA
+
+  mkdirSync(dirname(ps1Path), { recursive: true })
+  mkdirSync(dirname(appxPath), { recursive: true })
+  writeFileSync(ps1Path, 'fake ps1')
+  writeFileSync(appxPath, 'fake appx exe')
+  setPlatformForTesting('win32')
+  process.env.PATH = join(root, 'empty-path')
+  process.env.APPDATA = appData
+  process.env.LOCALAPPDATA = localAppData
+
+  try {
+    const catalog = new AgentCatalog({}, true)
+    await catalog.discover({ refresh: true })
+    const codex = (await catalog.listAgents()).find((agent) => agent.name === 'codex')
+    assert.equal(codex?.command, ps1Path)
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+    if (oldAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = oldAppData
+    if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('Claude discovery includes the latest CLI bundled by Claude App on macOS', async () => {

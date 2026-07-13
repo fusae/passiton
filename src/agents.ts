@@ -588,6 +588,8 @@ export function getBundledCodexCandidates(
 
   if (platform === 'win32') {
     return [
+      env.APPDATA && win32.join(env.APPDATA, 'npm', 'codex.ps1'),
+      env.APPDATA && win32.join(env.APPDATA, 'npm', 'codex.cmd'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'codex.exe'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Programs', 'ChatGPT', 'resources', 'codex.exe'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'ChatGPT', 'resources', 'codex.exe'),
