@@ -169,7 +169,10 @@ export class AgentCatalog {
     }
 
     for (const preset of DISCOVERY_PRESETS) {
-      const commands = [...preset.commands, ...await getBundledAgentCandidates(preset.adapter)]
+      const bundledCommands = await getBundledAgentCandidates(preset.adapter)
+      const commands = preset.adapter === 'opencode' && currentPlatform() === 'win32'
+        ? [...bundledCommands, ...preset.commands]
+        : [...preset.commands, ...bundledCommands]
       const existing = this.entries.get(preset.name)
       if (existing?.source === 'configured') {
         const resolved = existing.command ? await resolveCommand(existing.command) : undefined
@@ -184,7 +187,11 @@ export class AgentCatalog {
         // Repair stale paths left behind when Codex moved from Codex.app to
         // ChatGPT.app, or when an npm shim changed from a bare path to .cmd.
         const replacement = await findExecutable(commands, preset.envVars)
-        if (replacement) this.updateConfiguredCommand(existing, replacement)
+        if (replacement) {
+          this.updateConfiguredCommand(existing, replacement)
+        } else if (this.autoConfigureDiscovered && existing.config?.autoDiscovered) {
+          this.removeAutoConfiguredAgent(existing)
+        }
         continue
       }
 
@@ -241,6 +248,18 @@ export class AgentCatalog {
       agents: { ...current.agents, [entry.name]: nextAgent },
     })
     entry.config = nextAgent
+  }
+
+  private removeAutoConfiguredAgent(entry: AgentEntry): void {
+    if (!entry.config?.autoDiscovered) return
+    const current = loadConfig()
+    const currentAgent = current.agents[entry.name]
+    if (!currentAgent?.autoDiscovered || currentAgent.adapter !== entry.adapter || currentAgent.command !== entry.command) return
+    const { [entry.name]: _removed, ...agents } = current.agents
+    void _removed
+    writeConfig({ ...current, agents })
+    this.entries.delete(entry.name)
+    this.probeCache.clear()
   }
 
   registerDiscoveredAdapters(router: Router): void {
@@ -616,6 +635,7 @@ export function getBundledOpenCodeCandidates(
 ): string[] {
   if (platform === 'win32') {
     return [
+      env.APPDATA && win32.join(env.APPDATA, 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe'),
       win32.join(home, '.opencode', 'bin', 'opencode.exe'),
       win32.join(home, '.opencode', 'bin', 'opencode.cmd'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'opencode', 'bin', 'opencode.exe'),
@@ -665,7 +685,7 @@ async function resolveCommand(command: string): Promise<string | undefined> {
     for (const entry of await getSearchPathEntries()) {
       for (const ext of extensions) {
         const fullPath = join(entry, command + ext)
-        if (await isExecutable(fullPath)) {
+        if (await isSpawnableExecutable(fullPath)) {
           return fullPath
         }
       }
@@ -696,7 +716,7 @@ async function commandExists(command: string): Promise<boolean> {
   if (platform === 'win32') {
     for (const entry of staticSearchPathEntries()) {
       for (const ext of getExecutableExtensions()) {
-        if (await isExecutable(join(entry, command + ext))) return true
+        if (await isSpawnableExecutable(join(entry, command + ext))) return true
       }
     }
     return false
@@ -768,15 +788,26 @@ function isPathLike(command: string, platform: string = currentPlatform()): bool
 async function resolvePathWithExtensions(commandPath: string): Promise<string | undefined> {
   const lower = commandPath.toLowerCase()
   if (lower.endsWith('.exe') || lower.endsWith('.cmd') || lower.endsWith('.bat')) {
-    return await isExecutable(commandPath) ? commandPath : undefined
+    return await isSpawnableExecutable(commandPath) ? commandPath : undefined
   }
   for (const ext of getExecutableExtensions()) {
     const candidate = ext ? commandPath + ext : commandPath
-    if (await isExecutable(candidate)) {
+    if (await isSpawnableExecutable(candidate)) {
       return candidate
     }
   }
   return undefined
+}
+
+function isKnownUnspawnableWindowsPath(filePath: string): boolean {
+  if (currentPlatform() !== 'win32') return false
+  const normalized = filePath.replaceAll('/', '\\').toLowerCase()
+  return normalized.includes('\\program files\\windowsapps\\openai.codex_')
+}
+
+async function isSpawnableExecutable(filePath: string): Promise<boolean> {
+  if (isKnownUnspawnableWindowsPath(filePath)) return false
+  return isExecutable(filePath)
 }
 
 function getExecutableExtensions(): string[] {

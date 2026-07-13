@@ -84,10 +84,91 @@ test('OpenCode discovery includes its user-local installer paths', () => {
     ['/Users/test/.opencode/bin/opencode']
   )
   const windows = getBundledOpenCodeCandidates('win32', 'C:\\Users\\test', {
+    APPDATA: 'C:\\Users\\test\\AppData\\Roaming',
     LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local',
   })
+  assert.ok(windows.includes(win32.join('C:\\Users\\test\\AppData\\Roaming', 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe')))
   assert.ok(windows.includes(win32.join('C:\\Users\\test', '.opencode', 'bin', 'opencode.exe')))
   assert.ok(windows.includes(win32.join('C:\\Users\\test\\AppData\\Local', 'opencode', 'bin', 'opencode.exe')))
+})
+
+test('win32: OpenCode discovery prefers real exe over npm .cmd shim', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'passiton-opencode-win32-'))
+  const appData = join(root, 'Roaming')
+  const localAppData = join(root, 'Local')
+  const npmDir = join(appData, 'npm')
+  const exePath = win32.join(appData, 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe')
+  const oldPath = process.env.PATH
+  const oldAppData = process.env.APPDATA
+  const oldLocalAppData = process.env.LOCALAPPDATA
+
+  mkdirSync(dirname(exePath), { recursive: true })
+  mkdirSync(npmDir, { recursive: true })
+  writeFileSync(exePath, 'fake exe')
+  writeFileSync(join(npmDir, 'opencode.cmd'), 'fake shim')
+  setPlatformForTesting('win32')
+  process.env.PATH = npmDir
+  process.env.APPDATA = appData
+  process.env.LOCALAPPDATA = localAppData
+
+  try {
+    const catalog = new AgentCatalog({}, true)
+    await catalog.discover({ refresh: true })
+    const opencode = (await catalog.listAgents()).find((agent) => agent.name === 'opencode')
+    assert.equal(opencode?.command, exePath)
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+    if (oldAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = oldAppData
+    if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('win32: discovery skips protected Codex AppX package executables', async () => {
+  setPlatformForTesting('win32')
+  const appxCodex = 'C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.8479.0_x64__2p2nqsd0c76g0\\app\\resources\\codex.exe'
+  assert.equal(await findExecutable([appxCodex]), undefined)
+})
+
+test('win32: refresh removes stale auto-discovered Codex AppX config', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-codex-appx-'))
+  const oldPath = process.env.PATH
+  const oldLocalAppData = process.env.LOCALAPPDATA
+  const appxCodex = 'C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.8479.0_x64__2p2nqsd0c76g0\\app\\resources\\codex.exe'
+  setPlatformForTesting('win32')
+  process.env.PATH = dir
+  process.env.LOCALAPPDATA = join(dir, 'localappdata')
+
+  try {
+    await withConfigHome(async () => {
+      writeConfig({
+        ...DEFAULT_CONFIG,
+        agents: {
+          codex: {
+            adapter: 'codex',
+            command: appxCodex,
+            args: ['exec', '{prompt}'],
+            timeout: 1_000,
+            autoDiscovered: true,
+          },
+        },
+      })
+      const catalog = new AgentCatalog(loadConfig().agents, true, true)
+      await catalog.discover({ refresh: true })
+
+      assert.equal(catalog.configuredAgentConfigs().codex, undefined)
+      assert.equal(loadConfig().agents.codex, undefined)
+    })
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+    if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('discovery repairs a configured Codex path after the app executable moves', async () => {
@@ -500,6 +581,8 @@ test('configured local agent without persisted verification is unverified', asyn
 
 test('win32: discovers the full supported CLI agent set from npm-style .cmd shims', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'passiton-win32-agent-set-'))
+  const oldAppData = process.env.APPDATA
+  const oldLocalAppData = process.env.LOCALAPPDATA
   const commands = [
     'codex', 'claude', 'gemini', 'opencode', 'copilot', 'cursor-agent',
     'qwen', 'cline', 'aider', 'droid', 'amp', 'openhands', 'vibe',
@@ -515,6 +598,8 @@ test('win32: discovers the full supported CLI agent set from npm-style .cmd shim
   }
   setExtraAgentSearchPathsForTesting([dir])
   setPlatformForTesting('win32')
+  process.env.APPDATA = join(dir, 'appdata')
+  process.env.LOCALAPPDATA = join(dir, 'localappdata')
 
   try {
     const catalog = new AgentCatalog({}, true)
@@ -531,6 +616,10 @@ test('win32: discovers the full supported CLI agent set from npm-style .cmd shim
     assert.ok(discovered.every((agent) => agent.healthy))
     assert.ok(discovered.every((agent) => agent.command?.endsWith('.cmd')))
   } finally {
+    if (oldAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = oldAppData
+    if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = oldLocalAppData
     rmSync(dir, { recursive: true, force: true })
   }
 })
