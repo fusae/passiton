@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import http from 'node:http'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, win32 } from 'node:path'
 import { once } from 'node:events'
 import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -487,6 +487,47 @@ test('POST /api/config/agents rejects invalid custom CLI config', async () => {
   })
 })
 
+test('PUT /api/config/agents preserves versionArgs when changing priority', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'cli-version-args@example.com')
+    const name = `codex-node-test-${Date.now()}`
+    const npmShim = win32.join('C:\\Users\\test\\AppData\\Roaming', 'npm', 'codex.ps1')
+    const codexJs = win32.join('C:\\Users\\test\\AppData\\Roaming', 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
+    const create = await fetch(`${baseUrl}/api/config/agents`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        adapter: 'codex',
+        command: npmShim,
+        timeout: 10_000,
+      }),
+    })
+    assert.equal(create.status, 201)
+
+    const current = await create.json() as Record<string, any>
+    assert.equal(current.agents[name].command, process.execPath)
+    assert.deepEqual(current.agents[name].versionArgs, [codexJs, '--version'])
+
+    const update = await fetch(`${baseUrl}/api/config/agents/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        adapter: 'codex',
+        command: process.execPath,
+        args: [codexJs, 'exec', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
+        timeout: 10_000,
+        priority: 2,
+      }),
+    })
+    assert.equal(update.status, 200)
+    const payload = await update.json() as Record<string, any>
+    assert.deepEqual(payload.agents[name].versionArgs, [codexJs, '--version'])
+    assert.equal(payload.agents[name].priority, 2)
+  })
+})
+
 test('PUT /api/config rejects all unsafe allowedWorkspaces entries', async () => {
   await withServer(async (baseUrl) => {
     delete process.env.PASSITON_ALLOWED_WORKSPACES
@@ -924,8 +965,12 @@ test('POST /api/tasks without agent skips non-filesystem candidates for cwd task
         body: JSON.stringify({ prompt: 'cwd default', cwd }),
       })
       assert.equal(create.status, 201)
-      const task = await create.json() as { agent: { adapter: string } }
+      const task = await create.json() as { id: string; agent: { adapter: string } }
       assert.equal(task.agent.adapter, 'zzz-local')
+      await waitFor(async () => {
+        const status = state.getTask(task.id, auth.userId)?.status
+        return status === 'done' || status === 'error' || status === 'stopped'
+      }, 15_000)
     }, {
       configureRouter: (router) => {
         router.registerAdapter(new StubAdapter('zzz-local', async () => '[RESULT]local[/RESULT]'))
@@ -935,7 +980,7 @@ test('POST /api/tasks without agent skips non-filesystem candidates for cwd task
       ]),
     })
   } finally {
-    rmSync(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
+    await removeDirEventually(cwd)
   }
 })
 
@@ -1494,6 +1539,21 @@ async function waitFor(check: () => Promise<boolean>, timeoutMs = 5_000): Promis
     await new Promise((resolve) => setTimeout(resolve, 20))
   }
   throw new Error('Timed out waiting for condition')
+}
+
+async function removeDirEventually(path: string, timeoutMs = 15_000): Promise<void> {
+  const started = Date.now()
+  let lastError: unknown
+  while (Date.now() - started < timeoutMs) {
+    try {
+      rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+      return
+    } catch (err) {
+      lastError = err
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+  }
+  if (lastError) throw lastError
 }
 
 test('agent CRUD stores user API model configs', async () => {

@@ -117,6 +117,47 @@ test('Claude discovery includes the latest CLI bundled by Claude App on macOS', 
   }
 })
 
+test('Claude discovery includes npm package exe on Windows', async () => {
+  const candidates = await getBundledClaudeCandidates('win32', 'C:\\Users\\test', {
+    APPDATA: 'C:\\Users\\test\\AppData\\Roaming',
+    LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local',
+  })
+  assert.ok(candidates.includes(win32.join('C:\\Users\\test\\AppData\\Roaming', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')))
+  assert.ok(candidates.some((candidate) => candidate.endsWith(win32.join('Programs', 'Claude', 'resources', 'claude.exe'))))
+})
+
+test('win32: Claude npm shim discovery stores the real package exe', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'passiton-claude-npm-win32-'))
+  const npmDir = join(root, 'npm')
+  const exePath = join(npmDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')
+  const oldPath = process.env.PATH
+  const oldAppData = process.env.APPDATA
+  const oldLocalAppData = process.env.LOCALAPPDATA
+
+  mkdirSync(dirname(exePath), { recursive: true })
+  writeFileSync(join(npmDir, 'claude.ps1'), 'fake ps1')
+  writeFileSync(exePath, 'fake exe')
+  setPlatformForTesting('win32')
+  process.env.PATH = npmDir
+  process.env.APPDATA = join(root, 'Roaming')
+  process.env.LOCALAPPDATA = join(root, 'Local')
+
+  try {
+    const catalog = new AgentCatalog({}, true)
+    await catalog.discover({ refresh: true })
+    const claude = (await catalog.listAgents()).find((agent) => agent.name === 'claude-code')
+    assert.equal(claude?.command, exePath)
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+    if (oldAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = oldAppData
+    if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('OpenCode discovery includes its user-local installer paths', () => {
   assert.deepEqual(
     getBundledOpenCodeCandidates('darwin', '/Users/test', {}),

@@ -648,6 +648,7 @@ export async function getBundledClaudeCandidates(
     ].filter((value): value is string => Boolean(value))
     const versioned = (await Promise.all(roots.map((root) => versionedCandidates(root, 'claude.exe')))).flat()
     return [
+      env.APPDATA && win32.join(env.APPDATA, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Programs', 'Claude', 'resources', 'claude.exe'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Programs', 'Claude', 'claude.exe'),
       ...versioned,
@@ -973,7 +974,19 @@ async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ heal
     return { healthy: false, error: err instanceof Error ? err.message : String(err) }
   } finally {
     if (cwd) {
-      await rm(cwd, { recursive: true, force: true })
+      await removeDirEventually(cwd)
+    }
+  }
+}
+
+async function removeDirEventually(path: string, timeoutMs = 15_000): Promise<void> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    try {
+      await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+      return
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 100))
     }
   }
 }
