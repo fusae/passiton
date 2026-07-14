@@ -169,12 +169,33 @@ export class AgentCatalog {
     }
 
     for (const preset of DISCOVERY_PRESETS) {
-      const commands = [...preset.commands, ...await getBundledAgentCandidates(preset.adapter)]
+      const bundledCommands = await getBundledAgentCandidates(preset.adapter)
+      const commands = preset.adapter === 'opencode' && currentPlatform() === 'win32'
+        ? [...bundledCommands, ...preset.commands]
+        : [...preset.commands, ...bundledCommands]
       const existing = this.entries.get(preset.name)
       if (existing?.source === 'configured') {
+        if (this.autoConfigureDiscovered && existing.config?.autoDiscovered) {
+          const replacement = await findExecutable(commands, preset.envVars)
+          if (replacement) {
+            const discoveredConfig = createDiscoveredAgentConfig(preset.adapter, replacement)
+            if (discoveredConfig && !sameAgentInvocation(existing.config, discoveredConfig)) {
+              const validation = await validateDiscoveredAgent(preset.name, discoveredConfig)
+              if (validation.healthy) {
+                this.updateConfiguredAgent(existing, discoveredConfig, validation.version)
+              }
+            }
+          } else {
+            this.removeAutoConfiguredAgent(existing)
+          }
+          continue
+        }
+
         const resolved = existing.command ? await resolveCommand(existing.command) : undefined
         if (resolved) {
-          if (resolved !== existing.command) this.updateConfiguredCommand(existing, resolved)
+          if (resolved !== existing.command) {
+            this.updateConfiguredCommand(existing, resolved)
+          }
           if (this.autoConfigureDiscovered && !existing.config?.autoDiscovered) {
             this.markAutoConfigured(existing)
           }
@@ -184,7 +205,9 @@ export class AgentCatalog {
         // Repair stale paths left behind when Codex moved from Codex.app to
         // ChatGPT.app, or when an npm shim changed from a bare path to .cmd.
         const replacement = await findExecutable(commands, preset.envVars)
-        if (replacement) this.updateConfiguredCommand(existing, replacement)
+        if (replacement) {
+          this.updateConfiguredCommand(existing, replacement)
+        }
         continue
       }
 
@@ -207,7 +230,7 @@ export class AgentCatalog {
       this.entries.set(preset.name, {
         name: preset.name,
         adapter: preset.adapter,
-        command,
+        command: config.command ?? command,
         source: this.autoConfigureDiscovered ? 'configured' : 'discovered',
         supported: preset.supported,
         availableForSessions: preset.supported,
@@ -241,6 +264,45 @@ export class AgentCatalog {
       agents: { ...current.agents, [entry.name]: nextAgent },
     })
     entry.config = nextAgent
+  }
+
+  private updateConfiguredAgent(entry: AgentEntry, config: AgentConfig, version?: string): void {
+    if (!entry.config) return
+    const current = loadConfig()
+    const currentAgent = current.agents[entry.name]
+    if (!currentAgent || currentAgent.adapter !== entry.adapter) return
+    const now = Date.now()
+    const nextAgent: AgentConfig = {
+      ...currentAgent,
+      ...config,
+      timeout: currentAgent.timeout ?? config.timeout,
+      priority: currentAgent.priority,
+      env: currentAgent.env ?? config.env,
+      autoDiscovered: true,
+      lastVerifiedAt: now,
+      lastVerifiedVersion: version ?? currentAgent.lastVerifiedVersion ?? 'verified',
+      lastVerificationAttemptAt: now,
+    }
+    delete nextAgent.lastVerificationError
+    writeConfig({
+      ...current,
+      agents: { ...current.agents, [entry.name]: nextAgent },
+    })
+    entry.command = nextAgent.command
+    entry.config = nextAgent
+    this.probeCache.clear()
+  }
+
+  private removeAutoConfiguredAgent(entry: AgentEntry): void {
+    if (!entry.config?.autoDiscovered) return
+    const current = loadConfig()
+    const currentAgent = current.agents[entry.name]
+    if (!currentAgent?.autoDiscovered || currentAgent.adapter !== entry.adapter || currentAgent.command !== entry.command) return
+    const { [entry.name]: _removed, ...agents } = current.agents
+    void _removed
+    writeConfig({ ...current, agents })
+    this.entries.delete(entry.name)
+    this.probeCache.clear()
   }
 
   registerDiscoveredAdapters(router: Router): void {
@@ -322,7 +384,7 @@ export class AgentCatalog {
     const commandExecutable = isPathLike(entry.command)
       ? await isExecutable(entry.command)
       : Boolean(await resolveCommand(entry.command))
-    const versionProbe = refresh ? await probeCommand(entry.command) : { healthy: commandExecutable }
+    const versionProbe = refresh ? await probeCommand(entry.command, entry.config?.versionArgs) : { healthy: commandExecutable }
     const smokeProbe = refresh && entry.source === 'configured' && entry.availableForSessions && entry.config
       ? await smokeTestAgent(entry.name, entry.config)
       : undefined
@@ -375,7 +437,7 @@ export class AgentCatalog {
       }
     }
 
-    const versionProbe = await probeCommand(entry.command!)
+    const versionProbe = await probeCommand(entry.command!, entry.config?.versionArgs)
     // Smoke test (a real model round-trip) is the only signal that proves an
     // agent is actually callable — `--version` only proves the binary exists.
     // It's expensive (up to 60s), so we run it only on explicit refresh and
@@ -453,6 +515,7 @@ export class AgentCatalog {
       entry.name,
       entry.command,
       JSON.stringify(entry.config?.args ?? []),
+      JSON.stringify(entry.config?.versionArgs ?? []),
       JSON.stringify(entry.config?.env ?? {}),
     ].join(':')
   }
@@ -569,6 +632,8 @@ export function getBundledCodexCandidates(
 
   if (platform === 'win32') {
     return [
+      env.APPDATA && win32.join(env.APPDATA, 'npm', 'codex.ps1'),
+      env.APPDATA && win32.join(env.APPDATA, 'npm', 'codex.cmd'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'codex.exe'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Programs', 'ChatGPT', 'resources', 'codex.exe'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'ChatGPT', 'resources', 'codex.exe'),
@@ -600,6 +665,7 @@ export async function getBundledClaudeCandidates(
     ].filter((value): value is string => Boolean(value))
     const versioned = (await Promise.all(roots.map((root) => versionedCandidates(root, 'claude.exe')))).flat()
     return [
+      env.APPDATA && win32.join(env.APPDATA, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Programs', 'Claude', 'resources', 'claude.exe'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'Programs', 'Claude', 'claude.exe'),
       ...versioned,
@@ -616,6 +682,7 @@ export function getBundledOpenCodeCandidates(
 ): string[] {
   if (platform === 'win32') {
     return [
+      env.APPDATA && win32.join(env.APPDATA, 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe'),
       win32.join(home, '.opencode', 'bin', 'opencode.exe'),
       win32.join(home, '.opencode', 'bin', 'opencode.cmd'),
       env.LOCALAPPDATA && win32.join(env.LOCALAPPDATA, 'opencode', 'bin', 'opencode.exe'),
@@ -665,7 +732,7 @@ async function resolveCommand(command: string): Promise<string | undefined> {
     for (const entry of await getSearchPathEntries()) {
       for (const ext of extensions) {
         const fullPath = join(entry, command + ext)
-        if (await isExecutable(fullPath)) {
+        if (await isSpawnableExecutable(fullPath)) {
           return fullPath
         }
       }
@@ -696,7 +763,7 @@ async function commandExists(command: string): Promise<boolean> {
   if (platform === 'win32') {
     for (const entry of staticSearchPathEntries()) {
       for (const ext of getExecutableExtensions()) {
-        if (await isExecutable(join(entry, command + ext))) return true
+        if (await isSpawnableExecutable(join(entry, command + ext))) return true
       }
     }
     return false
@@ -767,26 +834,37 @@ function isPathLike(command: string, platform: string = currentPlatform()): bool
 
 async function resolvePathWithExtensions(commandPath: string): Promise<string | undefined> {
   const lower = commandPath.toLowerCase()
-  if (lower.endsWith('.exe') || lower.endsWith('.cmd') || lower.endsWith('.bat')) {
-    return await isExecutable(commandPath) ? commandPath : undefined
+  if (lower.endsWith('.exe') || lower.endsWith('.ps1') || lower.endsWith('.cmd') || lower.endsWith('.bat')) {
+    return await isSpawnableExecutable(commandPath) ? commandPath : undefined
   }
   for (const ext of getExecutableExtensions()) {
     const candidate = ext ? commandPath + ext : commandPath
-    if (await isExecutable(candidate)) {
+    if (await isSpawnableExecutable(candidate)) {
       return candidate
     }
   }
   return undefined
 }
 
+function isKnownUnspawnableWindowsPath(filePath: string): boolean {
+  if (currentPlatform() !== 'win32') return false
+  const normalized = filePath.replaceAll('/', '\\').toLowerCase()
+  return normalized.includes('\\program files\\windowsapps\\openai.codex_')
+}
+
+async function isSpawnableExecutable(filePath: string): Promise<boolean> {
+  if (isKnownUnspawnableWindowsPath(filePath)) return false
+  return isExecutable(filePath)
+}
+
 function getExecutableExtensions(): string[] {
-  const ourPriority = ['.exe', '.cmd', '.bat']
+  const ourPriority = ['.exe', '.ps1', '.cmd', '.bat']
   const pathext = process.env.PATHEXT
   if (pathext) {
     const userExts = pathext.split(';').filter(Boolean).map((e) => e.toLowerCase())
     const result: string[] = []
     for (const ext of ourPriority) {
-      if (userExts.includes(ext) && !result.includes(ext)) result.push(ext)
+      if (!result.includes(ext)) result.push(ext)
     }
     for (const ext of userExts) {
       if (!result.includes(ext)) result.push(ext)
@@ -875,8 +953,8 @@ async function isExecutable(filePath: string): Promise<boolean> {
   }
 }
 
-async function probeCommand(command: string): Promise<{ healthy: boolean; version?: string; error?: string }> {
-  const attempts = [['--version'], ['version'], ['-v']]
+async function probeCommand(command: string, versionArgs?: string[]): Promise<{ healthy: boolean; version?: string; error?: string }> {
+  const attempts = versionArgs ? [versionArgs] : [['--version'], ['version'], ['-v']]
   let lastError = ''
   for (const args of attempts) {
     try {
@@ -894,6 +972,26 @@ async function probeCommand(command: string): Promise<{ healthy: boolean; versio
   return { healthy: false, error: lastError }
 }
 
+function sameAgentInvocation(left: AgentConfig, right: AgentConfig): boolean {
+  return left.command === right.command
+    && JSON.stringify(left.args ?? []) === JSON.stringify(right.args ?? [])
+    && JSON.stringify(left.versionArgs ?? []) === JSON.stringify(right.versionArgs ?? [])
+}
+
+async function validateDiscoveredAgent(
+  name: string,
+  config: AgentConfig
+): Promise<{ healthy: boolean; version?: string }> {
+  if (!config.command) return { healthy: false }
+  const versionProbe = await probeCommand(config.command, config.versionArgs)
+  if (!versionProbe.healthy) return { healthy: false }
+  const smokeProbe = await smokeTestAgent(name, config)
+  return {
+    healthy: smokeProbe.healthy,
+    version: versionProbe.version,
+  }
+}
+
 async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ healthy: boolean; error?: string }> {
   let cwd: string | undefined
   try {
@@ -909,7 +1007,19 @@ async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ heal
     return { healthy: false, error: err instanceof Error ? err.message : String(err) }
   } finally {
     if (cwd) {
-      await rm(cwd, { recursive: true, force: true })
+      await removeDirEventually(cwd)
+    }
+  }
+}
+
+async function removeDirEventually(path: string, timeoutMs = 15_000): Promise<void> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    try {
+      await rm(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+      return
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 100))
     }
   }
 }

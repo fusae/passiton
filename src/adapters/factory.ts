@@ -1,5 +1,7 @@
 import type { AgentConfig, Adapter } from '../types.js'
 import type { Router } from '../router.js'
+import { existsSync } from 'fs'
+import { posix, win32 } from 'path'
 import { ClaudeCodeAdapter, defaultClaudeCodeArgs } from './claude-code.js'
 import { CodexAdapter } from './codex.js'
 import { CustomCliAdapter } from './custom-cli.js'
@@ -253,8 +255,46 @@ function isApiAdapterType(adapterType: string): boolean {
 export function createDiscoveredAgentConfig(adapter: string, command: string): AgentConfig | undefined {
   const defaults = DISCOVERED_DEFAULTS[adapter]
   if (!defaults) return undefined
+  const codexJs = adapter === 'codex' ? codexNpmPackageEntrypoint(command) : undefined
+  const claudeExe = adapter === 'claude-code' ? claudeNpmPackageEntrypoint(command) : undefined
+  if (codexJs) {
+    return {
+      ...defaults,
+      command: process.execPath,
+      args: [codexJs, ...(defaults.args ?? [])],
+      versionArgs: [codexJs, '--version'],
+    }
+  }
+  if (claudeExe) {
+    return {
+      ...defaults,
+      command: claudeExe,
+    }
+  }
   return {
     ...defaults,
     command,
   }
+}
+
+function codexNpmPackageEntrypoint(command: string): string | undefined {
+  const normalized = command.replaceAll('/', '\\').toLowerCase()
+  const base = win32.basename(normalized)
+  if (base !== 'codex' && base !== 'codex.cmd' && base !== 'codex.ps1') return undefined
+  if (!normalized.includes('\\npm\\codex')) return undefined
+  const pathApi = command.includes('/') && !command.includes('\\') ? posix : win32
+  const packageEntry = pathApi.join(pathApi.dirname(command), 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
+  return existsSync(packageEntry) ? packageEntry : undefined
+}
+
+function claudeNpmPackageEntrypoint(command: string): string | undefined {
+  const normalized = command.replaceAll('/', '\\').toLowerCase()
+  const base = win32.basename(normalized)
+  if (base === 'claude.exe' && normalized.includes('\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe')) {
+    return command
+  }
+  if (base !== 'claude' && base !== 'claude.cmd' && base !== 'claude.ps1') return undefined
+  const pathApi = command.includes('/') && !command.includes('\\') ? posix : win32
+  const packageExe = pathApi.join(pathApi.dirname(command), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')
+  return existsSync(packageExe) ? packageExe : undefined
 }

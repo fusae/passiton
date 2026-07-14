@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { dirname, join, win32 } from 'node:path'
 import { AgentCatalog, findExecutable, getBundledClaudeCandidates, getBundledCodexCandidates, getBundledOpenCodeCandidates, setExtraAgentSearchPathsForTesting, setPlatformForTesting } from '../agents.js'
-import { registerConfiguredAdapters } from '../adapters/factory.js'
+import { createDiscoveredAgentConfig, registerConfiguredAdapters } from '../adapters/factory.js'
 import { Router } from '../router.js'
 import { DEFAULT_CONFIG, getConfigPath, loadConfig, writeConfig } from '../config.js'
 
@@ -54,12 +54,71 @@ test('Codex discovery includes the executable bundled with ChatGPT on macOS', ()
 
 test('Codex discovery includes common ChatGPT locations on Windows', () => {
   const candidates = getBundledCodexCandidates('win32', 'C:\\Users\\test', {
+    APPDATA: 'C:\\Users\\test\\AppData\\Roaming',
     LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local',
     ProgramFiles: 'C:\\Program Files',
   })
+  assert.ok(candidates.includes(win32.join('C:\\Users\\test\\AppData\\Roaming', 'npm', 'codex.ps1')))
+  assert.ok(candidates.includes(win32.join('C:\\Users\\test\\AppData\\Roaming', 'npm', 'codex.cmd')))
   assert.ok(candidates.some((candidate) => candidate.endsWith(win32.join('Microsoft', 'WindowsApps', 'codex.exe'))))
   assert.ok(candidates.some((candidate) => candidate.endsWith(win32.join('Programs', 'ChatGPT', 'resources', 'codex.exe'))))
   assert.ok(candidates.some((candidate) => candidate.endsWith(win32.join('ChatGPT', 'resources', 'codex.exe'))))
+})
+
+test('win32: Codex discovery prefers npm PowerShell shim over AppX path', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'passiton-codex-npm-win32-'))
+  const appData = join(root, 'Roaming')
+  const localAppData = join(root, 'Local')
+  const ps1Path = win32.join(appData, 'npm', 'codex.ps1')
+  const appxPath = win32.join(localAppData, 'Microsoft', 'WindowsApps', 'codex.exe')
+  const oldPath = process.env.PATH
+  const oldAppData = process.env.APPDATA
+  const oldLocalAppData = process.env.LOCALAPPDATA
+
+  mkdirSync(dirname(ps1Path), { recursive: true })
+  mkdirSync(dirname(appxPath), { recursive: true })
+  writeFileSync(ps1Path, 'fake ps1')
+  writeFileSync(appxPath, 'fake appx exe')
+  setPlatformForTesting('win32')
+  process.env.PATH = join(root, 'empty-path')
+  process.env.APPDATA = appData
+  process.env.LOCALAPPDATA = localAppData
+
+  try {
+    const catalog = new AgentCatalog({}, true)
+    await catalog.discover({ refresh: true })
+    const codex = (await catalog.listAgents()).find((agent) => agent.name === 'codex')
+    assert.equal(codex?.command, ps1Path)
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+    if (oldAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = oldAppData
+    if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(ps1Path, { force: true })
+    rmSync(appxPath, { force: true })
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('Codex npm shim uses the package entrypoint only when it exists', () => {
+  const root = mkdtempSync(join(tmpdir(), 'passiton-codex-package-'))
+  const npmDir = join(root, 'npm')
+  const shim = join(npmDir, 'codex.ps1')
+  const packageEntry = join(npmDir, 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
+  mkdirSync(dirname(packageEntry), { recursive: true })
+  writeFileSync(shim, 'fake ps1')
+  writeFileSync(packageEntry, 'fake js')
+
+  try {
+    const config = createDiscoveredAgentConfig('codex', shim)
+    assert.equal(config?.command, process.execPath)
+    assert.deepEqual(config?.args?.slice(0, 2), [packageEntry, 'exec'])
+    assert.deepEqual(config?.versionArgs, [packageEntry, '--version'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('Claude discovery includes the latest CLI bundled by Claude App on macOS', async () => {
@@ -78,16 +137,234 @@ test('Claude discovery includes the latest CLI bundled by Claude App on macOS', 
   }
 })
 
+test('Claude discovery includes npm package exe on Windows', async () => {
+  const candidates = await getBundledClaudeCandidates('win32', 'C:\\Users\\test', {
+    APPDATA: 'C:\\Users\\test\\AppData\\Roaming',
+    LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local',
+  })
+  assert.ok(candidates.includes(win32.join('C:\\Users\\test\\AppData\\Roaming', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')))
+  assert.ok(candidates.some((candidate) => candidate.endsWith(win32.join('Programs', 'Claude', 'resources', 'claude.exe'))))
+})
+
+test('win32: Claude npm shim discovery stores the real package exe', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'passiton-claude-npm-win32-'))
+  const npmDir = join(root, 'npm')
+  const exePath = join(npmDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')
+  const oldPath = process.env.PATH
+  const oldAppData = process.env.APPDATA
+  const oldLocalAppData = process.env.LOCALAPPDATA
+
+  mkdirSync(dirname(exePath), { recursive: true })
+  writeFileSync(join(npmDir, 'claude.ps1'), 'fake ps1')
+  writeFileSync(exePath, 'fake exe')
+  setPlatformForTesting('win32')
+  process.env.PATH = npmDir
+  process.env.APPDATA = join(root, 'Roaming')
+  process.env.LOCALAPPDATA = join(root, 'Local')
+
+  try {
+    const catalog = new AgentCatalog({}, true)
+    await catalog.discover({ refresh: true })
+    const claude = (await catalog.listAgents()).find((agent) => agent.name === 'claude-code')
+    assert.equal(claude?.command, exePath)
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+    if (oldAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = oldAppData
+    if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(exePath, { force: true })
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('OpenCode discovery includes its user-local installer paths', () => {
   assert.deepEqual(
     getBundledOpenCodeCandidates('darwin', '/Users/test', {}),
     ['/Users/test/.opencode/bin/opencode']
   )
   const windows = getBundledOpenCodeCandidates('win32', 'C:\\Users\\test', {
+    APPDATA: 'C:\\Users\\test\\AppData\\Roaming',
     LOCALAPPDATA: 'C:\\Users\\test\\AppData\\Local',
   })
+  assert.ok(windows.includes(win32.join('C:\\Users\\test\\AppData\\Roaming', 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe')))
   assert.ok(windows.includes(win32.join('C:\\Users\\test', '.opencode', 'bin', 'opencode.exe')))
   assert.ok(windows.includes(win32.join('C:\\Users\\test\\AppData\\Local', 'opencode', 'bin', 'opencode.exe')))
+})
+
+test('win32: OpenCode discovery prefers real exe over npm .cmd shim', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'passiton-opencode-win32-'))
+  const appData = join(root, 'Roaming')
+  const localAppData = join(root, 'Local')
+  const npmDir = join(appData, 'npm')
+  const exePath = win32.join(appData, 'npm', 'node_modules', 'opencode-ai', 'bin', 'opencode.exe')
+  const oldPath = process.env.PATH
+  const oldAppData = process.env.APPDATA
+  const oldLocalAppData = process.env.LOCALAPPDATA
+
+  mkdirSync(dirname(exePath), { recursive: true })
+  mkdirSync(npmDir, { recursive: true })
+  writeFileSync(exePath, 'fake exe')
+  writeFileSync(join(npmDir, 'opencode.cmd'), 'fake shim')
+  setPlatformForTesting('win32')
+  process.env.PATH = npmDir
+  process.env.APPDATA = appData
+  process.env.LOCALAPPDATA = localAppData
+
+  try {
+    const catalog = new AgentCatalog({}, true)
+    await catalog.discover({ refresh: true })
+    const opencode = (await catalog.listAgents()).find((agent) => agent.name === 'opencode')
+    assert.equal(opencode?.command, exePath)
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+    if (oldAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = oldAppData
+    if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(exePath, { force: true })
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('win32: discovery skips protected Codex AppX package executables', async () => {
+  setPlatformForTesting('win32')
+  const appxCodex = 'C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.8479.0_x64__2p2nqsd0c76g0\\app\\resources\\codex.exe'
+  assert.equal(await findExecutable([appxCodex]), undefined)
+})
+
+test('win32: refresh removes stale auto-discovered Codex AppX config', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-codex-appx-'))
+  const oldPath = process.env.PATH
+  const oldAppData = process.env.APPDATA
+  const oldLocalAppData = process.env.LOCALAPPDATA
+  const appxCodex = 'C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.8479.0_x64__2p2nqsd0c76g0\\app\\resources\\codex.exe'
+  setPlatformForTesting('win32')
+  process.env.PATH = dir
+  process.env.APPDATA = join(dir, 'appdata')
+  process.env.LOCALAPPDATA = join(dir, 'localappdata')
+
+  try {
+    await withConfigHome(async () => {
+      writeConfig({
+        ...DEFAULT_CONFIG,
+        agents: {
+          codex: {
+            adapter: 'codex',
+            command: appxCodex,
+            args: ['exec', '{prompt}'],
+            timeout: 1_000,
+            autoDiscovered: true,
+          },
+        },
+      })
+      const catalog = new AgentCatalog(loadConfig().agents, true, true)
+      await catalog.discover({ refresh: true })
+
+      assert.equal(catalog.configuredAgentConfigs().codex, undefined)
+      assert.equal(loadConfig().agents.codex, undefined)
+    })
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+    if (oldAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = oldAppData
+    if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+  }
+})
+
+test('win32: refresh does not adopt an unverified Codex node config', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'passiton-codex-node-stale-'))
+  const appData = join(root, 'Roaming')
+  const ps1Path = win32.join(appData, 'npm', 'codex.ps1')
+  const oldPath = process.env.PATH
+  const oldAppData = process.env.APPDATA
+  const oldLocalAppData = process.env.LOCALAPPDATA
+
+  mkdirSync(dirname(ps1Path), { recursive: true })
+  writeFileSync(ps1Path, 'fake ps1')
+  setPlatformForTesting('win32')
+  process.env.PATH = join(root, 'empty-path')
+  process.env.APPDATA = appData
+  process.env.LOCALAPPDATA = join(root, 'localappdata')
+
+  try {
+    await withConfigHome(async () => {
+      writeConfig({
+        ...DEFAULT_CONFIG,
+        agents: {
+          codex: {
+            adapter: 'codex',
+            command: process.execPath,
+            args: ['exec', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
+            timeout: 123_000,
+            priority: 2,
+            env: { PASSITON_TEST_ENV: 'keep-me' },
+            autoDiscovered: true,
+          },
+        },
+      })
+      const catalog = new AgentCatalog(loadConfig().agents, true, true)
+      await catalog.discover({ refresh: true })
+      const config = catalog.configuredAgentConfigs().codex
+
+      assert.equal(config?.command, process.execPath)
+      assert.deepEqual(config?.args, ['exec', '--ephemeral', '--skip-git-repo-check', '{prompt}'])
+      assert.equal(config?.timeout, 123_000)
+      assert.equal(config?.priority, 2)
+      assert.deepEqual(config?.env, { PASSITON_TEST_ENV: 'keep-me' })
+    })
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+    if (oldAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = oldAppData
+    if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(ps1Path, { force: true })
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+  }
+})
+
+test('refresh adopts a verified replacement while preserving user settings', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-agent-replacement-'))
+  const command = writeExecutable(
+    join(dir, 'codex'),
+    'if [ "$1" = "--version" ]; then echo codex-replacement; exit 0; fi\necho TURING_READY',
+    'if "%~1"=="--version" (echo codex-replacement & exit /b 0)\necho TURING_READY'
+  )
+  setExtraAgentSearchPathsForTesting([dir])
+
+  try {
+    await withConfigHome(async () => {
+      const existing = {
+        adapter: 'codex' as const,
+        command: join(dir, 'removed-codex'),
+        args: ['exec', '{prompt}'],
+        timeout: 123_000,
+        priority: 3,
+        env: { PASSITON_TEST_ENV: 'keep-me' },
+        autoDiscovered: true,
+      }
+      writeConfig({ ...DEFAULT_CONFIG, agents: { codex: existing } })
+      const catalog = new AgentCatalog(loadConfig().agents, true, true)
+      await catalog.discover({ refresh: true })
+      const config = catalog.configuredAgentConfigs().codex
+
+      assert.equal(config?.command, command)
+      assert.equal(config?.timeout, 123_000)
+      assert.equal(config?.priority, 3)
+      assert.deepEqual(config?.env, { PASSITON_TEST_ENV: 'keep-me' })
+      assert.equal(config?.lastVerifiedVersion, 'codex-replacement')
+      assert.equal(config?.lastVerificationError, undefined)
+    })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('discovery repairs a configured Codex path after the app executable moves', async () => {
@@ -500,6 +777,8 @@ test('configured local agent without persisted verification is unverified', asyn
 
 test('win32: discovers the full supported CLI agent set from npm-style .cmd shims', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'passiton-win32-agent-set-'))
+  const oldAppData = process.env.APPDATA
+  const oldLocalAppData = process.env.LOCALAPPDATA
   const commands = [
     'codex', 'claude', 'gemini', 'opencode', 'copilot', 'cursor-agent',
     'qwen', 'cline', 'aider', 'droid', 'amp', 'openhands', 'vibe',
@@ -515,6 +794,8 @@ test('win32: discovers the full supported CLI agent set from npm-style .cmd shim
   }
   setExtraAgentSearchPathsForTesting([dir])
   setPlatformForTesting('win32')
+  process.env.APPDATA = join(dir, 'appdata')
+  process.env.LOCALAPPDATA = join(dir, 'localappdata')
 
   try {
     const catalog = new AgentCatalog({}, true)
@@ -531,7 +812,11 @@ test('win32: discovers the full supported CLI agent set from npm-style .cmd shim
     assert.ok(discovered.every((agent) => agent.healthy))
     assert.ok(discovered.every((agent) => agent.command?.endsWith('.cmd')))
   } finally {
-    rmSync(dir, { recursive: true, force: true })
+    if (oldAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = oldAppData
+    if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
   }
 })
 
@@ -561,6 +846,21 @@ test('win32: resolveCommand prefers .cmd over bare name when .exe absent', async
   try {
     const result = await findExecutable(['codex'])
     assert.equal(result, join(dir, 'codex.cmd'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('win32: resolveCommand prefers .ps1 over .cmd when .exe absent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-win32-ps1-'))
+  writeFileSync(join(dir, 'codex.ps1'), 'fake ps1')
+  writeFileSync(join(dir, 'codex.cmd'), 'fake cmd')
+  setExtraAgentSearchPathsForTesting([dir])
+  setPlatformForTesting('win32')
+
+  try {
+    const result = await findExecutable(['codex'])
+    assert.equal(result, join(dir, 'codex.ps1'))
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

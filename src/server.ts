@@ -576,6 +576,9 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
   const args = data.args === undefined
     ? (existing && existing.adapter === adapter ? existing.args : defaults.args)
     : requireStringArray(data.args, 'args')
+  const versionArgs = existing && existing.adapter === adapter
+    ? existing.versionArgs
+    : defaults.versionArgs
   const timeout = optionalPositiveInt(data.timeout, 'timeout')
     ?? (existing && existing.adapter === adapter ? existing.timeout : defaults.timeout)
   const inheritedEnv = existing && existing.adapter === adapter ? existing.env : defaults.env
@@ -585,6 +588,7 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
       config: {
         ...defaults,
         args,
+        ...(versionArgs ? { versionArgs } : {}),
         timeout,
         ...(existing?.autoDiscovered ? { autoDiscovered: true } : {}),
         ...(existing?.lastVerifiedAt !== undefined ? { lastVerifiedAt: existing.lastVerifiedAt } : {}),
@@ -593,7 +597,6 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
         ...(existing?.lastVerificationError !== undefined ? { lastVerificationError: existing.lastVerificationError } : {}),
         ...(priority !== undefined ? { priority } : existing?.priority !== undefined ? { priority: existing.priority } : {}),
       model: existing && existing.adapter === adapter ? existing.model : defaults.model,
-      command,
       ...(finalEnv && Object.keys(finalEnv).length > 0 ? { env: finalEnv } : {}),
     },
   }
