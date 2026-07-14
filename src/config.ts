@@ -187,6 +187,9 @@ function validateConfig(config: AppConfig): AppConfig {
     if (agent.args !== undefined) {
       assertStringArray(agent.args, `agents.${name}.args`)
     }
+    if (agent.versionArgs !== undefined) {
+      assertStringArray(agent.versionArgs, `agents.${name}.versionArgs`)
+    }
     if (agent.timeout !== undefined) {
       assertPositiveInt(agent.timeout, `agents.${name}.timeout`)
     }

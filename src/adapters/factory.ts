@@ -1,5 +1,6 @@
 import type { AgentConfig, Adapter } from '../types.js'
 import type { Router } from '../router.js'
+import { dirname, join, win32 } from 'path'
 import { ClaudeCodeAdapter, defaultClaudeCodeArgs } from './claude-code.js'
 import { CodexAdapter } from './codex.js'
 import { CustomCliAdapter } from './custom-cli.js'
@@ -253,8 +254,25 @@ function isApiAdapterType(adapterType: string): boolean {
 export function createDiscoveredAgentConfig(adapter: string, command: string): AgentConfig | undefined {
   const defaults = DISCOVERED_DEFAULTS[adapter]
   if (!defaults) return undefined
+  const codexJs = adapter === 'codex' ? codexNpmPackageEntrypoint(command) : undefined
+  if (codexJs) {
+    return {
+      ...defaults,
+      command: process.execPath,
+      args: [codexJs, ...(defaults.args ?? [])],
+      versionArgs: [codexJs, '--version'],
+    }
+  }
   return {
     ...defaults,
     command,
   }
+}
+
+function codexNpmPackageEntrypoint(command: string): string | undefined {
+  const normalized = command.replaceAll('/', '\\').toLowerCase()
+  const base = win32.basename(normalized)
+  if (base !== 'codex' && base !== 'codex.cmd' && base !== 'codex.ps1') return undefined
+  if (!normalized.includes('\\npm\\codex')) return undefined
+  return join(dirname(command), 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
 }

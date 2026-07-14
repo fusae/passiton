@@ -476,6 +476,7 @@ export interface AgentConfig {
   adapter: AgentAdapterType | (string & {})
   command?: string
   args?: string[]
+  versionArgs?: string[]
   timeout?: number
   priority?: number
   model?: string

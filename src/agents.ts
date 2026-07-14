@@ -175,9 +175,22 @@ export class AgentCatalog {
         : [...preset.commands, ...bundledCommands]
       const existing = this.entries.get(preset.name)
       if (existing?.source === 'configured') {
+        if (this.autoConfigureDiscovered && existing.config?.autoDiscovered) {
+          const replacement = await findExecutable(commands, preset.envVars)
+          if (replacement) {
+            const discoveredConfig = createDiscoveredAgentConfig(preset.adapter, replacement)
+            if (discoveredConfig) this.updateConfiguredAgent(existing, { ...discoveredConfig, autoDiscovered: true })
+          } else {
+            this.removeAutoConfiguredAgent(existing)
+          }
+          continue
+        }
+
         const resolved = existing.command ? await resolveCommand(existing.command) : undefined
         if (resolved) {
-          if (resolved !== existing.command) this.updateConfiguredCommand(existing, resolved)
+          if (resolved !== existing.command) {
+            this.updateConfiguredCommand(existing, resolved)
+          }
           if (this.autoConfigureDiscovered && !existing.config?.autoDiscovered) {
             this.markAutoConfigured(existing)
           }
@@ -189,8 +202,6 @@ export class AgentCatalog {
         const replacement = await findExecutable(commands, preset.envVars)
         if (replacement) {
           this.updateConfiguredCommand(existing, replacement)
-        } else if (this.autoConfigureDiscovered && existing.config?.autoDiscovered) {
-          this.removeAutoConfiguredAgent(existing)
         }
         continue
       }
@@ -214,7 +225,7 @@ export class AgentCatalog {
       this.entries.set(preset.name, {
         name: preset.name,
         adapter: preset.adapter,
-        command,
+        command: config.command ?? command,
         source: this.autoConfigureDiscovered ? 'configured' : 'discovered',
         supported: preset.supported,
         availableForSessions: preset.supported,
@@ -248,6 +259,21 @@ export class AgentCatalog {
       agents: { ...current.agents, [entry.name]: nextAgent },
     })
     entry.config = nextAgent
+  }
+
+  private updateConfiguredAgent(entry: AgentEntry, config: AgentConfig): void {
+    if (!entry.config) return
+    if (sameAgentConfig(entry.config, config)) return
+    const current = loadConfig()
+    const currentAgent = current.agents[entry.name]
+    if (!currentAgent || currentAgent.adapter !== entry.adapter) return
+    writeConfig({
+      ...current,
+      agents: { ...current.agents, [entry.name]: config },
+    })
+    entry.command = config.command
+    entry.config = config
+    this.probeCache.clear()
   }
 
   private removeAutoConfiguredAgent(entry: AgentEntry): void {
@@ -341,7 +367,7 @@ export class AgentCatalog {
     const commandExecutable = isPathLike(entry.command)
       ? await isExecutable(entry.command)
       : Boolean(await resolveCommand(entry.command))
-    const versionProbe = refresh ? await probeCommand(entry.command) : { healthy: commandExecutable }
+    const versionProbe = refresh ? await probeCommand(entry.command, entry.config?.versionArgs) : { healthy: commandExecutable }
     const smokeProbe = refresh && entry.source === 'configured' && entry.availableForSessions && entry.config
       ? await smokeTestAgent(entry.name, entry.config)
       : undefined
@@ -394,7 +420,7 @@ export class AgentCatalog {
       }
     }
 
-    const versionProbe = await probeCommand(entry.command!)
+    const versionProbe = await probeCommand(entry.command!, entry.config?.versionArgs)
     // Smoke test (a real model round-trip) is the only signal that proves an
     // agent is actually callable — `--version` only proves the binary exists.
     // It's expensive (up to 60s), so we run it only on explicit refresh and
@@ -472,6 +498,7 @@ export class AgentCatalog {
       entry.name,
       entry.command,
       JSON.stringify(entry.config?.args ?? []),
+      JSON.stringify(entry.config?.versionArgs ?? []),
       JSON.stringify(entry.config?.env ?? {}),
     ].join(':')
   }
@@ -908,8 +935,8 @@ async function isExecutable(filePath: string): Promise<boolean> {
   }
 }
 
-async function probeCommand(command: string): Promise<{ healthy: boolean; version?: string; error?: string }> {
-  const attempts = [['--version'], ['version'], ['-v']]
+async function probeCommand(command: string, versionArgs?: string[]): Promise<{ healthy: boolean; version?: string; error?: string }> {
+  const attempts = versionArgs ? [versionArgs] : [['--version'], ['version'], ['-v']]
   let lastError = ''
   for (const args of attempts) {
     try {
@@ -925,6 +952,10 @@ async function probeCommand(command: string): Promise<{ healthy: boolean; versio
     }
   }
   return { healthy: false, error: lastError }
+}
+
+function sameAgentConfig(left: AgentConfig, right: AgentConfig): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
 }
 
 async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ healthy: boolean; error?: string }> {

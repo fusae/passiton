@@ -88,7 +88,8 @@ test('win32: Codex discovery prefers npm PowerShell shim over AppX path', async 
     const catalog = new AgentCatalog({}, true)
     await catalog.discover({ refresh: true })
     const codex = (await catalog.listAgents()).find((agent) => agent.name === 'codex')
-    assert.equal(codex?.command, ps1Path)
+    assert.equal(codex?.command, process.execPath)
+    assert.equal(codex?.args?.[0], win32.join(appData, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'))
   } finally {
     if (oldPath === undefined) delete process.env.PATH
     else process.env.PATH = oldPath
@@ -174,10 +175,12 @@ test('win32: discovery skips protected Codex AppX package executables', async ()
 test('win32: refresh removes stale auto-discovered Codex AppX config', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'passiton-codex-appx-'))
   const oldPath = process.env.PATH
+  const oldAppData = process.env.APPDATA
   const oldLocalAppData = process.env.LOCALAPPDATA
   const appxCodex = 'C:\\Program Files\\WindowsApps\\OpenAI.Codex_26.707.8479.0_x64__2p2nqsd0c76g0\\app\\resources\\codex.exe'
   setPlatformForTesting('win32')
   process.env.PATH = dir
+  process.env.APPDATA = join(dir, 'appdata')
   process.env.LOCALAPPDATA = join(dir, 'localappdata')
 
   try {
@@ -203,9 +206,62 @@ test('win32: refresh removes stale auto-discovered Codex AppX config', async () 
   } finally {
     if (oldPath === undefined) delete process.env.PATH
     else process.env.PATH = oldPath
+    if (oldAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = oldAppData
     if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
     else process.env.LOCALAPPDATA = oldLocalAppData
-    rmSync(dir, { recursive: true, force: true })
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+  }
+})
+
+test('win32: refresh repairs stale auto-discovered Codex node config', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'passiton-codex-node-stale-'))
+  const appData = join(root, 'Roaming')
+  const ps1Path = win32.join(appData, 'npm', 'codex.ps1')
+  const oldPath = process.env.PATH
+  const oldAppData = process.env.APPDATA
+  const oldLocalAppData = process.env.LOCALAPPDATA
+
+  mkdirSync(dirname(ps1Path), { recursive: true })
+  writeFileSync(ps1Path, 'fake ps1')
+  setPlatformForTesting('win32')
+  process.env.PATH = join(root, 'empty-path')
+  process.env.APPDATA = appData
+  process.env.LOCALAPPDATA = join(root, 'localappdata')
+
+  try {
+    await withConfigHome(async () => {
+      writeConfig({
+        ...DEFAULT_CONFIG,
+        agents: {
+          codex: {
+            adapter: 'codex',
+            command: process.execPath,
+            args: ['exec', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
+            timeout: 600_000,
+            autoDiscovered: true,
+          },
+        },
+      })
+      const catalog = new AgentCatalog(loadConfig().agents, true, true)
+      await catalog.discover({ refresh: true })
+      const config = catalog.configuredAgentConfigs().codex
+
+      assert.equal(config?.command, process.execPath)
+      assert.equal(config?.args?.[0], win32.join(appData, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'))
+      assert.deepEqual(config?.versionArgs, [
+        win32.join(appData, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'),
+        '--version',
+      ])
+    })
+  } finally {
+    if (oldPath === undefined) delete process.env.PATH
+    else process.env.PATH = oldPath
+    if (oldAppData === undefined) delete process.env.APPDATA
+    else process.env.APPDATA = oldAppData
+    if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
+    else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
   }
 })
 
@@ -658,7 +714,7 @@ test('win32: discovers the full supported CLI agent set from npm-style .cmd shim
     else process.env.APPDATA = oldAppData
     if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
     else process.env.LOCALAPPDATA = oldLocalAppData
-    rmSync(dir, { recursive: true, force: true })
+    rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
   }
 })
 
