@@ -335,7 +335,7 @@ test('refresh adopts a verified replacement while preserving user settings', asy
   const command = writeExecutable(
     join(dir, 'codex'),
     'if [ "$1" = "--version" ]; then echo codex-replacement; exit 0; fi\necho TURING_READY',
-    'if "%~1"=="--version" (echo codex-replacement & exit /b 0)\necho TURING_READY'
+    'if ($args[0] -eq "--version") { Write-Output "codex-replacement"; exit 0 }\nWrite-Output "TURING_READY"'
   )
   setExtraAgentSearchPathsForTesting([dir])
 
@@ -439,7 +439,7 @@ test('production discovery auto-configures and verifies installed agents', async
   const dir = mkdtempSync(join(tmpdir(), 'passiton-agent-auto-config-'))
   const command = writeExecutable(join(dir, 'codex'),
     'if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi\necho TURING_READY',
-    'if "%~1"=="--version" (echo codex-test & exit /b 0)\necho TURING_READY'
+    'if ($args[0] -eq "--version") { Write-Output "codex-test"; exit 0 }\nWrite-Output "TURING_READY"'
   )
   setExtraAgentSearchPathsForTesting([dir])
 
@@ -515,7 +515,7 @@ test('configured local agents require a successful smoke run to be healthy', asy
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-smoke-'))
   const command = writeExecutable(join(dir, 'codex'),
     'if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi\necho TURING_READY',
-    'if "%~1"=="--version" (echo codex-test & exit /b 0)\necho TURING_READY'
+    'if ($args[0] -eq "--version") { Write-Output "codex-test"; exit 0 }\nWrite-Output "TURING_READY"'
   )
 
   try {
@@ -551,7 +551,7 @@ test('configured local agents use executable existence without refresh', async (
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-no-probe-'))
   const command = writeExecutable(join(dir, 'codex'),
     'if [ "$1" = "--version" ]; then exit 2; fi\nexit 2',
-    'if "%~1"=="--version" (exit /b 2)\nexit /b 2'
+    'exit 2'
   )
 
   try {
@@ -580,11 +580,11 @@ test('listAgents without refresh does not invoke version probe, while refresh do
   const counter = join(dir, 'counter')
   const noRefreshCommand = writeExecutable(join(dir, 'codex-no-refresh'),
     `if [ "$1" = "--version" ]; then echo hit >> "${counter}"; echo codex-test; exit 0; fi\nexit 0`,
-    `if "%~1"=="--version" (echo hit>>"${counter}" & echo codex-test & exit /b 0)\nexit /b 0`
+    `if ($args[0] -eq "--version") { Add-Content -Path '${counter.replaceAll("'", "''")}' -Value 'hit'; Write-Output "codex-test"; exit 0 }\nexit 0`
   )
   const refreshCommand = writeExecutable(join(dir, 'codex-refresh'),
     `if [ "$1" = "--version" ]; then echo hit >> "${counter}"; echo codex-test; exit 0; fi\nexit 0`,
-    `if "%~1"=="--version" (echo hit>>"${counter}" & echo codex-test & exit /b 0)\nexit /b 0`
+    `if ($args[0] -eq "--version") { Add-Content -Path '${counter.replaceAll("'", "''")}' -Value 'hit'; Write-Output "codex-test"; exit 0 }\nexit 0`
   )
 
   try {
@@ -620,7 +620,7 @@ test('configured local agents stay healthy-but-unverified when smoke run fails',
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-smoke-fail-'))
   const command = writeExecutable(join(dir, 'codex'),
     'if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi\nexit 2',
-    'if "%~1"=="--version" (echo codex-test & exit /b 0)\nexit /b 2'
+    'if ($args[0] -eq "--version") { Write-Output "codex-test"; exit 0 }\nexit 2'
   )
 
   try {
@@ -651,7 +651,7 @@ test('successful local agent smoke persists verification to config', async () =>
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-persist-smoke-'))
   const command = writeExecutable(join(dir, 'codex'),
     'if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi\necho TURING_READY',
-    'if "%~1"=="--version" (echo codex-test & exit /b 0)\necho TURING_READY'
+    'if ($args[0] -eq "--version") { Write-Output "codex-test"; exit 0 }\nWrite-Output "TURING_READY"'
   )
 
   await withConfigHome(async () => {
@@ -683,7 +683,7 @@ test('fresh AgentCatalog trusts persisted verification when binary version still
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-persist-restart-'))
   const command = writeExecutable(join(dir, 'codex'),
     'if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi\nexit 2',
-    'if "%~1"=="--version" (echo codex-test & exit /b 0)\nexit /b 2'
+    'if ($args[0] -eq "--version") { Write-Output "codex-test"; exit 0 }\nexit 2'
   )
 
   await withConfigHome(async () => {
@@ -715,7 +715,7 @@ test('cold listAgents returns stored verification before background version refr
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-persist-mismatch-'))
   const command = writeExecutable(join(dir, 'codex'),
     'if [ "$1" = "--version" ]; then echo codex-new; exit 0; fi\nexit 2',
-    'if "%~1"=="--version" (echo codex-new & exit /b 0)\nexit /b 2'
+    'if ($args[0] -eq "--version") { Write-Output "codex-new"; exit 0 }\nexit 2'
   )
 
   await withConfigHome(async () => {
@@ -747,7 +747,7 @@ test('configured local agent without persisted verification is unverified', asyn
   const dir = mkdtempSync(join(tmpdir(), 'turing-agent-no-persist-'))
   const command = writeExecutable(join(dir, 'codex'),
     'if [ "$1" = "--version" ]; then echo codex-test; exit 0; fi\nexit 2',
-    'if "%~1"=="--version" (echo codex-test & exit /b 0)\nexit /b 2'
+    'if ($args[0] -eq "--version") { Write-Output "codex-test"; exit 0 }\nexit 2'
   )
 
   await withConfigHome(async () => {
@@ -816,7 +816,7 @@ test('win32: discovers the full supported CLI agent set from npm-style PowerShel
     else process.env.APPDATA = oldAppData
     if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
     else process.env.LOCALAPPDATA = oldLocalAppData
-    rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 })
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
   }
 })
 
@@ -978,9 +978,9 @@ async function withConfigHome(run: () => Promise<void>): Promise<void> {
 function writeExecutable(filePath: string, posixBody = 'echo test-version', win32Body?: string): string {
   mkdirSync(dirname(filePath), { recursive: true })
   if (isWin32) {
-    const cmdPath = filePath + '.cmd'
-    writeFileSync(cmdPath, `@echo off\n${win32Body ?? posixBody}\n`)
-    return cmdPath
+    const ps1Path = filePath + '.ps1'
+    writeFileSync(ps1Path, `${win32Body ?? posixBody}\n`)
+    return ps1Path
   }
   writeFileSync(filePath, `#!/bin/sh\n${posixBody}\n`)
   chmodSync(filePath, 0o755)
