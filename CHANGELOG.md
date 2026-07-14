@@ -7,13 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-07-14
+
 ### Added
 
+- Local CLI agents can now be auto-discovered and verified before use.
 - Local CLI agents now support configurable priority, and task creation without an explicit agent automatically selects the highest-priority usable agent.
 - Task handoff now supports running source tasks by stopping them before creating the continuation task.
+- Task detail pages now show git commits made by the task.
 - Allowed Workspaces writes now reject unsafe roots such as temp directories, OS roots, and home-directory roots, with load-time security warnings for suspicious existing entries.
 - Custom CLI agents can now be added from Settings with a generic `custom-cli` adapter, including `{prompt}` argument substitution, env vars, timeout, diagnostics, and an empty-state add path.
 - Ops steward now has its own encrypted model configuration in the Ops panel, with API Assistant fallback preserved for existing users.
+
+### Fixed
+
+- Windows agent discovery now prefers PowerShell shims, supports Codex npm shims, and hardens CLI shim execution.
+- OpenCode diagnostics are now more robust across platforms.
+- Agent settings cards now stay aligned across local CLI states.
+- Claude Code protocol events are now filtered out of task output.
+- `GET /api/agents` no longer blocks on child-process version probes, so agent lists load instantly.
+- Priority reorder arrows now apply optimistic reordering instantly and have larger hit targets.
+
+### Changed
+
+- Agent settings now focus on verified local CLIs.
+- Priority controls now explain that list order determines default agent priority.
+- README now frames Passiton as a control plane and documents both UI and HTTP API operation.
 
 ## [0.2.1] - 2026-07-10
 
@@ -72,7 +91,8 @@ Initial public baseline. Local-first agent-to-agent orchestration:
 - **Web UI**, HTTP API, WebSocket events, and `passiton` CLI.
 - **Auth**: JWT with auto-generated secret on first run, encrypted provider key vault, local-access auto-login.
 
-[Unreleased]: https://github.com/fusae/passiton/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/fusae/passiton/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/fusae/passiton/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/fusae/passiton/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/fusae/passiton/releases/tag/v0.2.0
 [0.1.0]: https://github.com/fusae/passiton/releases/tag/v0.1.0
