@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import http from 'node:http'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, win32 } from 'node:path'
+import { join } from 'node:path'
 import { once } from 'node:events'
 import { execFile } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -491,40 +491,50 @@ test('PUT /api/config/agents preserves versionArgs when changing priority', asyn
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'cli-version-args@example.com')
     const name = `codex-node-test-${Date.now()}`
-    const npmShim = win32.join('C:\\Users\\test\\AppData\\Roaming', 'npm', 'codex.ps1')
-    const codexJs = win32.join('C:\\Users\\test\\AppData\\Roaming', 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
-    const create = await fetch(`${baseUrl}/api/config/agents`, {
-      method: 'POST',
-      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        adapter: 'codex',
-        command: npmShim,
-        timeout: 10_000,
-      }),
-    })
-    assert.equal(create.status, 201)
+    const root = mkdtempSync(join(tmpdir(), 'passiton-server-codex-'))
+    const npmDir = join(root, 'npm')
+    const npmShim = join(npmDir, 'codex.ps1')
+    const codexJs = join(npmDir, 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
+    mkdirSync(join(npmDir, 'node_modules', '@openai', 'codex', 'bin'), { recursive: true })
+    writeFileSync(npmShim, 'fake ps1')
+    writeFileSync(codexJs, 'fake js')
 
-    const current = await create.json() as Record<string, any>
-    assert.equal(current.agents[name].command, process.execPath)
-    assert.deepEqual(current.agents[name].versionArgs, [codexJs, '--version'])
+    try {
+      const create = await fetch(`${baseUrl}/api/config/agents`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          adapter: 'codex',
+          command: npmShim,
+          timeout: 10_000,
+        }),
+      })
+      assert.equal(create.status, 201)
 
-    const update = await fetch(`${baseUrl}/api/config/agents/${encodeURIComponent(name)}`, {
-      method: 'PUT',
-      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
-      body: JSON.stringify({
-        name,
-        adapter: 'codex',
-        command: process.execPath,
-        args: [codexJs, 'exec', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
-        timeout: 10_000,
-        priority: 2,
-      }),
-    })
-    assert.equal(update.status, 200)
-    const payload = await update.json() as Record<string, any>
-    assert.deepEqual(payload.agents[name].versionArgs, [codexJs, '--version'])
-    assert.equal(payload.agents[name].priority, 2)
+      const current = await create.json() as Record<string, any>
+      assert.equal(current.agents[name].command, process.execPath)
+      assert.deepEqual(current.agents[name].versionArgs, [codexJs, '--version'])
+
+      const update = await fetch(`${baseUrl}/api/config/agents/${encodeURIComponent(name)}`, {
+        method: 'PUT',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          adapter: 'codex',
+          command: process.execPath,
+          args: [codexJs, 'exec', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
+          timeout: 10_000,
+          priority: 2,
+        }),
+      })
+      assert.equal(update.status, 200)
+      const payload = await update.json() as Record<string, any>
+      assert.deepEqual(payload.agents[name].versionArgs, [codexJs, '--version'])
+      assert.equal(payload.agents[name].priority, 2)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })
 

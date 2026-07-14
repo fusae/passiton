@@ -4,7 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { dirname, join, win32 } from 'node:path'
 import { AgentCatalog, findExecutable, getBundledClaudeCandidates, getBundledCodexCandidates, getBundledOpenCodeCandidates, setExtraAgentSearchPathsForTesting, setPlatformForTesting } from '../agents.js'
-import { registerConfiguredAdapters } from '../adapters/factory.js'
+import { createDiscoveredAgentConfig, registerConfiguredAdapters } from '../adapters/factory.js'
 import { Router } from '../router.js'
 import { DEFAULT_CONFIG, getConfigPath, loadConfig, writeConfig } from '../config.js'
 
@@ -88,8 +88,7 @@ test('win32: Codex discovery prefers npm PowerShell shim over AppX path', async 
     const catalog = new AgentCatalog({}, true)
     await catalog.discover({ refresh: true })
     const codex = (await catalog.listAgents()).find((agent) => agent.name === 'codex')
-    assert.equal(codex?.command, process.execPath)
-    assert.equal(codex?.args?.[0], win32.join(appData, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'))
+    assert.equal(codex?.command, ps1Path)
   } finally {
     if (oldPath === undefined) delete process.env.PATH
     else process.env.PATH = oldPath
@@ -97,6 +96,27 @@ test('win32: Codex discovery prefers npm PowerShell shim over AppX path', async 
     else process.env.APPDATA = oldAppData
     if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
     else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(ps1Path, { force: true })
+    rmSync(appxPath, { force: true })
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('Codex npm shim uses the package entrypoint only when it exists', () => {
+  const root = mkdtempSync(join(tmpdir(), 'passiton-codex-package-'))
+  const npmDir = join(root, 'npm')
+  const shim = join(npmDir, 'codex.ps1')
+  const packageEntry = join(npmDir, 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
+  mkdirSync(dirname(packageEntry), { recursive: true })
+  writeFileSync(shim, 'fake ps1')
+  writeFileSync(packageEntry, 'fake js')
+
+  try {
+    const config = createDiscoveredAgentConfig('codex', shim)
+    assert.equal(config?.command, process.execPath)
+    assert.deepEqual(config?.args?.slice(0, 2), [packageEntry, 'exec'])
+    assert.deepEqual(config?.versionArgs, [packageEntry, '--version'])
+  } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
@@ -154,6 +174,7 @@ test('win32: Claude npm shim discovery stores the real package exe', async () =>
     else process.env.APPDATA = oldAppData
     if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
     else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(exePath, { force: true })
     rmSync(root, { recursive: true, force: true })
   }
 })
@@ -203,6 +224,7 @@ test('win32: OpenCode discovery prefers real exe over npm .cmd shim', async () =
     else process.env.APPDATA = oldAppData
     if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
     else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(exePath, { force: true })
     rmSync(root, { recursive: true, force: true })
   }
 })
@@ -255,7 +277,7 @@ test('win32: refresh removes stale auto-discovered Codex AppX config', async () 
   }
 })
 
-test('win32: refresh repairs stale auto-discovered Codex node config', async () => {
+test('win32: refresh does not adopt an unverified Codex node config', async () => {
   const root = mkdtempSync(join(tmpdir(), 'passiton-codex-node-stale-'))
   const appData = join(root, 'Roaming')
   const ps1Path = win32.join(appData, 'npm', 'codex.ps1')
@@ -279,7 +301,9 @@ test('win32: refresh repairs stale auto-discovered Codex node config', async () 
             adapter: 'codex',
             command: process.execPath,
             args: ['exec', '--ephemeral', '--skip-git-repo-check', '{prompt}'],
-            timeout: 600_000,
+            timeout: 123_000,
+            priority: 2,
+            env: { PASSITON_TEST_ENV: 'keep-me' },
             autoDiscovered: true,
           },
         },
@@ -289,11 +313,10 @@ test('win32: refresh repairs stale auto-discovered Codex node config', async () 
       const config = catalog.configuredAgentConfigs().codex
 
       assert.equal(config?.command, process.execPath)
-      assert.equal(config?.args?.[0], win32.join(appData, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'))
-      assert.deepEqual(config?.versionArgs, [
-        win32.join(appData, 'npm', 'node_modules', '@openai', 'codex', 'bin', 'codex.js'),
-        '--version',
-      ])
+      assert.deepEqual(config?.args, ['exec', '--ephemeral', '--skip-git-repo-check', '{prompt}'])
+      assert.equal(config?.timeout, 123_000)
+      assert.equal(config?.priority, 2)
+      assert.deepEqual(config?.env, { PASSITON_TEST_ENV: 'keep-me' })
     })
   } finally {
     if (oldPath === undefined) delete process.env.PATH
@@ -302,7 +325,45 @@ test('win32: refresh repairs stale auto-discovered Codex node config', async () 
     else process.env.APPDATA = oldAppData
     if (oldLocalAppData === undefined) delete process.env.LOCALAPPDATA
     else process.env.LOCALAPPDATA = oldLocalAppData
+    rmSync(ps1Path, { force: true })
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+  }
+})
+
+test('refresh adopts a verified replacement while preserving user settings', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-agent-replacement-'))
+  const command = writeExecutable(
+    join(dir, 'codex'),
+    'if [ "$1" = "--version" ]; then echo codex-replacement; exit 0; fi\necho TURING_READY',
+    'if "%~1"=="--version" (echo codex-replacement & exit /b 0)\necho TURING_READY'
+  )
+  setExtraAgentSearchPathsForTesting([dir])
+
+  try {
+    await withConfigHome(async () => {
+      const existing = {
+        adapter: 'codex' as const,
+        command: join(dir, 'removed-codex'),
+        args: ['exec', '{prompt}'],
+        timeout: 123_000,
+        priority: 3,
+        env: { PASSITON_TEST_ENV: 'keep-me' },
+        autoDiscovered: true,
+      }
+      writeConfig({ ...DEFAULT_CONFIG, agents: { codex: existing } })
+      const catalog = new AgentCatalog(loadConfig().agents, true, true)
+      await catalog.discover({ refresh: true })
+      const config = catalog.configuredAgentConfigs().codex
+
+      assert.equal(config?.command, command)
+      assert.equal(config?.timeout, 123_000)
+      assert.equal(config?.priority, 3)
+      assert.deepEqual(config?.env, { PASSITON_TEST_ENV: 'keep-me' })
+      assert.equal(config?.lastVerifiedVersion, 'codex-replacement')
+      assert.equal(config?.lastVerificationError, undefined)
+    })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })
 

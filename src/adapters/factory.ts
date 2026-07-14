@@ -1,7 +1,7 @@
 import type { AgentConfig, Adapter } from '../types.js'
 import type { Router } from '../router.js'
 import { existsSync } from 'fs'
-import { dirname, join, win32 } from 'path'
+import { posix, win32 } from 'path'
 import { ClaudeCodeAdapter, defaultClaudeCodeArgs } from './claude-code.js'
 import { CodexAdapter } from './codex.js'
 import { CustomCliAdapter } from './custom-cli.js'
@@ -282,7 +282,9 @@ function codexNpmPackageEntrypoint(command: string): string | undefined {
   const base = win32.basename(normalized)
   if (base !== 'codex' && base !== 'codex.cmd' && base !== 'codex.ps1') return undefined
   if (!normalized.includes('\\npm\\codex')) return undefined
-  return join(dirname(command), 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
+  const pathApi = command.includes('/') && !command.includes('\\') ? posix : win32
+  const packageEntry = pathApi.join(pathApi.dirname(command), 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
+  return existsSync(packageEntry) ? packageEntry : undefined
 }
 
 function claudeNpmPackageEntrypoint(command: string): string | undefined {
@@ -292,6 +294,7 @@ function claudeNpmPackageEntrypoint(command: string): string | undefined {
     return command
   }
   if (base !== 'claude' && base !== 'claude.cmd' && base !== 'claude.ps1') return undefined
-  const packageExe = join(dirname(command), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')
+  const pathApi = command.includes('/') && !command.includes('\\') ? posix : win32
+  const packageExe = pathApi.join(pathApi.dirname(command), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')
   return existsSync(packageExe) ? packageExe : undefined
 }

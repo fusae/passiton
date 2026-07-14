@@ -179,7 +179,12 @@ export class AgentCatalog {
           const replacement = await findExecutable(commands, preset.envVars)
           if (replacement) {
             const discoveredConfig = createDiscoveredAgentConfig(preset.adapter, replacement)
-            if (discoveredConfig) this.updateConfiguredAgent(existing, { ...discoveredConfig, autoDiscovered: true })
+            if (discoveredConfig && !sameAgentInvocation(existing.config, discoveredConfig)) {
+              const validation = await validateDiscoveredAgent(preset.name, discoveredConfig)
+              if (validation.healthy) {
+                this.updateConfiguredAgent(existing, discoveredConfig, validation.version)
+              }
+            }
           } else {
             this.removeAutoConfiguredAgent(existing)
           }
@@ -261,18 +266,30 @@ export class AgentCatalog {
     entry.config = nextAgent
   }
 
-  private updateConfiguredAgent(entry: AgentEntry, config: AgentConfig): void {
+  private updateConfiguredAgent(entry: AgentEntry, config: AgentConfig, version?: string): void {
     if (!entry.config) return
-    if (sameAgentConfig(entry.config, config)) return
     const current = loadConfig()
     const currentAgent = current.agents[entry.name]
     if (!currentAgent || currentAgent.adapter !== entry.adapter) return
+    const now = Date.now()
+    const nextAgent: AgentConfig = {
+      ...currentAgent,
+      ...config,
+      timeout: currentAgent.timeout ?? config.timeout,
+      priority: currentAgent.priority,
+      env: currentAgent.env ?? config.env,
+      autoDiscovered: true,
+      lastVerifiedAt: now,
+      lastVerifiedVersion: version ?? currentAgent.lastVerifiedVersion ?? 'verified',
+      lastVerificationAttemptAt: now,
+    }
+    delete nextAgent.lastVerificationError
     writeConfig({
       ...current,
-      agents: { ...current.agents, [entry.name]: config },
+      agents: { ...current.agents, [entry.name]: nextAgent },
     })
-    entry.command = config.command
-    entry.config = config
+    entry.command = nextAgent.command
+    entry.config = nextAgent
     this.probeCache.clear()
   }
 
@@ -955,8 +972,24 @@ async function probeCommand(command: string, versionArgs?: string[]): Promise<{ 
   return { healthy: false, error: lastError }
 }
 
-function sameAgentConfig(left: AgentConfig, right: AgentConfig): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
+function sameAgentInvocation(left: AgentConfig, right: AgentConfig): boolean {
+  return left.command === right.command
+    && JSON.stringify(left.args ?? []) === JSON.stringify(right.args ?? [])
+    && JSON.stringify(left.versionArgs ?? []) === JSON.stringify(right.versionArgs ?? [])
+}
+
+async function validateDiscoveredAgent(
+  name: string,
+  config: AgentConfig
+): Promise<{ healthy: boolean; version?: string }> {
+  if (!config.command) return { healthy: false }
+  const versionProbe = await probeCommand(config.command, config.versionArgs)
+  if (!versionProbe.healthy) return { healthy: false }
+  const smokeProbe = await smokeTestAgent(name, config)
+  return {
+    healthy: smokeProbe.healthy,
+    version: versionProbe.version,
+  }
 }
 
 async function smokeTestAgent(name: string, config: AgentConfig): Promise<{ healthy: boolean; error?: string }> {
