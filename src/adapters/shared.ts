@@ -1,4 +1,4 @@
-import { spawn } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import { existsSync } from 'fs'
 import type { AdapterSendOpts } from '../types.js'
 
@@ -42,6 +42,50 @@ export function prepareCommandForSpawn(command: string, args: string[], platform
   }
 
   return { command, args }
+}
+
+/**
+ * Kill a child process and its entire process tree.
+ *
+ * On POSIX we signal the process group (set up via `detached: true` at
+ * spawn time) so grandchildren are included. A SIGKILL escalation fires
+ * after a 5 s grace period for processes that trap/ignore SIGTERM.
+ *
+ * On Windows there is no process-group concept; `taskkill /T /F` does
+ * the tree kill instead.
+ */
+function terminateProcessTree(proc: ChildProcess): void {
+  const pid = proc.pid
+  if (pid === undefined) return
+
+  if (currentPlatform() === 'win32') {
+    try {
+      spawn('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true })
+    } catch {
+      // ESRCH — already exited or taskkill unavailable.
+    }
+    return
+  }
+
+  // POSIX — signal the entire process group.
+  try {
+    process.kill(-pid, 'SIGTERM')
+  } catch {
+    try { proc.kill('SIGTERM') } catch { /* ESRCH — already dead */ }
+  }
+
+  // Escalate to SIGKILL after a grace period if the child ignores SIGTERM.
+  const escalationTimer = setTimeout(() => {
+    try {
+      process.kill(-pid, 'SIGKILL')
+    } catch {
+      try { proc.kill('SIGKILL') } catch { /* ESRCH — already dead */ }
+    }
+  }, 5_000)
+  escalationTimer.unref()
+
+  // Cancel the escalation if the process exits during the grace period.
+  proc.once('exit', () => { clearTimeout(escalationTimer) })
 }
 
 interface RunCommandOptions {
@@ -93,6 +137,7 @@ export function runCommand({
       env: { ...process.env, ...env },
       stdio: [stdinMode, 'pipe', 'pipe'],
       ...(invocation.shell ? { shell: true } : {}),
+      ...(currentPlatform() !== 'win32' ? { detached: true } : {}),
     })
 
     if (stdinMode === 'pipe') {
@@ -121,7 +166,7 @@ export function runCommand({
       if (settled) return
       settled = true
       cleanupTimers()
-      proc.kill('SIGTERM')
+      terminateProcessTree(proc)
       reject(withLastOutput(new Error(`[${adapterName}] interrupted by human message`), lastOutput))
     }
     signal?.addEventListener('abort', abort, { once: true })
@@ -164,7 +209,7 @@ export function runCommand({
       idleTimer = setTimeout(() => {
         if (settled) return
         const latestIdleTimeout = currentIdleTimeout()
-        proc.kill('SIGTERM')
+        terminateProcessTree(proc)
         settled = true
         cleanupTimers()
         signal?.removeEventListener('abort', abort)
@@ -185,7 +230,7 @@ export function runCommand({
       hardTimer = setTimeout(() => {
         if (settled) return
         const latestHardTimeout = Math.max(HARD_TIMEOUT_MS, currentIdleTimeout())
-        proc.kill('SIGTERM')
+        terminateProcessTree(proc)
         settled = true
         cleanupTimers()
         signal?.removeEventListener('abort', abort)
