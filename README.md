@@ -10,14 +10,23 @@ Passiton is a local-first control plane for the CLI coding agents you already ha
 
 - **Task / Session / Workflow**: run one agent, pair two agents, or chain multi-step workflows with dependencies and approvals.
 - **Operate by UI or API**: every action -- create agents, dispatch tasks, run workflows, hand off failed work -- is available in the web UI and over a self-describing HTTP API (`GET /api/docs`) that an AI operator can drive.
-- **Any CLI agent**: the four above are auto-discovered; register anything else (aider, goose, qwen-code, ...) as a custom CLI agent via the UI or `POST /api/config/agents`.
+- **Any CLI agent**: Claude Code, Codex, Gemini CLI, and OpenCode are auto-discovered, auto-configured, and verified automatically; register anything else (aider, goose, qwen-code, ...) as a custom CLI agent via the UI or `POST /api/config/agents`.
+- **Agent priority**: reorder agents with arrows in Settings; tasks created without an explicit agent go to the highest-priority usable agent.
 - **Human-in-the-loop**: pause, resume, inject feedback, approve workflow steps, and rerun downstream steps after changes.
 - **Local-first SQLite**: defaults to `127.0.0.1`, stores config and state under `~/.passiton/`, and keeps the legacy `turing.db` filename for compatibility.
 - **CLI and API agents**: Codex, Claude Code, Gemini CLI, OpenCode, Anthropic, OpenAI, DeepSeek, Zhipu, Qwen, Moonshot, and OpenAI-compatible endpoints.
-- **Agent handoff**: continue errored or stopped tasks with another ready agent, including the previous output tail and verified git workspace state when available.
+- **Agent handoff**: continue running, errored, or stopped tasks (running tasks are stopped automatically first) with another ready agent; the handoff includes the previous output tail and verified git workspace state when available.
 - **i18n**: English is the default UI language; Simplified Chinese is available in Settings.
 
 ## Quick Start
+
+```bash
+npx passiton
+```
+
+Open `http://localhost:4590`.
+
+### From source
 
 ```bash
 git clone https://github.com/fusae/passiton.git
@@ -27,24 +36,21 @@ npm run build
 npm start
 ```
 
-Open `http://localhost:4590`.
-
 Optional verification:
 
 ```bash
 npm test
 ```
 
-`npx passiton` is coming after the npm package is published. For local development, use `npm link` after `npm run build`.
+For local development, use `npm link` after `npm run build` to get the `passiton` command on your PATH.
 
 ## First Task Walkthrough
 
-1. Open `Settings`.
-2. Confirm a local CLI agent shows `Discovered`.
-3. Click `Add`; it becomes `unverified`.
-4. Click `Diagnose`; a usable agent becomes `ready`.
-5. Open `Tasks`, choose the agent, enter a prompt, and optionally set `cwd`.
-6. Agents that are not auto-discovered can be added as a custom CLI agent in `Settings` → `Agents` → `Add custom agent`, or with `POST /api/config/agents` using adapter `custom-cli`; see [Community adapters](./docs/community-adapters.md).
+1. On first launch, the four preset CLI agents (Claude Code, Codex, Gemini CLI, OpenCode) are auto-discovered, auto-added, and verified automatically in the background.
+2. In `Settings`, they reach `ready` with zero clicks.
+3. An installed-but-unusable CLI (e.g. not logged in) shows `invalid`; the `Diagnose` button explains why.
+4. Open `Tasks`, enter a prompt, and optionally set `cwd` — the agent picker defaults to "Auto (highest priority)", so choosing an agent is optional.
+5. Agents that are not auto-discovered can be added as a custom CLI agent in `Settings` → `Agents` → `Add custom agent`, or with `POST /api/config/agents` using adapter `custom-cli`; see [Community adapters](./docs/community-adapters.md).
 
 Tasks with `cwd` require a filesystem-capable local CLI agent. API assistants can plan and review, but they cannot read or write local files directly.
 
@@ -80,6 +86,8 @@ curl -s -X POST "$BASE/api/tasks" \
     "prompt": "Summarize this repository."
   }'
 ```
+
+`agent` is optional — omit it and the task goes to the highest-priority usable agent.
 
 ## Configuration
 

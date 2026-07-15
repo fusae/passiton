@@ -10,14 +10,23 @@ Passiton 是一个本地优先的控制台，用来编排你已经装好的 CLI 
 
 - **Task / Session / Workflow**：运行单 agent、让两个 agent 协作，或把多步骤任务串成带依赖和审批的工作流。
 - **UI 或 API 操作**：创建 agents、分派任务、运行 workflows、handoff 失败任务等所有操作，都可在 Web UI 中完成，也可通过 AI operator 能驱动的自描述 HTTP API（`GET /api/docs`）完成。
-- **任意 CLI agent**：上面四类会自动发现；其他 agent（aider、goose、qwen-code 等）可在 UI 中注册为 custom CLI agent，也可通过 `POST /api/config/agents` 注册。
+- **任意 CLI agent**：Claude Code、Codex、Gemini CLI 和 OpenCode 会自动发现、自动配置并自动验证；其他 agent（aider、goose、qwen-code 等）可在 UI 中注册为 custom CLI agent，也可通过 `POST /api/config/agents` 注册。
 - **Human-in-the-loop**：暂停、恢复、插入反馈、审批工作流步骤，并在修改上游后重跑下游。
 - **Local-first SQLite**：默认监听 `127.0.0.1`，配置和状态保存在 `~/.passiton/`，数据库文件名为兼容保留的 `turing.db`。
 - **CLI 与 API agents**：Codex、Claude Code、Gemini CLI、OpenCode、Anthropic、OpenAI、DeepSeek、智谱、Qwen、Moonshot 以及 OpenAI-compatible 端点。
-- **Agent handoff**：失败或停止的任务可交给另一个 ready agent 继续，并带上上一轮输出尾部和可用的 git 工作区状态。
+- **Agent priority**：Settings 中用箭头调整顺序即可设置优先级；未显式指定 agent 的任务会分派给优先级最高的可用 agent。
+- **Agent handoff**：运行中、失败或停止的任务可交给另一个 ready agent 继续；运行中的任务会先自动停止，并带上上一轮输出尾部和可用的 git 工作区状态。
 - **i18n**：界面默认英文，Settings 中可切换简体中文。
 
 ## 快速开始
+
+```bash
+npx passiton
+```
+
+打开 `http://localhost:4590`。
+
+### 从源码运行
 
 ```bash
 git clone https://github.com/fusae/passiton.git
@@ -27,23 +36,21 @@ npm run build
 npm start
 ```
 
-打开 `http://localhost:4590`。
-
 可选验证：
 
 ```bash
 npm test
 ```
 
-`npx passiton` 会在 npm 包发布后可用。本地开发可在 `npm run build` 后使用 `npm link`。
+本地开发如需链接 `passiton` 命令，可在 `npm run build` 后使用 `npm link`。
 
 ## 第一个任务
 
 1. 打开 `Settings`。
-2. 确认至少一个本地 CLI agent 显示 `Discovered`。
-3. 点击 `Add`，状态变为 `unverified`。
-4. 点击 `Diagnose`，可用 agent 会变为 `ready`。
-5. 打开 `Tasks`，选择 agent，输入任务，并按需设置 `cwd`。
+2. 观察预置 CLI agents 自行验证：Claude Code、Codex、Gemini CLI 和 OpenCode 会在后台自动发现、自动添加并自动验证。
+3. 可用的已安装 CLI 会零点击到达 `ready`。
+4. 已安装但不可用的 CLI（例如未登录的 agent）会变为 `invalid`；详情可通过 `Diagnose` 查看。
+5. 打开 `Tasks`，输入任务，可选选择 agent，并按需设置 `cwd`。表单默认使用 `Auto (highest priority)`。
 6. 未被自动发现的 agent 可在 `Settings` → `Agents` → `Add custom agent` 中添加为 custom CLI agent，也可用 `POST /api/config/agents` 和 adapter `custom-cli` 添加；详见 [Community adapters](./docs/community-adapters.md)。
 
 带 `cwd` 的任务需要具备文件系统能力的本地 CLI agent。API assistant 可以规划和评审，但不能直接读写本地文件。
@@ -80,6 +87,8 @@ curl -s -X POST "$BASE/api/tasks" \
     "prompt": "Summarize this repository."
   }'
 ```
+
+在 `POST /api/tasks` 中，`agent` 是可选字段；省略时 Passiton 会选择优先级最高的可用 agent。
 
 ## 配置
 
