@@ -523,10 +523,52 @@ export interface FeatureConfig {
   localCliAgents: boolean
 }
 
+export interface OpsSupervisorConfig {
+  enabled: boolean
+  intervalMs: number
+  staleProgressMs: number
+  cooldownMs: number
+  maxIncidents: number
+}
+
+export type OpsIncidentClassification =
+  | 'model_unavailable'
+  | 'quota_exhausted'
+  | 'auth_failed'
+  | 'reconnect_loop'
+  | 'no_output'
+
+export type OpsIncidentStatus =
+  | 'detected'
+  | 'remediated'
+  | 'no_fallback'
+  | 'acknowledged'
+
+export interface OpsIncident {
+  id: string
+  userId?: string
+  targetKind: 'task'
+  targetId: string
+  targetAgent: string
+  classification: OpsIncidentClassification
+  severity: 'critical' | 'warning'
+  evidence: string
+  status: OpsIncidentStatus
+  detectedAt: number
+  remediatedAt?: number
+  acknowledgedAt?: number
+  action?: string
+  actionOutcome?: string
+  excludedAgent?: string
+  handoffTaskId?: string
+  handoffAgent?: string
+}
+
 export interface OpsConfig {
   model?: {
     userAgentName?: string
   }
+  supervisor?: OpsSupervisorConfig
 }
 
 // Full app config
@@ -573,6 +615,7 @@ export type WsEventType =
   | 'agent:status'
   | 'heartbeat'
   | 'log'
+  | 'ops:incident'
 
 export interface StandardWsEvent {
   type: WsEventType

@@ -7,6 +7,7 @@ import type { AppConfig, SessionMode } from './types.js'
 import { defaultClaudeCodeArgs } from './adapters/claude-code.js'
 import { resolveDataHome } from './paths.js'
 import { validateAllowedWorkspaces } from './workspace.js'
+import { DEFAULT_SUPERVISOR_CONFIG } from './ops-supervisor.js'
 
 function env(name: string): string | undefined {
   return process.env[`PASSITON_${name}`] ?? process.env[`TURING_${name}`]
@@ -37,6 +38,7 @@ export const DEFAULT_CONFIG: AppConfig = {
     model: {
       userAgentName: '__ops__',
     },
+    supervisor: { ...DEFAULT_SUPERVISOR_CONFIG },
   },
   agents: {},
   policy: {
@@ -164,6 +166,19 @@ function validateConfig(config: AppConfig): AppConfig {
         assertNonEmptyString(config.ops.model.userAgentName, 'ops.model.userAgentName')
       }
     }
+    if (config.ops.supervisor !== undefined) {
+      if (!isPlainObject(config.ops.supervisor)) {
+        throw new Error('[config] "ops.supervisor" must be an object')
+      }
+      const s = config.ops.supervisor
+      if (s.enabled !== undefined && typeof s.enabled !== 'boolean') {
+        throw new Error('[config] "ops.supervisor.enabled" must be a boolean')
+      }
+      if (s.intervalMs !== undefined) assertPositiveInt(s.intervalMs, 'ops.supervisor.intervalMs')
+      if (s.staleProgressMs !== undefined) assertPositiveInt(s.staleProgressMs, 'ops.supervisor.staleProgressMs')
+      if (s.cooldownMs !== undefined) assertPositiveInt(s.cooldownMs, 'ops.supervisor.cooldownMs')
+      if (s.maxIncidents !== undefined) assertNonNegativeInt(s.maxIncidents, 'ops.supervisor.maxIncidents')
+    }
   }
 
   if (!isPlainObject(config.agents)) {
@@ -269,6 +284,10 @@ function normalizeConfig(config: AppConfig): AppConfig {
     model: {
       ...DEFAULT_CONFIG.ops?.model,
       ...config.ops?.model,
+    },
+    supervisor: {
+      ...DEFAULT_SUPERVISOR_CONFIG,
+      ...config.ops?.supervisor,
     },
   }
 

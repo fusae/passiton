@@ -28,6 +28,9 @@ import type {
   TaskStatus,
   WorkspaceDirtyState,
   ExternalJob,
+  OpsIncident,
+  OpsIncidentClassification,
+  OpsIncidentStatus,
 } from './types.js'
 
 const DB_DIR = resolveDataHome()
@@ -327,6 +330,26 @@ function createTables(): void {
       UNIQUE(provider, external_id)
     );
 
+    CREATE TABLE IF NOT EXISTS ops_incidents (
+      id              TEXT PRIMARY KEY,
+      user_id         TEXT,
+      target_kind     TEXT NOT NULL DEFAULT 'task',
+      target_id       TEXT NOT NULL,
+      target_agent    TEXT NOT NULL,
+      classification  TEXT NOT NULL,
+      severity        TEXT NOT NULL DEFAULT 'critical',
+      evidence        TEXT NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'detected',
+      detected_at     INTEGER NOT NULL,
+      remediated_at   INTEGER,
+      acknowledged_at INTEGER,
+      action          TEXT,
+      action_outcome  TEXT,
+      excluded_agent  TEXT,
+      handoff_task_id TEXT,
+      handoff_agent   TEXT
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_session_logs_session ON session_logs(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots(session_id, round, timestamp);
@@ -338,6 +361,8 @@ function createTables(): void {
     CREATE INDEX IF NOT EXISTS idx_pipeline_templates_user ON pipeline_templates(user_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_external_jobs_status ON external_jobs(status, updated_at);
     CREATE INDEX IF NOT EXISTS idx_external_jobs_session ON external_jobs(session_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_ops_incidents_status ON ops_incidents(status, detected_at);
+    CREATE INDEX IF NOT EXISTS idx_ops_incidents_target ON ops_incidents(target_id, classification);
   `)
 
   // Migrate: add new columns if they don't exist (for existing DBs)
@@ -1692,4 +1717,120 @@ function maybeRunMessageGc(now: number): void {
   if (messageRetentionMs <= 0) return
   if (now - lastMessageGcAt < MESSAGE_GC_INTERVAL_MS) return
   pruneExpiredMessages(now)
+}
+
+// ── Ops Incidents ────────────────────────────────────────────────────────────
+
+function rowToOpsIncident(row: Record<string, unknown>): OpsIncident {
+  return {
+    id: row.id as string,
+    userId: (row.user_id as string | null) ?? undefined,
+    targetKind: (row.target_kind as 'task') ?? 'task',
+    targetId: row.target_id as string,
+    targetAgent: row.target_agent as string,
+    classification: row.classification as OpsIncidentClassification,
+    severity: (row.severity as 'critical' | 'warning') ?? 'critical',
+    evidence: row.evidence as string,
+    status: row.status as OpsIncidentStatus,
+    detectedAt: row.detected_at as number,
+    remediatedAt: (row.remediated_at as number | null) ?? undefined,
+    acknowledgedAt: (row.acknowledged_at as number | null) ?? undefined,
+    action: (row.action as string | null) ?? undefined,
+    actionOutcome: (row.action_outcome as string | null) ?? undefined,
+    excludedAgent: (row.excluded_agent as string | null) ?? undefined,
+    handoffTaskId: (row.handoff_task_id as string | null) ?? undefined,
+    handoffAgent: (row.handoff_agent as string | null) ?? undefined,
+  }
+}
+
+export function createOpsIncident(params: {
+  id: string
+  userId?: string
+  targetKind?: 'task'
+  targetId: string
+  targetAgent: string
+  classification: OpsIncidentClassification
+  severity?: 'critical' | 'warning'
+  evidence: string
+  status?: OpsIncidentStatus
+  detectedAt?: number
+}): OpsIncident {
+  const now = params.detectedAt ?? Date.now()
+  db.prepare(`
+    INSERT INTO ops_incidents (id, user_id, target_kind, target_id, target_agent, classification, severity, evidence, status, detected_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    params.id,
+    params.userId ?? null,
+    params.targetKind ?? 'task',
+    params.targetId,
+    params.targetAgent,
+    params.classification,
+    params.severity ?? 'critical',
+    params.evidence,
+    params.status ?? 'detected',
+    now
+  )
+  return getOpsIncident(params.id)!
+}
+
+export function getOpsIncident(id: string): OpsIncident | undefined {
+  const row = db.prepare('SELECT * FROM ops_incidents WHERE id = ?').get(id) as Record<string, unknown> | undefined
+  return row ? rowToOpsIncident(row) : undefined
+}
+
+export function listOpsIncidents(filter?: { status?: OpsIncidentStatus; userId?: string; targetId?: string; limit?: number }): OpsIncident[] {
+  const conditions: string[] = []
+  const params: (string | number)[] = []
+  if (filter?.status) { conditions.push('status = ?'); params.push(filter.status) }
+  if (filter?.userId) { conditions.push('user_id = ?'); params.push(filter.userId) }
+  if (filter?.targetId) { conditions.push('target_id = ?'); params.push(filter.targetId) }
+  let sql = 'SELECT * FROM ops_incidents'
+  if (conditions.length > 0) sql += ' WHERE ' + conditions.join(' AND ')
+  sql += ' ORDER BY detected_at DESC'
+  if (filter?.limit && Number.isInteger(filter.limit) && filter.limit > 0) {
+    sql += ' LIMIT ?'
+    params.push(filter.limit)
+  }
+  const rows = db.prepare(sql).all(...params) as Record<string, unknown>[]
+  return rows.map(rowToOpsIncident)
+}
+
+export function findOpsIncident(targetId: string, classification: OpsIncidentClassification): OpsIncident | undefined {
+  const row = db.prepare(
+    'SELECT * FROM ops_incidents WHERE target_id = ? AND classification = ? AND status = ? ORDER BY detected_at DESC LIMIT 1'
+  ).get(targetId, classification, 'detected') as Record<string, unknown> | undefined
+  return row ? rowToOpsIncident(row) : undefined
+}
+
+export function updateOpsIncident(id: string, updates: Partial<Pick<OpsIncident,
+  'status' | 'remediatedAt' | 'acknowledgedAt' | 'action' | 'actionOutcome' | 'excludedAgent' | 'handoffTaskId' | 'handoffAgent'
+>>): OpsIncident | undefined {
+  const fields: string[] = []
+  const values: unknown[] = []
+  if (updates.status !== undefined) { fields.push('status = ?'); values.push(updates.status) }
+  if (updates.remediatedAt !== undefined) { fields.push('remediated_at = ?'); values.push(updates.remediatedAt) }
+  if (updates.acknowledgedAt !== undefined) { fields.push('acknowledged_at = ?'); values.push(updates.acknowledgedAt) }
+  if (updates.action !== undefined) { fields.push('action = ?'); values.push(updates.action) }
+  if (updates.actionOutcome !== undefined) { fields.push('action_outcome = ?'); values.push(updates.actionOutcome) }
+  if (updates.excludedAgent !== undefined) { fields.push('excluded_agent = ?'); values.push(updates.excludedAgent) }
+  if (updates.handoffTaskId !== undefined) { fields.push('handoff_task_id = ?'); values.push(updates.handoffTaskId) }
+  if (updates.handoffAgent !== undefined) { fields.push('handoff_agent = ?'); values.push(updates.handoffAgent) }
+  if (fields.length === 0) return getOpsIncident(id)
+  values.push(id)
+  db.prepare(`UPDATE ops_incidents SET ${fields.join(', ')} WHERE id = ?`).run(...values)
+  return getOpsIncident(id)
+}
+
+export function pruneOpsIncidents(maxKeep: number): number {
+  if (maxKeep <= 0) return 0
+  const count = (db.prepare('SELECT COUNT(*) as n FROM ops_incidents').get() as { n: number }).n
+  if (count <= maxKeep) return 0
+  const toDelete = count - maxKeep
+  db.prepare(`
+    DELETE FROM ops_incidents WHERE id IN (
+      SELECT id FROM ops_incidents ORDER BY detected_at ASC LIMIT ?
+    )
+  `).run(toDelete)
+  return toDelete
 }

@@ -894,6 +894,31 @@ test('stopTask keeps stopped status when a late agent result arrives', async () 
   })
 })
 
+test('stopTask aborts the running agent process', async () => {
+  await withTempDb(async () => {
+    let aborted = false
+    const router = new Router()
+    router.registerAdapter(new StubAdapter('opencode', async (_session, _message, opts) => {
+      await new Promise<void>((resolve) => {
+        opts?.signal?.addEventListener('abort', () => {
+          aborted = true
+          resolve()
+        }, { once: true })
+      })
+      throw new Error('aborted')
+    }))
+
+    const task = router.startTask({ agent: { adapter: 'opencode' }, prompt: 'slow' })
+    await waitFor(() => state.getTask(task.id)?.status === 'running')
+    await router.stopTask(task.id)
+    await waitFor(() => aborted)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+
+    assert.equal(state.getTask(task.id)?.status, 'stopped')
+    router.dispose()
+  })
+})
+
 test('failed task with cwd captures workspace dirty state', async () => {
   await withTempDb(async () => {
     const dir = mkdtempSync(join(tmpdir(), 'turing-dirty-'))

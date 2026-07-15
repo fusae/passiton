@@ -46,6 +46,7 @@ export class Router extends EventEmitter {
   private runningLoops = new Set<string>()
   private runEpochs = new Map<string, number>()
   private turnControllers = new Map<string, AbortController>()
+  private taskControllers = new Map<string, AbortController>()
   private timeoutExtensions = new Map<string, number>()
   private lastStreamStepSignatures = new Map<string, string>()
   private externalJobTimers = new Map<string, NodeJS.Timeout>()
@@ -69,6 +70,8 @@ export class Router extends EventEmitter {
     this.externalJobTimers.clear()
     for (const controller of this.turnControllers.values()) controller.abort()
     this.turnControllers.clear()
+    for (const controller of this.taskControllers.values()) controller.abort()
+    this.taskControllers.clear()
     this.removeAllListeners()
   }
 
@@ -292,6 +295,7 @@ export class Router extends EventEmitter {
     const task = state.getTask(id)
     if (!task) throw new Error(`Task ${id} not found`)
     if (task.status === 'done' || task.status === 'error' || task.status === 'stopped') return task
+    this.taskControllers.get(id)?.abort()
     const finishedAt = Date.now()
     const gitCommits = await this.collectTaskGitCommits(task, finishedAt)
     const stopped = state.updateTask(id, {
@@ -358,6 +362,9 @@ export class Router extends EventEmitter {
         }
       },
     }
+    const controller = new AbortController()
+    this.taskControllers.set(task.id, controller)
+    opts.signal = controller.signal
     this.applyAdapterSecret(adapter, task.userId, opts)
 
     try {
@@ -392,6 +399,8 @@ export class Router extends EventEmitter {
         ...(workspaceState ? { workspaceState } : {}),
       }, task.userId)
       this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
+    } finally {
+      this.taskControllers.delete(task.id)
     }
     // Slot release + next-task drain happen in the .finally() of scheduleTask.
   }

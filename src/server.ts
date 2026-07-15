@@ -27,9 +27,10 @@ import { activeAgents, getConfigPath, loadConfig, writeConfig } from './config.j
 import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { AdapterResponse, AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, Pipeline, PipelineTemplateRecord, PipelineWithSessions, AgentRef, Message, Session, SessionMode, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType } from './types.js'
+import type { AdapterResponse, AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, Pipeline, PipelineTemplateRecord, PipelineWithSessions, AgentRef, Message, Session, SessionMode, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType, OpsIncident } from './types.js'
 import { pipelineTemplates, templates } from './templates.js'
 import { resolveWorkspacePath, validateAllowedWorkspaces, WorkspaceAccessError } from './workspace.js'
+import { OpsSupervisor, acknowledgeIncident, listIncidents } from './ops-supervisor.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(__dirname, 'web')
@@ -1374,7 +1375,29 @@ async function selectDefaultTaskAgent(userId: string, agentCatalog: AgentCatalog
   return { adapter: selected.name }
 }
 
-function buildTaskHandoffPrompt(source: Task): string {
+/**
+ * Select the next highest-priority READY filesystem-capable local CLI agent,
+ * excluding the specified failing agent. Returns undefined if none exists.
+ */
+async function selectFallbackTaskAgent(
+  userId: string,
+  agentCatalog: AgentCatalog,
+  cwd: string | undefined,
+  excludeAdapter: string
+): Promise<AgentRef | undefined> {
+  const agents = await listAgentModels(userId, agentCatalog)
+  const accepted = agents.filter((agent) => {
+    if (agent.name === excludeAdapter || agent.adapter === excludeAdapter) return false
+    if (agent.status === 'invalid' || agent.status === 'no_key' || agent.status === 'discovered') return false
+    if (cwd && !agentHasFilesystem(userId, { adapter: agent.name })) return false
+    return true
+  })
+  const ready = accepted.filter((agent) => agent.status === 'ready')
+  const selected = sortAgentsByPriority(ready)[0]
+  return selected ? { adapter: selected.name } : undefined
+}
+
+export function buildTaskHandoffPrompt(source: Task): string {
   const previousOutput = truncateText(source.lastAgentOutput || source.output || source.result || '', HANDOFF_OUTPUT_TAIL_CHARS)
   const ended = source.status === 'error'
     ? `error${source.errorMessage ? `: ${source.errorMessage}` : ''}`
@@ -2933,6 +2956,10 @@ function sessionApiDocs() {
       },
     },
     pipelineTemplates: 'GET /api/pipeline-templates',
+    opsIncidents: {
+      list: 'GET /api/ops/incidents?status=detected&limit=20',
+      acknowledge: 'POST /api/ops/incidents/:id/ack',
+    },
   }
 }
 
@@ -3534,6 +3561,32 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return json(res, 200, await executeOpsAction(router, authUser!.userId, parseOpsActionBody(await parseBody(req))))
       }
 
+      // GET /api/ops/incidents
+      if (pathname === '/api/ops/incidents' && method === 'GET') {
+        const statusParam = optionalString(url.searchParams.get('status') ?? undefined, 'status')
+        const allowedStatuses: OpsIncident['status'][] = ['detected', 'remediated', 'no_fallback', 'acknowledged']
+        if (statusParam && !allowedStatuses.includes(statusParam as OpsIncident['status'])) {
+          throw new HttpError(400, 'Invalid incident status')
+        }
+        const limit = optionalPositiveInt(url.searchParams.get('limit'), 'limit')
+        const incidents = listIncidents({
+          userId: authUser!.userId,
+          ...(statusParam ? { status: statusParam as OpsIncident['status'] } : {}),
+          ...(limit ? { limit } : {}),
+        })
+        return json(res, 200, incidents)
+      }
+
+      // POST /api/ops/incidents/:id/ack
+      const incidentAckMatch = pathname.match(/^\/api\/ops\/incidents\/([^/]+)\/ack$/)
+      if (incidentAckMatch && method === 'POST') {
+        const existing = state.getOpsIncident(incidentAckMatch[1])
+        if (!existing || existing.userId !== authUser!.userId) return json(res, 404, { error: 'Incident not found' })
+        const incident = acknowledgeIncident(incidentAckMatch[1])
+        if (!incident) return json(res, 404, { error: 'Incident not found' })
+        return json(res, 200, incident)
+      }
+
       // GET /api/config
       if (pathname === '/api/config' && method === 'GET') {
         return json(res, 200, loadConfig())
@@ -4050,12 +4103,64 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
   server.on('close', () => {
     clearInterval(heartbeat)
+    supervisor?.stop()
     for (const ws of clients.keys()) {
       ws.terminate()
     }
     clients.clear()
     wss.close()
   })
+
+  // ── Ops Supervisor ────────────────────────────────────────────────────────
+  const supervisorConfig = loadConfig().ops?.supervisor
+  let supervisor: OpsSupervisor | undefined
+  if (supervisorConfig?.enabled !== false) {
+    supervisor = new OpsSupervisor(
+      {
+        stopTask: (id) => router.stopTask(id),
+        startHandoff: async (source, excludeAdapter) => {
+          const fallback = await selectFallbackTaskAgent(
+            source.userId ?? state.DEFAULT_USER_ID,
+            agentCatalog,
+            source.cwd,
+            excludeAdapter
+          )
+          if (!fallback) {
+            return { reason: 'No filesystem-capable local CLI agent available (excluding failing agent).' }
+          }
+          const task = router.startTask({
+            userId: source.userId,
+            agent: fallback,
+            prompt: buildTaskHandoffPrompt(source),
+            context: source.context,
+            systemPrompt: source.systemPrompt,
+            cwd: source.cwd,
+            permissionMode: source.permissionMode,
+            metadata: { continuedFromTaskId: source.id },
+          })
+          return { task }
+        },
+        emitWsEvent: (event) => {
+          const payload = JSON.stringify(event)
+          const uid = eventUserId(event)
+          for (const [ws, clientUserId] of clients) {
+            if (ws.readyState === 1) {
+              if (uid && uid !== clientUserId) continue
+              ws.send(payload)
+            }
+          }
+        },
+      },
+      {
+        enabled: true,
+        intervalMs: supervisorConfig?.intervalMs ?? 15_000,
+        staleProgressMs: supervisorConfig?.staleProgressMs ?? 600_000,
+        cooldownMs: supervisorConfig?.cooldownMs ?? 300_000,
+        maxIncidents: supervisorConfig?.maxIncidents ?? 100,
+      }
+    )
+    supervisor.start()
+  }
 
   const onListening = () => {
     const displayHost = host === '0.0.0.0' ? '127.0.0.1' : host

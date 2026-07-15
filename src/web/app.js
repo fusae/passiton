@@ -803,6 +803,18 @@ const MESSAGES = {
     'ops_action_workflow_done': 'Executed {action}, Workflow: {id}',
     'ops_action_done': 'Executed {action}.',
 
+    // Ops supervisor incidents
+    'ops_incident_title': 'Incidents',
+    'ops_incident_ack': 'Ack',
+    'ops_incident_model_unavailable': 'Model unavailable',
+    'ops_incident_quota_exhausted': 'Quota exhausted',
+    'ops_incident_auth_failed': 'Auth failure',
+    'ops_incident_reconnect_loop': 'Reconnect loop',
+    'ops_incident_no_output': 'No output',
+    'ops_incident_handoff': '{label}: handed off to {agent}',
+    'ops_incident_no_fallback': '{label}: stopped, no fallback agent',
+    'ops_incident_stuck': '{label}: {agent} stuck',
+
     // Landing page
     'landing_nav_features': 'Features',
     'landing_nav_architecture': 'Architecture',
@@ -1477,6 +1489,18 @@ const MESSAGES = {
     'ops_action_workflow_done': '已执行 {action}，Workflow：{id}',
     'ops_action_done': '已执行 {action}。',
 
+    // Ops supervisor incidents
+    'ops_incident_title': '事件',
+    'ops_incident_ack': '确认',
+    'ops_incident_model_unavailable': '模型不可用',
+    'ops_incident_quota_exhausted': '配额耗尽',
+    'ops_incident_auth_failed': '认证失败',
+    'ops_incident_reconnect_loop': '重连循环',
+    'ops_incident_no_output': '无输出',
+    'ops_incident_handoff': '{label}：已接力给 {agent}',
+    'ops_incident_no_fallback': '{label}：已停止，无可用接力 Agent',
+    'ops_incident_stuck': '{label}：{agent} 已卡住',
+
     // Landing page
     'landing_nav_features': 'Features',
     'landing_nav_architecture': 'Architecture',
@@ -1589,6 +1613,8 @@ const state = {
   opsModelEditing: false,
   opsMessages: [],
   opsLastReport: null,
+  opsIncidents: [],
+  opsIncidentToast: null,
   opsPosition: loadOpsPosition(),
   opsDragging: false,
   opsDragged: false,
@@ -2016,6 +2042,7 @@ function renderOpsWidget() {
           <span class="ops-mascot-leg right"></span>
         </span>
         <span class="ops-fab-label">Ops</span>
+        ${renderOpsIncidentBadge()}
       </button>
       <section class="ops-panel ${open ? 'open' : ''}" id="ops-panel">
         <div class="ops-header">
@@ -2029,6 +2056,7 @@ function renderOpsWidget() {
           <button onclick="window.askOps(${jsString(t('ops_global_question'))})">${t('ops_global_check')}</button>
           <button onclick="window.askOpsForCurrent()">${t('ops_current_page_check')}</button>
         </div>
+        ${renderOpsIncidentTimeline()}
         ${renderOpsModelSettings()}
         <div class="ops-thread" id="ops-thread">
           ${messages.map(message => `
@@ -2213,7 +2241,94 @@ function handleWsEvent(event) {
       state.heartbeats.set(event.sessionId, event)
       updateHeartbeat(event)
       break
+    case 'ops:incident':
+      handleOpsIncident(event.payload)
+      break
   }
+}
+
+function handleOpsIncident(incident) {
+  if (!incident?.id) return
+  const idx = state.opsIncidents.findIndex(i => i.id === incident.id)
+  if (idx >= 0) {
+    state.opsIncidents[idx] = incident
+  } else {
+    state.opsIncidents.unshift(incident)
+    if (state.opsIncidents.length > 50) state.opsIncidents.length = 50
+  }
+  if (incident.status === 'detected' || incident.status === 'remediated' || incident.status === 'no_fallback') {
+    state.opsIncidentToast = incident
+    showToast(opsIncidentLabel(incident), incident.severity === 'warning' ? 'info' : 'error')
+    setTimeout(() => {
+      if (state.opsIncidentToast?.id === incident.id) {
+        state.opsIncidentToast = null
+        updateOpsPanel()
+      }
+    }, 6000)
+  }
+  updateOpsPanel()
+}
+
+function opsIncidentLabel(incident) {
+  const key = `ops_incident_${incident.classification}`
+  const label = t(key) || incident.classification
+  if (incident.status === 'remediated' && incident.handoffAgent) {
+    return t('ops_incident_handoff', { label, agent: incident.handoffAgent })
+  }
+  if (incident.status === 'no_fallback') {
+    return t('ops_incident_no_fallback', { label })
+  }
+  return t('ops_incident_stuck', { label, agent: incident.targetAgent })
+}
+
+async function loadOpsIncidents() {
+  try {
+    state.opsIncidents = await api('/api/ops/incidents?limit=20', 'GET')
+  } catch {
+    // silent
+  }
+}
+
+window.ackOpsIncident = async function(incidentId) {
+  try {
+    const updated = await api(`/api/ops/incidents/${incidentId}/ack`, 'POST')
+    const idx = state.opsIncidents.findIndex(i => i.id === incidentId)
+    if (idx >= 0) state.opsIncidents[idx] = updated
+    updateOpsPanel()
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+function renderOpsIncidentTimeline() {
+  const incidents = state.opsIncidents.filter(i => i.status !== 'acknowledged')
+  if (incidents.length === 0) return ''
+  const items = incidents.slice(0, 5).map(incident => {
+    const time = new Date(incident.detectedAt).toLocaleTimeString()
+    const statusIcon = incident.status === 'remediated' ? '✓' : incident.status === 'no_fallback' ? '⚠' : '●'
+    const actionText = incident.actionOutcome ? `<div class="ops-incident-action">${escapeHtml(incident.actionOutcome)}</div>` : ''
+    const evidence = incident.evidence ? `<div class="ops-incident-evidence">${escapeHtml(incident.evidence.slice(0, 200))}</div>` : ''
+    const ackBtn = incident.status !== 'acknowledged' ? `<button class="ops-incident-ack" onclick="window.ackOpsIncident('${incident.id}')">${escapeHtml(t('ops_incident_ack'))}</button>` : ''
+    return `
+      <div class="ops-incident-item severity-${incident.severity}">
+        <div class="ops-incident-head">
+          <span class="ops-incident-status">${statusIcon}</span>
+          <span class="ops-incident-classification">${escapeHtml(opsIncidentLabel(incident))}</span>
+          <span class="ops-incident-time">${time}</span>
+          ${ackBtn}
+        </div>
+        ${evidence}
+        ${actionText}
+      </div>
+    `
+  }).join('')
+  return `<div class="ops-incident-timeline">${items}</div>`
+}
+
+function renderOpsIncidentBadge() {
+  const count = state.opsIncidents.filter(i => i.status === 'detected' || i.status === 'remediated' || i.status === 'no_fallback').length
+  if (count === 0) return ''
+  return `<span class="ops-incident-badge">${count}</span>`
 }
 
 function applySessionUpdate(session) {
@@ -5082,6 +5197,7 @@ window.toggleOps = function() {
   else startOpsWalker()
   if (state.opsOpen) {
     loadOpsModel(undefined, true).then(updateOpsPanel).catch(() => {})
+    loadOpsIncidents().then(updateOpsPanel).catch(() => {})
     setTimeout(() => document.getElementById('ops-input')?.focus(), 0)
   }
 }
@@ -8271,5 +8387,6 @@ document.addEventListener('DOMContentLoaded', () => {
   if (getAuthToken()) {
     connectWs()
     loadOpsModel().then(updateOpsPanel).catch(() => {})
+    loadOpsIncidents().then(updateOpsPanel).catch(() => {})
   }
 })
