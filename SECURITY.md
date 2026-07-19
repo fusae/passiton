@@ -39,7 +39,12 @@ If you expose Passiton beyond `localhost` through Tailscale, Cloudflare Tunnel, 
 
 Startup fails fast for non-localhost binds unless authentication is explicit and workspaces are restricted.
 
-The `trusted` permission mode injects auto-approve flags into supported CLI agents. Never enable it for agents running against sensitive or shared directories.
+Permission modes define how local CLI agents are launched:
+
+- `safe` is the default for read-only analysis, review, and planning. Passiton does not bypass the agent's sandbox or approval prompts, so unattended writes may fail or block waiting for input.
+- `trusted` injects auto-approve or full-access flags into supported CLI agents. Use it only when the task must create, edit, or delete files, install dependencies, run commands, or create commits.
+
+AI callers must provide both a narrowly scoped `cwd` and `permissionMode: "trusted"` for filesystem writes or command execution. Never enable it against sensitive or shared directories. API assistants do not gain local filesystem access from either mode.
 
 ## Provider Keys
 

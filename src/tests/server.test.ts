@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import WebSocket from 'ws'
 import { Router } from '../router.js'
-import { createServer, registerPersistedUserAgents } from '../server.js'
+import { createServer, recommendationForError, registerPersistedUserAgents } from '../server.js'
 import * as state from '../state.js'
 import type { Adapter, AdapterSendOpts, Session } from '../types.js'
 import { encryptSecret } from '../keyvault.js'
@@ -225,12 +225,22 @@ test('ops endpoints report task failures and targeted diagnostics', async () => 
       const modelDiagnoseResponse = await fetch(`${baseUrl}/api/ops/diagnose`, {
         method: 'POST',
         headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
-        body: JSON.stringify({ question: '为什么失败', target: { kind: 'task', id: 'ops-task-1' } }),
+        body: JSON.stringify({ question: '请综合分析这些故障之间是否有关联' }),
       })
       assert.equal(modelDiagnoseResponse.status, 200)
       const modelDiagnose = await modelDiagnoseResponse.json() as { answer?: string; answerSource?: string }
       assert.equal(modelDiagnose.answerSource, 'ops-deepseek')
       assert.match(modelDiagnose.answer || '', /LLM answer/)
+
+      const namedAgentQuestionResponse = await fetch(`${baseUrl}/api/ops/diagnose`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ question: 'claude-code不可用是咋回事' }),
+      })
+      assert.equal(namedAgentQuestionResponse.status, 200)
+      const namedAgentAnswer = await namedAgentQuestionResponse.json() as { answer?: string; directAnswer?: string }
+      assert.equal(namedAgentAnswer.directAnswer, undefined)
+      assert.match(namedAgentAnswer.answer || '', /LLM answer/)
     } finally {
       await new Promise<void>((resolve) => fakeApi.close(() => resolve()))
     }
@@ -256,6 +266,149 @@ test('ops endpoints report task failures and targeted diagnostics', async () => 
       router.registerAdapter(new StubAdapter('opencode', async () => '[DONE] repaired'))
     },
   })
+})
+
+test('ops answers common platform questions from scoped facts without guessing', async () => {
+  const agentCatalog = new StubAgentCatalog([
+    {
+      name: 'claude-code',
+      adapter: 'claude-code',
+      source: 'configured',
+      healthy: true,
+      verified: true,
+      availableForSessions: true,
+      command: 'claude',
+      version: '2.1.0',
+    },
+    {
+      name: 'broken-cli',
+      adapter: 'custom-cli',
+      source: 'configured',
+      healthy: true,
+      verified: false,
+      availableForSessions: false,
+      autoDiscovered: true,
+      verificationAttemptedAt: Date.now(),
+      verificationError: '401 login required',
+      command: 'broken-cli',
+    },
+  ])
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'ops-facts@example.com')
+    state.createTask({
+      id: 'ops-fact-task',
+      userId: auth.userId,
+      agent: { adapter: 'claude-code' },
+      prompt: 'implement',
+      permissionMode: 'safe',
+    })
+    state.updateTask('ops-fact-task', {
+      status: 'error',
+      errorMessage: 'EACCES: permission denied',
+      finishedAt: Date.now(),
+    }, auth.userId)
+    state.createSession({
+      id: 'ops-fact-session',
+      userId: auth.userId,
+      from: { adapter: 'claude-code' },
+      to: { adapter: 'broken-cli' },
+      approveMode: true,
+      maxRounds: 4,
+    })
+    state.updateSession('ops-fact-session', { status: 'paused', currentRound: 2 }, auth.userId)
+    state.createPipeline({
+      id: 'ops-fact-workflow',
+      userId: auth.userId,
+      name: 'Publish Video',
+      status: 'error',
+      sessions: [{ sessionId: 'ops-fact-session', title: 'Review', status: 'error' }],
+    })
+
+    const ask = async (question: string, target?: { kind: string; id: string }) => {
+      const response = await fetch(`${baseUrl}/api/ops/diagnose`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ question, target }),
+      })
+      assert.equal(response.status, 200)
+      return response.json() as Promise<{ directAnswer?: string; answer?: string; issues: Array<{ target?: { id: string }; actions?: Array<{ id: string }> }> }>
+    }
+
+    assert.match((await ask('claude-code不可用是怎么回事')).directAnswer || '', /ready（可用）/)
+    assert.match((await ask('broken-cli为什么不可用')).directAnswer || '', /401 login required/)
+    assert.match((await ask('safe 和 trusted 权限模式有什么区别')).directAnswer || '', /safe.*只读/s)
+    assert.match((await ask('这个任务为什么失败', { kind: 'task', id: 'ops-fact-task' })).directAnswer || '', /EACCES.*trusted/s)
+    assert.match((await ask('这个 session 现在卡在哪里', { kind: 'session', id: 'ops-fact-session' })).directAnswer || '', /paused.*等待人工审核/s)
+    const workflowAnswer = await ask('这个工作流为什么失败', { kind: 'workflow', id: 'ops-fact-workflow' })
+    assert.match(workflowAnswer.directAnswer || '', /Publish Video.*error.*Review/s)
+    assert.ok(workflowAnswer.issues.some((issue) => issue.actions?.some((action) => action.id === 'rerun_workflow_step')))
+    const latest = await ask('最新的 task 怎么回事')
+    assert.match(latest.directAnswer || '', /ops-fact.*error/s)
+    assert.ok(latest.issues.every((issue) => !issue.target || issue.target.id === 'ops-fact-task'))
+  }, { agentCatalog })
+})
+
+test('ops can hand off a failed task to another ready local agent', async () => {
+  const agentCatalog = new StubAgentCatalog([
+    {
+      name: 'opencode', adapter: 'opencode', source: 'configured', healthy: true,
+      verified: true, availableForSessions: true, command: 'opencode', priority: 2,
+    },
+    {
+      name: 'codex', adapter: 'codex', source: 'configured', healthy: true,
+      verified: true, availableForSessions: true, command: 'codex', priority: 1,
+    },
+  ])
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'ops-handoff@example.com')
+    state.createTask({
+      id: 'ops-handoff-source',
+      userId: auth.userId,
+      agent: { adapter: 'opencode' },
+      prompt: 'continue implementation',
+    })
+    state.updateTask('ops-handoff-source', {
+      status: 'error',
+      errorMessage: 'quota exhausted',
+      finishedAt: Date.now(),
+    }, auth.userId)
+
+    const response = await fetch(`${baseUrl}/api/ops/action`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        actionId: 'handoff_task',
+        target: { kind: 'task', id: 'ops-handoff-source' },
+        confirmed: true,
+      }),
+    })
+    assert.equal(response.status, 200)
+    const result = await response.json() as { task: { agent: { adapter: string }; prompt: string } }
+    assert.equal(result.task.agent.adapter, 'codex')
+    assert.match(result.task.prompt, /Previous attempt/)
+  }, {
+    agentCatalog,
+    configureRouter(router) {
+      router.registerAdapter(new StubAdapter('codex', async () => '[DONE] continued'))
+      router.registerAdapter(new StubAdapter('opencode', async () => '[DONE] original'))
+    },
+  })
+})
+
+test('ops recommendations cover common recoverable platform failures', () => {
+  const cases: Array<[string, RegExp]> = [
+    ['429 quota exhausted', /backup agent/],
+    ['401 unauthorized', /Log in/],
+    ['failed to refresh available models', /available model/],
+    ['503 connection reset', /Connection issue/],
+    ['idle timed out after 600000ms', /extend timeout/],
+    ['EACCES permission denied', /trusted mode/],
+    ['Task interrupted by server restart', /Rerun/],
+    ['spawn ENOENT command not found', /executable path/],
+    ['waiting for approval', /approve or reject/],
+    ['typecheck failed', /repair task/],
+  ]
+  for (const [error, expected] of cases) assert.match(recommendationForError(error), expected)
 })
 
 test('GET /health returns unauthenticated liveness payload', async () => {

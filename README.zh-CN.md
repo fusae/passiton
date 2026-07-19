@@ -129,7 +129,12 @@ Passiton 面向单个可信用户的本地使用场景。默认行为：
 2. `PASSITON_JWT_SECRET` 或 `auth.jwtSecret`
 3. 非空的 `policy.allowedWorkspaces`
 
-`trusted` 权限模式只应配合可信 agent 和范围很窄的 `cwd` 使用。详见 [SECURITY.md](./SECURITY.md)。
+权限模式：
+
+- `safe`（默认）：用于只读分析、审查和规划。Passiton 不会绕过 CLI agent 的沙箱或审批提示，因此无人值守的文件写入可能失败或等待输入。
+- `trusted`：用于需要创建、修改或删除文件，安装依赖，运行构建/测试命令，或创建提交的无人值守任务。它会启用受支持 CLI agent 的自动批准或完全访问参数，因此必须搭配范围明确的 `cwd`。
+
+AI 调用方只要要求涉及文件写入或命令执行，就必须同时传入 `cwd` 和 `permissionMode: "trusted"`。API assistant 无论使用哪种模式都不能访问本地文件。详见 [SECURITY.md](./SECURITY.md)。
 
 ## HTTP API
 

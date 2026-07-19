@@ -128,6 +128,7 @@ type OpsIssue = {
   title: string
   detail: string
   recommendation: string
+  agentName?: string
   target?: Required<OpsTarget>
   actions?: OpsAction[]
 }
@@ -141,7 +142,7 @@ type ApiSmokeResult = {
 const apiSmokeCache = new Map<string, ApiSmokeResult>()
 
 type OpsAction = {
-  id: 'stop_task' | 'rerun_task' | 'resume_session' | 'rerun_workflow_step' | 'create_repair_task'
+  id: 'stop_task' | 'rerun_task' | 'handoff_task' | 'resume_session' | 'rerun_workflow_step' | 'create_repair_task'
   label: string
   description: string
   target: Required<OpsTarget>
@@ -1706,12 +1707,12 @@ function mcpTools(): McpTool[] {
     {
       name: 'passiton_create_task',
       title: 'Create Passiton task',
-      description: 'Create a single-agent Passiton task. Use this for one-shot work.',
+      description: 'Create a single-agent Passiton task. Use safe only for read-only analysis/review. For create/edit/delete/install/build/test/commit or any filesystem write or command execution, provide cwd and permissionMode="trusted".',
       inputSchema: objectSchema({
         agent: agentSchema('Agent adapter name or agent reference.'),
         prompt: { type: 'string' },
         cwd: { type: 'string', description: 'Optional working directory. Required for filesystem work.' },
-        permissionMode: { type: 'string', enum: ['safe', 'trusted'], description: 'Use trusted for filesystem writes with local CLI agents.' },
+        permissionMode: { type: 'string', enum: ['safe', 'trusted'], description: 'safe (default) is read-only/unattended-safe; trusted bypasses supported CLI approvals for writes and command execution and requires cwd.' },
         idempotencyKey: { type: 'string', description: 'Optional stable key to avoid duplicate task creation on retries.' },
         systemPrompt: { type: 'string' },
         context: contextSchema(),
@@ -1732,7 +1733,7 @@ function mcpTools(): McpTool[] {
     {
       name: 'passiton_create_session',
       title: 'Create Passiton session',
-      description: 'Create an agent-to-agent session. Use this for multi-turn planning, implementation, review, or discussion between agents.',
+      description: 'Create an agent-to-agent session. Use safe for read-only planning/review. For implementation, file writes, installs, builds, tests, commits, or command execution, provide cwd and permissionMode="trusted".',
       inputSchema: objectSchema({
         from: agentSchema('Planner or first speaker agent name.'),
         to: agentSchema('Executor or second speaker agent name.'),
@@ -1740,7 +1741,7 @@ function mcpTools(): McpTool[] {
         mode: { type: 'string', enum: ['collaborate', 'discuss', 'review', 'freeform'] },
         maxRounds: { type: 'integer' },
         approveMode: { type: 'boolean' },
-        permissionMode: { type: 'string', enum: ['safe', 'trusted'] },
+        permissionMode: { type: 'string', enum: ['safe', 'trusted'], description: 'safe (default) does not bypass CLI sandbox/approval prompts; trusted enables supported CLI auto-approve/full-access behavior and requires cwd.' },
         idempotencyKey: { type: 'string', description: 'Optional stable key to avoid duplicate session creation on retries.' },
         cwd: { type: 'string' },
         systemPromptFrom: { type: 'string' },
@@ -2255,6 +2256,13 @@ async function buildOpsReport(
   const sessions = state.listSessions({ userId })
   const workflows = state.listPipelines(userId)
   const agents = await listAgentModels(userId, agentCatalog).catch(() => [])
+  const agentSummaries = agents.map((agent) => ({
+    name: agent.name,
+    adapter: agent.adapter,
+    status: agent.status,
+    version: agent.version || agent.model,
+    error: agent.error,
+  }))
   const staleMs = 10 * 60 * 1000
   const queuedMs = 5 * 60 * 1000
 
@@ -2268,7 +2276,7 @@ async function buildOpsReport(
         target: { kind: 'task', id: task.id },
         actions: [
           opsAction('stop_task', { kind: 'task', id: task.id }, 'Stop Task', 'Stop this stuck background task.', 'medium'),
-          opsAction('rerun_task', { kind: 'task', id: task.id }, 'Rerun Task', 'Create a new task with the original prompt.', 'medium'),
+          opsAction('handoff_task', { kind: 'task', id: task.id }, 'Switch Agent & Continue', 'Stop this task and continue its workspace state with another ready local agent.', 'medium'),
         ],
       })
     }
@@ -2293,6 +2301,7 @@ async function buildOpsReport(
         target: { kind: 'task', id: task.id },
         actions: [
           opsAction('rerun_task', { kind: 'task', id: task.id }, 'Rerun Task', 'Create a new task with the original prompt.', 'medium'),
+          opsAction('handoff_task', { kind: 'task', id: task.id }, 'Switch Agent & Continue', 'Continue with another ready local agent while preserving context and workspace state.', 'medium'),
           opsAction('create_repair_task', { kind: 'task', id: task.id }, 'Create Repair Task', 'Create a new task for an agent to fix the failure; Ops will not edit files directly.', 'high'),
         ],
       })
@@ -2349,12 +2358,16 @@ async function buildOpsReport(
       })
     }
     if (workflow.status === 'error' || workflow.status === 'paused') {
+      const failedStep = workflow.sessions.find((step) => step.status === 'error')
       issues.push({
         severity: workflow.status === 'error' ? 'critical' : 'info',
         title: `Workflow ${workflow.status}`,
         detail: `${workflow.name} is currently ${workflow.status}.`,
         recommendation: 'Inspect the step timeline and find the first step that is not done.',
         target: { kind: 'workflow', id: workflow.id },
+        actions: failedStep
+          ? [opsAction('rerun_workflow_step', { kind: 'session', id: failedStep.sessionId }, 'Rerun Failed Step', 'Rerun the failed workflow step and continue its dependents.', 'medium')]
+          : undefined,
       })
     }
   }
@@ -2362,11 +2375,14 @@ async function buildOpsReport(
   for (const agent of agents) {
     const status = String((agent as { status?: unknown }).status || '')
     if (status && status !== 'ready' && status !== 'discovered') {
+      const name = String((agent as { name?: unknown }).name || 'unknown')
+      const error = String((agent as { error?: unknown }).error || '').trim()
       issues.push({
         severity: status === 'invalid' || status === 'no_key' ? 'critical' : 'warning',
         title: 'Agent unavailable',
-        detail: `${String((agent as { name?: unknown }).name || 'unknown')} status is ${status}.`,
+        detail: `${name} status is ${status}.${error ? ` Diagnostic: ${error}` : ''}`,
         recommendation: 'Run diagnostics again in Settings; for API agents check keys, and for CLI agents check login, PATH, and subscription quota.',
+        agentName: name,
       })
     }
   }
@@ -2374,11 +2390,35 @@ async function buildOpsReport(
   const targetIssue = input.target?.id
     ? issues.filter(issue => issue.target?.kind === input.target?.kind && issue.target?.id === input.target?.id)
     : []
-  const relevant = targetIssue.length ? targetIssue : issues
-  const summary = summarizeOpsIssues(relevant, input)
-  const directAnswer = directOpsAnswer(userId, input.question)
+  const normalizedQuestion = String(input.question || '').toLowerCase()
+  const resolvedTarget = input.target?.id
+    ? input.target
+    : resolveOpsQuestionTarget(normalizedQuestion, tasks, sessions, workflows)
+  const resolvedTargetIssues = resolvedTarget?.id
+    ? issues.filter(issue => issue.target?.kind === resolvedTarget.kind && issue.target?.id === resolvedTarget.id)
+    : []
+  const mentionedAgents = agentSummaries.filter((agent) => normalizedQuestion.includes(agent.name.toLowerCase()))
+  const mentionedAgentIssues = issues.filter((issue) => (
+    issue.agentName && normalizedQuestion.includes(issue.agentName.toLowerCase())
+  ))
+  const relevant = targetIssue.length
+    ? targetIssue
+    : resolvedTargetIssues.length
+      ? resolvedTargetIssues
+    : mentionedAgents.length
+      ? mentionedAgentIssues
+      : issues
+  const scopedInput = { ...input, target: resolvedTarget }
+  const summary = summarizeOpsIssues(relevant, scopedInput)
+  const directAnswer = directOpsAnswer(userId, input.question, {
+    target: resolvedTarget,
+    agents: agentSummaries,
+    tasks,
+    sessions,
+    workflows,
+  })
   const modelAnswer = input.question && !directAnswer
-    ? await generateOpsModelAnswer(userId, input, {
+      ? await generateOpsModelAnswer(userId, scopedInput, {
         summary,
         policy: 'Read-only diagnostics; platform actions require user confirmation; do not edit project files, commit, or push.',
         issues: relevant.slice(0, 20),
@@ -2393,6 +2433,7 @@ async function buildOpsReport(
           workflows: workflows.length,
           agents: agents.length,
         },
+        agents: mentionedAgents.length ? mentionedAgents : agentSummaries.slice(0, 30),
         page: input.page,
       }).catch((err) => ({
         answer: undefined,
@@ -2422,35 +2463,161 @@ async function buildOpsReport(
       workflows: workflows.length,
       agents: agents.length,
     },
+    agents: mentionedAgents.length ? mentionedAgents : agentSummaries,
   }
 }
 
-function directOpsAnswer(userId: string, question: string | undefined): string | undefined {
+function directOpsAnswer(
+  userId: string,
+  question: string | undefined,
+  facts: {
+    target?: OpsTarget
+    agents: Array<{ name: string; adapter: string; status: string; version?: string; error?: string }>
+    tasks: Task[]
+    sessions: Session[]
+    workflows: Pipeline[]
+  }
+): string | undefined {
   const value = String(question || '').toLowerCase()
   if (!value) return undefined
-  if (/什么模型|用的什么模型|接.*模型|llm|deepseek|gpt|claude|qwen|模型/.test(value)) {
+  const chinese = /[\u3400-\u9fff]/.test(String(question))
+  const asksModelIdentity = /(?:你|管家|ops).{0,12}(?:用|使用|接入|连接).{0,10}(?:什么|哪个).{0,5}(?:模型|llm)/.test(value) ||
+    /(?:什么|哪个).{0,5}(?:模型|llm).{0,12}(?:在回答|回答|驱动|管家)/.test(value) ||
+    /\b(?:what|which) (?:llm|model)\b|\b(?:your|ops) (?:llm|model)\b/.test(value)
+  if (asksModelIdentity) {
     const selected = selectCachedOpsModelAgent(userId)
     if (selected) {
-      return [
-        `The current Ops steward is connected to ${selected.name}.`,
-        `adapter: ${selected.config.adapter}`,
-        `model: ${selected.config.model || 'not configured'}`,
-        'It only diagnoses, explains, and recommends; it does not edit project files, commit, or push.',
-      ].join('\n')
+      return chinese
+        ? [
+            `当前平台管家使用 ${selected.name}。`,
+            `适配器：${selected.config.adapter}`,
+            `模型：${selected.config.model || '未配置'}`,
+            '管家负责诊断、解释和建议；项目修复通过需确认的修复任务执行。',
+          ].join('\n')
+        : [
+            `The current Ops steward is connected to ${selected.name}.`,
+            `adapter: ${selected.config.adapter}`,
+            `model: ${selected.config.model || 'not configured'}`,
+            'It diagnoses, explains, and recommends; project repairs run through confirmed repair tasks.',
+          ].join('\n')
     }
     return [
       'No Ops LLM is currently available.',
       'Configure an Ops model from the Ops panel, or add an API Assistant as a fallback.',
     ].join('\n')
   }
-  if (/能做什么|职责|权限|边界/.test(value)) {
+  if (/safe|trusted|只读|读写|写文件|沙箱|sandbox|权限模式/.test(value)) {
     return [
-      'Ops scope: read-only diagnostics plus platform actions after your confirmation.',
-      'It can stop, resume, rerun, and create repair tasks.',
-      'It does not edit project files, commit code, or push.',
+      '`safe` 用于只读分析、审查和规划，不绕过 CLI 沙箱或审批。',
+      '`trusted` 用于需要写文件、安装依赖、运行命令、测试或提交的无人值守任务，并且必须限制 `cwd`。',
+      'API Agent 无论哪种模式都不能直接访问本地文件。',
     ].join('\n')
   }
+  if (/能做什么|职责|权限|边界|capabilit|what can you do/.test(value)) {
+    return [
+      '管家可以检查 Agent、Task、Session、Workflow、权限、认证、额度、超时和连接异常。',
+      '经你确认后，它可以停止、恢复、重跑、切换 Agent 接力，或创建修复任务。',
+      '它不会自行提交、推送或直接修改项目文件。',
+    ].join('\n')
+  }
+
+  const namedAgents = facts.agents.filter((agent) => value.includes(agent.name.toLowerCase()))
+  if (namedAgents.length) {
+    return namedAgents.map((agent) => {
+      const available = agent.status === 'ready' || agent.status === 'discovered'
+      return [
+        `${agent.name} 当前状态：${agent.status}（${available ? '可用' : '不可用'}）。`,
+        `适配器：${agent.adapter}${agent.version ? `；版本：${agent.version}` : ''}。`,
+        agent.error
+          ? `诊断错误：${agent.error}\n处理建议：${recommendationForError(agent.error)}`
+          : available ? '当前没有记录到诊断错误。' : '当前没有足够的错误详情，请在 Settings 重新执行诊断。',
+      ].join('\n')
+    }).join('\n\n')
+  }
+
+  const task = facts.target?.kind === 'task'
+    ? facts.tasks.find((item) => item.id === facts.target?.id)
+    : undefined
+  if (task && asksForRunDiagnosis(value)) return describeOpsTask(task)
+
+  const session = facts.target?.kind === 'session'
+    ? facts.sessions.find((item) => item.id === facts.target?.id)
+    : undefined
+  if (session && asksForRunDiagnosis(value)) return describeOpsSession(session)
+
+  const workflow = facts.target?.kind === 'workflow'
+    ? facts.workflows.find((item) => item.id === facts.target?.id)
+    : undefined
+  if (workflow && asksForRunDiagnosis(value)) return describeOpsWorkflow(workflow)
   return undefined
+}
+
+function asksForRunDiagnosis(question: string): boolean {
+  return /怎么回事|为什么|原因|状态|进度|完成|结束|运行|失败|错误|报错|卡住|卡在|等待|当前|超时|恢复|修复|怎么办|status|progress|done|running|failed|error|stuck|waiting|timeout|recover|fix/.test(question)
+}
+
+function resolveOpsQuestionTarget(
+  question: string,
+  tasks: Task[],
+  sessions: Session[],
+  workflows: Pipeline[]
+): OpsTarget | undefined {
+  const explicit = [
+    ...tasks.map((item) => ({ kind: 'task' as const, item })),
+    ...sessions.map((item) => ({ kind: 'session' as const, item })),
+    ...workflows.map((item) => ({ kind: 'workflow' as const, item })),
+  ].find(({ item }) => question.includes(item.id.toLowerCase()) || question.includes(item.id.slice(0, 8).toLowerCase()))
+  if (explicit) return { kind: explicit.kind, id: explicit.item.id }
+
+  const latest = <T extends { id: string; updatedAt: number }>(items: T[], kind: Required<OpsTarget>['kind']): OpsTarget | undefined => {
+    const item = [...items].sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    return item ? { kind, id: item.id } : undefined
+  }
+  if (/最新|最近|latest|most recent/.test(question)) {
+    if (/task|任务/.test(question)) return latest(tasks, 'task')
+    if (/session|会话/.test(question)) return latest(sessions, 'session')
+    if (/workflow|工作流/.test(question)) return latest(workflows, 'workflow')
+  }
+  return undefined
+}
+
+function describeOpsTask(task: Task): string {
+  const lines = [
+    `Task ${task.id.slice(0, 8)} 当前状态：${task.status}；Agent：${agentLabel(task.agent)}；权限模式：${task.permissionMode}。`,
+  ]
+  if (task.errorMessage) lines.push(`错误：${task.errorMessage}`, `处理建议：${recommendationForError(task.errorMessage)}`)
+  else if (task.status === 'running') lines.push(`最近更新：${formatDuration(Date.now() - task.updatedAt)}前。`)
+  else if (task.status === 'done') lines.push(`结果摘要：${compactTaskSummary(task) || '任务已完成，但没有保存结果摘要。'}`)
+  else if (task.lastAgentOutput) lines.push(`最后输出：${truncateText(task.lastAgentOutput, 600)}`)
+  return lines.join('\n')
+}
+
+function describeOpsSession(session: Session): string {
+  const lines = [
+    `Session ${session.id.slice(0, 8)} 当前状态：${session.status}；轮次：${session.currentRound}/${session.maxRounds}；下一位：${session.nextTurn}。`,
+  ]
+  if (session.errorMessage || session.errorType) {
+    const error = session.errorMessage || session.errorType || ''
+    lines.push(`错误：${error}`, `处理建议：${recommendationForError(error)}`)
+  } else if (session.status === 'paused') {
+    lines.push(session.approveMode ? '当前正在等待人工审核或反馈。' : '当前已暂停，可以恢复继续。')
+  } else if (session.lastAgentOutput) {
+    lines.push(`最后输出：${truncateText(session.lastAgentOutput, 600)}`)
+  }
+  return lines.join('\n')
+}
+
+function describeOpsWorkflow(workflow: Pipeline): string {
+  const counts = workflow.sessions.reduce<Record<string, number>>((result, step) => {
+    result[step.status] = (result[step.status] || 0) + 1
+    return result
+  }, {})
+  const firstBlocked = workflow.sessions.find((step) => step.status === 'error' || step.status === 'active' || step.status === 'pending')
+  return [
+    `Workflow ${workflow.name} 当前状态：${workflow.status}。`,
+    `步骤统计：${Object.entries(counts).map(([status, count]) => `${status} ${count}`).join('，') || '无步骤'}。`,
+    firstBlocked ? `当前需关注步骤：${firstBlocked.title}（${firstBlocked.status}）。` : '没有发现阻塞步骤。',
+  ].join('\n')
 }
 
 function summarizeOpsIssues(issues: OpsIssue[], input: { question?: string; target?: OpsTarget }): string {
@@ -2494,6 +2661,7 @@ async function generateOpsModelAnswer(
     issues: OpsIssue[]
     counts: { critical: number; warning: number; info: number }
     totals: { tasks: number; sessions: number; workflows: number; agents: number }
+    agents: Array<{ name: string; adapter: string; status: string; version?: string; error?: string }>
     page?: OpsPageContext
   }
 ): Promise<{ answer?: string; source?: string; error?: string }> {
@@ -2516,8 +2684,9 @@ async function generateOpsModelAnswer(
         'Your role: inspect platform state, explain task/session/workflow issues, and recommend the next step.',
         'Your boundary: do not edit project files directly, commit, or push; when fixes are needed, recommend creating a repair task or using platform actions.',
         'Answer the user’s current question directly. Do not mechanically restate every diagnostic item.',
+        'Use the current agent inventory in the report as the source of truth for agent availability. Do not infer an agent failure from unrelated task errors.',
         'If the report lacks enough evidence, state what is missing.',
-        'Answer in concise, specific English.',
+        'Answer in the same language as the user. Be concise and specific.',
       ].join('\n'),
     })
     const answer = typeof result === 'string' ? result : (result as AdapterResponse).content
@@ -2674,16 +2843,22 @@ function opsAction(
 
 function classifyOpsSeverity(text: unknown): OpsIssue['severity'] {
   const value = String(text || '').toLowerCase()
-  if (/quota|usage limit|insufficient|429|rate limit|auth|login|unauthorized|permission|timeout|timed out/.test(value)) return 'critical'
+  if (/quota|usage limit|insufficient|429|rate limit|auth|login|unauthorized|permission|eacces|timeout|timed out|model.*unavailable|command not found|enoent/.test(value)) return 'critical'
   return 'warning'
 }
 
-function recommendationForError(text: string): string {
+export function recommendationForError(text: string): string {
   const value = text.toLowerCase()
   if (/quota|usage limit|insufficient|429|rate limit/.test(value)) return 'Quota or rate-limit issue. Wait for recovery, then switch to a backup agent or resume manually.'
   if (/auth|login|unauthorized|forbidden|401|403/.test(value)) return 'Authentication issue. Log in to the CLI again or update the provider key.'
+  if (/model.*unavailable|failed to refresh available models/.test(value)) return 'Model discovery or availability issue. Refresh the agent, select an available model, or switch to a backup agent.'
+  if (/reconnect|econnreset|epipe|socket|network|502|503|504/.test(value)) return 'Connection issue. Verify the upstream service, then retry or switch agents if reconnecting repeats.'
   if (/timeout|timed out|idle/.test(value)) return 'Timeout issue. Check whether files were written, then extend timeout and rerun if needed.'
-  if (/permission|eacces|access/.test(value)) return 'Permission issue. Check cwd, file permissions, and permission mode.'
+  if (/permission|eacces|access denied|read.only|sandbox/.test(value)) return 'Permission issue. Check cwd and file permissions; use trusted mode only for confirmed write tasks.'
+  if (/interrupted by server restart|server restart|process.*restart/.test(value)) return 'The server interrupted this run. Rerun it from the saved prompt and workspace state.'
+  if (/command not found|enoent|not recognized|executable/.test(value)) return 'CLI discovery issue. Refresh Agents, verify the executable path, and run diagnostics again.'
+  if (/waiting.*approval|approval.*required|confirmation.*required/.test(value)) return 'The run is waiting for approval. Review the requested operation, then approve or reject it in the workflow/session UI.'
+  if (/syntax|typecheck|compile|build failed|test failed|assert/.test(value)) return 'Implementation verification failed. Create a repair task with the failing output and rerun the relevant checks.'
   return 'Check the last output and logs, then decide whether to rerun or switch agents.'
 }
 
@@ -2819,16 +2994,22 @@ function sessionApiDocs() {
       localLogin: 'POST /api/auth/local',
       header: 'Authorization: Bearer <token>',
     },
+    permissionModes: {
+      safe: 'Default. Read-only analysis, review, and planning; CLI sandbox and approval prompts are not bypassed.',
+      trusted: 'Unattended filesystem writes and command execution; requires a narrowly scoped cwd and enables supported CLI auto-approve/full-access flags.',
+      aiOperatorRule: 'For create/edit/delete/install/build/test/commit or any filesystem write or command execution, send both cwd and permissionMode="trusted". API assistants cannot access local files.',
+    },
     createSession: {
       method: 'POST',
       path: '/api/sessions',
+      description: 'Use safe for read-only collaboration. Use trusted with cwd when either local CLI agent must implement changes or run commands.',
       body: {
         from: { adapter: 'opencode' },
         to: { adapter: 'claude-code' },
-        initialPrompt: 'Write the article from this brief...',
+        initialPrompt: 'Create docs/article.md from this brief...',
         mode: 'freeform',
         maxRounds: 1,
-        permissionMode: 'safe',
+        permissionMode: 'trusted',
         cwd: '/optional/project/path',
         context: {
           text: 'Background context',
@@ -2840,11 +3021,12 @@ function sessionApiDocs() {
     createTask: {
       method: 'POST',
       path: '/api/tasks',
-      description: 'If "agent" is omitted, Passiton selects the highest-priority usable agent (lower priority number first, ready before unverified, name tie-break).',
+      description: 'If "agent" is omitted, Passiton selects the highest-priority usable agent. Use safe only for read-only work; filesystem writes or command execution require cwd and permissionMode="trusted".',
       body: {
         agent: { adapter: 'opencode' },
-        prompt: 'Write the article from this brief...',
+        prompt: 'Create docs/article.md from this brief...',
         cwd: '/optional/project/path',
+        permissionMode: 'trusted',
         context: {
           text: 'Background context',
           rules: 'Output markdown only',
@@ -3149,7 +3331,7 @@ function parseOpsDiagnoseBody(body: unknown): { question?: string; target?: OpsT
 function parseOpsActionBody(body: unknown): { actionId: OpsAction['id']; target: Required<OpsTarget>; confirmed: boolean } {
   const data = requireRecord(body, 'body')
   const actionId = optionalString(data.actionId, 'actionId')
-  if (actionId !== 'stop_task' && actionId !== 'rerun_task' && actionId !== 'resume_session' && actionId !== 'rerun_workflow_step' && actionId !== 'create_repair_task') {
+  if (actionId !== 'stop_task' && actionId !== 'rerun_task' && actionId !== 'handoff_task' && actionId !== 'resume_session' && actionId !== 'rerun_workflow_step' && actionId !== 'create_repair_task') {
     throw new HttpError(400, 'Unsupported ops action')
   }
   const targetData = requireRecord(data.target, 'target')
@@ -3171,12 +3353,13 @@ function parseNudgeBody(body: unknown): { content: string } {
 
 async function executeOpsAction(
   router: Router,
+  agentCatalog: AgentCatalog,
   userId: string,
   input: { actionId: OpsAction['id']; target: Required<OpsTarget>; confirmed: boolean }
 ): Promise<unknown> {
   if (!input.confirmed) throw new HttpError(400, 'Ops action requires explicit confirmation')
   const { actionId, target } = input
-  if ((actionId === 'stop_task' || actionId === 'rerun_task' || actionId === 'create_repair_task') && target.kind !== 'task') {
+  if ((actionId === 'stop_task' || actionId === 'rerun_task' || actionId === 'handoff_task' || actionId === 'create_repair_task') && target.kind !== 'task') {
     throw new HttpError(400, 'Task action requires task target')
   }
   if (actionId === 'resume_session' && target.kind !== 'session') {
@@ -3216,14 +3399,31 @@ async function executeOpsAction(
     return { action: actionId, task: created }
   }
 
+  const fallback = await selectFallbackTaskAgent(userId, agentCatalog, task.cwd, task.agent.adapter)
+  if (actionId === 'handoff_task') {
+    if (!fallback) throw new HttpError(409, 'No ready fallback local agent is available for this task')
+    if (task.status === 'running' || task.status === 'queued') await router.stopTask(task.id)
+    const created = router.startTask({
+      userId,
+      agent: fallback,
+      prompt: buildTaskHandoffPrompt(task),
+      cwd: task.cwd,
+      context: task.context,
+      systemPrompt: task.systemPrompt,
+      permissionMode: task.permissionMode,
+      metadata: { continuedFromTaskId: task.id },
+    })
+    return { action: actionId, task: created }
+  }
+
   const previous = task.result || task.output || task.lastAgentOutput || task.errorMessage || ''
   const created = router.startTask({
     userId,
-    agent: task.agent,
+    agent: fallback ?? task.agent,
     cwd: task.cwd,
     context: task.context,
     systemPrompt: task.systemPrompt,
-    permissionMode: task.permissionMode,
+    permissionMode: task.cwd ? 'trusted' : task.permissionMode,
     prompt: [
       'You are a repair task created by Passiton Ops. Fix only the issue exposed by the failed task below.',
       'Requirements: check the current workspace state first; edit only necessary files; do not push; do not rewrite history; finish with a change summary.',
@@ -3558,7 +3758,7 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
 
       // POST /api/ops/action
       if (pathname === '/api/ops/action' && method === 'POST') {
-        return json(res, 200, await executeOpsAction(router, authUser!.userId, parseOpsActionBody(await parseBody(req))))
+        return json(res, 200, await executeOpsAction(router, agentCatalog, authUser!.userId, parseOpsActionBody(await parseBody(req))))
       }
 
       // GET /api/ops/incidents

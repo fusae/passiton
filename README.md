@@ -128,7 +128,12 @@ If you expose Passiton beyond localhost through a LAN, tunnel, or public host, s
 2. `PASSITON_JWT_SECRET` or `auth.jwtSecret`
 3. non-empty `policy.allowedWorkspaces`
 
-Use `trusted` permission mode only for trusted agents and narrowly scoped `cwd` values. See [SECURITY.md](./SECURITY.md).
+Permission modes:
+
+- `safe` (default): use for read-only analysis, review, and planning. Passiton does not bypass the CLI agent's sandbox or approval prompts, so unattended file writes may fail or wait for input.
+- `trusted`: use for unattended work that creates, edits, or deletes files, installs dependencies, runs build/test commands, or creates commits. It enables the supported CLI agent's auto-approve or full-access flag and therefore requires a narrowly scoped `cwd`.
+
+AI callers must send both `cwd` and `permissionMode: "trusted"` whenever the requested result requires filesystem writes or command execution. API assistants still cannot access local files in either mode. See [SECURITY.md](./SECURITY.md).
 
 ## HTTP API
 

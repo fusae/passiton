@@ -5524,7 +5524,14 @@ function collectOpsActions(report) {
       if (!actions.some(item => item.id === action.id && item.target?.id === action.target?.id)) actions.push(action)
     }
   }
-  return actions.slice(0, 4)
+  const labelCounts = new Map()
+  for (const action of actions) labelCounts.set(action.label, (labelCounts.get(action.label) || 0) + 1)
+  return actions.slice(0, 4).map(action => ({
+    ...action,
+    label: labelCounts.get(action.label) > 1 && action.target?.id
+      ? `${action.label} · ${String(action.target.id).slice(0, 8)}`
+      : action.label,
+  }))
 }
 
 function renderOpsMessageActions(message) {

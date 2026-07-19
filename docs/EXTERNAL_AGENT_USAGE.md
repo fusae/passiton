@@ -47,6 +47,13 @@ curl -s -X POST http://localhost:4590/api/auth/login \
 
 Tasks and sessions with `cwd` require a filesystem-capable local CLI agent.
 
+### Permission modes
+
+- `safe` (default) is for read-only analysis, review, and planning. It does not bypass a CLI agent's sandbox or approval prompts.
+- `trusted` is for unattended work that creates, edits, or deletes files, installs dependencies, runs build/test commands, or creates commits. It requires a narrowly scoped `cwd`.
+
+AI operator rule: if the request includes create, edit, delete, install, build, test, commit, or any other filesystem write or command execution, send both `cwd` and `permissionMode: "trusted"`. Do not expect a `safe` task to implement changes. API assistants cannot access local files in either mode.
+
 ## Agents
 
 ```text
@@ -67,9 +74,9 @@ curl -s -X POST http://localhost:4590/api/tasks \
   -H "Content-Type: application/json" \
   -d '{
     "agent": {"adapter": "opencode"},
-    "prompt": "Write a concise project summary.",
+    "prompt": "Create docs/project-summary.md with a concise project summary.",
     "cwd": "/path/to/project",
-    "permissionMode": "safe",
+    "permissionMode": "trusted",
     "context": {
       "rules": "Return markdown only.",
       "text": "Background information here."
@@ -135,7 +142,7 @@ Session fields:
 | `mode` | no | `collaborate`, `discuss`, `review`, or `freeform` |
 | `maxRounds` | no | max turns |
 | `approveMode` | no | require human approval between rounds |
-| `permissionMode` | no | `safe` or `trusted` |
+| `permissionMode` | no | `safe` for read-only work; `trusted` for unattended writes or command execution (requires `cwd`) |
 | `cwd` | no | working directory for CLI agents |
 | `context.files` | no | files read once and injected as context |
 | `context.rules` | no | constraints |
