@@ -1550,7 +1550,7 @@ test('pipeline dependencies inject referenced files even without git snapshots',
       assert.match(dependencyPrompt, new RegExp(realReferencePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
       assert.match(dependencyPrompt, /真实素材：高考考生被带回站点办理入职/)
     } finally {
-      rmSync(dir, { recursive: true, force: true })
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
     }
   })
 })
