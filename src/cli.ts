@@ -257,9 +257,12 @@ async function serverStart() {
   registerConfiguredAdapters(router, agentCatalog.configuredAgentConfigs())
   registerBuiltinAdapters(router)
   registerPersistedUserAgents(router)
-  router.recoverTasks()
 
-  const server = createServer(router, config.server.port, agentCatalog, config.server.host)
+  const server = createServer(router, config.server.port, agentCatalog, config.server.host, () => {
+    router.recoverTasks()
+    router.recoverSessions()
+    router.recoverExternalJobs()
+  })
   installGracefulShutdown(server)
   // foreground — never exit
 }

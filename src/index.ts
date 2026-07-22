@@ -30,12 +30,14 @@ async function main(): Promise<void> {
   // conveniences; open-source consumers may omit them for a clean core.
   registerDreamina(router)
   registerGeminiImageAdapter(router)
-  router.recoverTasks()
-  router.recoverSessions()
-  router.recoverExternalJobs()
 
-  // Start HTTP + WebSocket server
-  const server = createServer(router, config.server.port, agentCatalog, config.server.host)
+  // Recover persisted work only after this process owns the listening port.
+  // A duplicate launchd/manual instance must not mutate the shared database.
+  const server = createServer(router, config.server.port, agentCatalog, config.server.host, () => {
+    router.recoverTasks()
+    router.recoverSessions()
+    router.recoverExternalJobs()
+  })
   installGracefulShutdown(server)
 }
 

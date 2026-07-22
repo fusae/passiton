@@ -2132,6 +2132,28 @@ test('GET /api/tasks limit+offset only returns the requesting user tasks', async
   })
 })
 
+test('startup ready callback runs only after the port is acquired', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'turing-listening-'))
+  state.initDb(join(dir, 'turing.db'))
+  const router = new Router()
+  let readyCalls = 0
+  let server: http.Server | undefined
+
+  try {
+    server = createServer(router, 0, new StubAgentCatalog() as never, undefined, () => {
+      assert.equal(server?.listening, true)
+      readyCalls += 1
+    })
+    await once(server, 'listening')
+    assert.equal(readyCalls, 1)
+  } finally {
+    await new Promise<void>((resolve) => { server?.close(() => resolve()); setTimeout(resolve, 500) })
+    router.dispose()
+    state.closeDb()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('EADDRINUSE prints a friendly message and exits with code 1', async () => {
   const blocker = http.createServer()
   await new Promise<void>((resolve) => blocker.listen(0, resolve))
@@ -2146,18 +2168,20 @@ test('EADDRINUSE prints a friendly message and exits with code 1', async () => {
   const originalStderrWrite = process.stderr.write.bind(process.stderr)
   let exitCode: number | null = null
   let stderrOutput = ''
+  let readyCalls = 0
   process.exit = ((code?: number) => { exitCode = code ?? 0; return undefined as never }) as typeof process.exit
   process.stderr.write = ((chunk: string | Uint8Array) => { stderrOutput += chunk.toString(); return true }) as typeof process.stderr.write
 
   let server: http.Server | undefined
   try {
     const router = new Router()
-    server = createServer(router, occupiedPort, new StubAgentCatalog() as never)
+    server = createServer(router, occupiedPort, new StubAgentCatalog() as never, undefined, () => { readyCalls += 1 })
     await new Promise<void>((resolve) => {
       server!.on('error', () => resolve())
       setTimeout(resolve, 2000)
     })
     assert.equal(exitCode, 1)
+    assert.equal(readyCalls, 0, 'startup recovery must not run before the port is acquired')
     assert.match(stderrOutput, /Port .* is already in use/)
   } finally {
     process.exit = originalExit

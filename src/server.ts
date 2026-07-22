@@ -3612,7 +3612,13 @@ async function executeOpsAction(
   return { action: actionId, task: created }
 }
 
-export function createServer(router: Router, port: number, agentCatalog: AgentCatalog, host?: string): http.Server {
+export function createServer(
+  router: Router,
+  port: number,
+  agentCatalog: AgentCatalog,
+  host?: string,
+  onReady?: () => void
+): http.Server {
   const clients = new Map<WebSocket, string>()
 
   // Forward router events only to the owner. Some events only carry a sessionId,
@@ -4563,10 +4569,11 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         maxIncidents: supervisorConfig?.maxIncidents ?? 100,
       }
     )
-    supervisor.start()
   }
 
   const onListening = () => {
+    onReady?.()
+    supervisor?.start()
     const displayHost = host === '0.0.0.0' ? '127.0.0.1' : host
     console.log(`[server] Passiton running at http://${displayHost ?? 'localhost'}:${port}`)
   }
