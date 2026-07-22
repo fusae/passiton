@@ -2993,6 +2993,56 @@ textarea.input { resize: vertical; min-height: 80px; }
   line-height: 1.5;
   margin-bottom: 12px;
 }
+.session-create-modal {
+  width: min(860px, 100%);
+}
+.session-participant-list {
+  display: grid;
+  gap: 10px;
+}
+.session-participant {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.7fr) minmax(220px, 1.3fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  opacity: 0.58;
+}
+.session-participant.selected {
+  border-color: var(--border-hover);
+  background: var(--bg-card);
+  opacity: 1;
+}
+.session-participant-select,
+.moderator-choice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.moderator-choice {
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+.session-roster {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.session-roster-item {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.session-roster-item span {
+  color: var(--text-secondary);
+  font-size: 0.76rem;
+}
 .template-tags {
   display: flex;
   flex-wrap: wrap;
@@ -3308,6 +3358,9 @@ textarea.input { resize: vertical; min-height: 80px; }
     justify-content: center;
   }
   .template-grid {
+    grid-template-columns: 1fr;
+  }
+  .session-participant {
     grid-template-columns: 1fr;
   }
 }

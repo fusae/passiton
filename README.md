@@ -2,13 +2,13 @@
 
 [简体中文](./README.zh-CN.md)
 
-Passiton is a local-first control plane for the CLI coding agents you already have — Claude Code, Codex, Gemini, and more. Run single tasks, two-agent sessions, or multi-step workflows with human review. Operate it by hand through the web UI, or entirely over a self-describing HTTP API that another AI can drive.
+Passiton is a local-first control plane for the CLI coding agents you already have — Claude Code, Codex, Gemini, and more. Execute work with Tasks, make decisions in multi-agent Sessions, and orchestrate both through Workflows with human review.
 
 ![Agent handoff demo: a task fails on one agent and is continued by another, which verifies the workspace and finishes only the remaining work](https://raw.githubusercontent.com/fusae/passiton/main/docs/assets/handoff-demo.gif)
 
 ## Key Features
 
-- **Task / Session / Workflow**: run one agent, pair two agents, or chain multi-step workflows with dependencies and approvals.
+- **Task / Session / Workflow**: Tasks execute concrete work; multi-agent Sessions compare proposals, review, diagnose, and design; Workflows orchestrate both with dependencies and approvals.
 - **Operate by UI or API**: every action -- create agents, dispatch tasks, run workflows, hand off failed work -- is available in the web UI and over a self-describing HTTP API (`GET /api/docs`) that an AI operator can drive.
 - **Any CLI agent**: Claude Code, Codex, Gemini CLI, and OpenCode are auto-discovered, auto-configured, and verified automatically; register anything else (aider, goose, qwen-code, ...) as a custom CLI agent via the UI or `POST /api/config/agents`.
 - **Agent priority**: reorder agents with arrows in Settings; tasks created without an explicit agent go to the highest-priority usable agent.
@@ -53,6 +53,19 @@ For local development, use `npm link` after `npm run build` to get the `passiton
 5. Agents that are not auto-discovered can be added as a custom CLI agent in `Settings` → `Agents` → `Add custom agent`, or with `POST /api/config/agents` using adapter `custom-cli`; see [Community adapters](./docs/community-adapters.md).
 
 Tasks with `cwd` require a filesystem-capable local CLI agent. API assistants can plan and review, but they cannot read or write local files directly.
+
+## Multi-agent Sessions
+
+A Session is a decision room, not an implementation job. Choose 2–6 ready agents, assign each a role, and designate exactly one moderator. Participants speak in rounds; the moderator concludes with a structured decision that can be handed to a Task or Workflow.
+
+Available scenarios:
+
+- `proposal`: independent proposals followed by comparison and selection
+- `panel_review`: product, engineering, and risk review of an existing plan or artifact
+- `diagnosis`: evidence-based hypotheses and root-cause convergence
+- `design`: architecture and product tradeoffs resolved into an actionable decision
+
+Sessions run read-only by design. Use a Task when the requested outcome requires files, commands, tests, or commits.
 
 On Windows, custom agents should use a native `.exe`, an npm-generated `.ps1` shim, or `node.exe` plus the CLI JavaScript entrypoint. Passiton automatically switches a `.cmd` shim to its matching `.ps1` sibling so `cmd.exe` cannot split multi-line prompts.
 

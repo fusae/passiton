@@ -95,6 +95,44 @@ test('local planner with API-looking name does not get API-only warning', async 
   })
 })
 
+test('multi-agent Session runs every participant and lets the moderator conclude', async () => {
+  await withTempDb(async () => {
+    const router = new Router()
+    const calls: string[] = []
+    const prompts = new Map<string, string>()
+    const register = (name: string, output: string) => {
+      router.registerAdapter(new StubAdapter(name, async (_session, _message, opts) => {
+        calls.push(name)
+        prompts.set(name, opts?.systemPrompt ?? '')
+        return output
+      }))
+    }
+    register('codex', '方案 A：优先降低实现复杂度。')
+    register('opencode', '方案 B：补充用户验证和风险控制。')
+    register('claude-code', '[RESULT]采用方案 A，并加入方案 B 的验证机制。[/RESULT]\n[DONE]')
+
+    const session = router.startMeeting({
+      scenario: 'design',
+      participants: [
+        { agent: { adapter: 'claude-code' }, role: '主持人与决策者', moderator: true },
+        { agent: { adapter: 'codex' }, role: '技术设计' },
+        { agent: { adapter: 'opencode' }, role: '产品与风险评审' },
+      ],
+      initialPrompt: '设计多人 Session 功能',
+      maxRounds: 2,
+    })
+
+    await waitFor(() => state.getSession(session.id)?.status === 'done')
+
+    assert.deepEqual(calls, ['codex', 'opencode', 'claude-code'])
+    assert.equal(state.getSession(session.id)?.currentRound, 1)
+    assert.deepEqual(state.getSession(session.id)?.participants?.map((item) => item.agent.adapter), calls)
+    assert.match(prompts.get('codex') ?? '', /reasoning and decision-making/i)
+    assert.match(prompts.get('claude-code') ?? '', /Final Decision/)
+    assert.equal(state.getMessages(session.id).at(-1)?.from, 'claude-code')
+  })
+})
+
 test('detects structured and natural-language executor assistance requests', () => {
   assert.match(
     detectAgentAssistanceRequest('[ASSIST_REQUEST]\naction: read_file\ntarget: /tmp/a.md\n[/ASSIST_REQUEST]') ?? '',

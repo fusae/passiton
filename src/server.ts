@@ -27,7 +27,7 @@ import { activeAgents, getConfigPath, loadConfig, writeConfig } from './config.j
 import { KeyVaultError, decryptKey, decryptSecret, deleteKey, encryptSecret, listKeys, maskAgentKey, storeKey } from './keyvault.js'
 import type { Router } from './router.js'
 import * as state from './state.js'
-import type { AdapterResponse, AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, Pipeline, PipelineTemplateRecord, PipelineWithSessions, AgentRef, Message, Session, SessionMode, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType, OpsIncident } from './types.js'
+import type { AdapterResponse, AgentConfig, AgentListResponse, ApiAgentInfo, AppConfig, Pipeline, PipelineTemplateRecord, PipelineWithSessions, AgentRef, Message, Session, SessionMode, SessionScenario, SessionParticipant, SessionContext, SessionContextInput, Task, TaskStatus, WsEvent, WorkflowNodeType, OpsIncident } from './types.js'
 import { pipelineTemplates, templates } from './templates.js'
 import { resolveWorkspacePath, validateAllowedWorkspaces, WorkspaceAccessError } from './workspace.js'
 import { OpsSupervisor, acknowledgeIncident, listIncidents } from './ops-supervisor.js'
@@ -746,6 +746,9 @@ function sessionsForClient(sessions: Session[]): Array<Pick<Session,
   | 'to'
   | 'status'
   | 'mode'
+  | 'scenario'
+  | 'participants'
+  | 'nextParticipantIndex'
   | 'nextTurn'
   | 'maxRounds'
   | 'currentRound'
@@ -771,6 +774,9 @@ function sessionsForClient(sessions: Session[]): Array<Pick<Session,
     to: session.to,
     status: session.status,
     mode: session.mode,
+    scenario: session.scenario,
+    participants: session.participants,
+    nextParticipantIndex: session.nextParticipantIndex,
     nextTurn: session.nextTurn,
     maxRounds: session.maxRounds,
     currentRound: session.currentRound,
@@ -1287,22 +1293,43 @@ function appendOutputDirContext(context: SessionContext | undefined, outputDir?:
 
 function parseSessionBody(body: unknown) {
   const data = requireRecord(body, 'body')
-  const templateId = optionalString(data.template_id ?? data.templateId, 'template_id')
-
   return {
     idempotencyKey: optionalString(data.idempotencyKey, 'idempotencyKey'),
-    from: parseAgentRef(data.from, 'from'),
-    to: parseAgentRef(data.to, 'to'),
+    scenario: parseSessionScenario(data.scenario),
+    participants: parseSessionParticipants(data.participants),
     initialPrompt: requireNonEmptyString(data.initialPrompt, 'initialPrompt'),
-    mode: parseSessionMode(data.mode),
-    systemPrompts: parseSystemPrompts(data.systemPrompts),
-    templateId,
     context: parseSessionContext(data.context, 'context'),
     maxRounds: optionalPositiveInt(data.maxRounds, 'maxRounds'),
-    approveMode: optionalBoolean(data.approveMode, 'approveMode'),
-    permissionMode: parsePermissionMode(data.permissionMode),
-    cwd: optionalString(data.cwd, 'cwd'),
   }
+}
+
+function parseSessionScenario(value: unknown): SessionScenario {
+  if (value === 'proposal' || value === 'panel_review' || value === 'diagnosis' || value === 'design') return value
+  throw new HttpError(400, '"scenario" must be one of proposal, panel_review, diagnosis, design')
+}
+
+function parseSessionParticipants(value: unknown): SessionParticipant[] {
+  if (!Array.isArray(value) || value.length < 2 || value.length > 6) {
+    throw new HttpError(400, '"participants" must contain 2 to 6 agents')
+  }
+  const participants = value.map((item, index) => {
+    const record = requireRecord(item, `participants[${index}]`)
+    return {
+      agent: parseAgentRef(record.agent, `participants[${index}].agent`),
+      role: requireNonEmptyString(record.role, `participants[${index}].role`),
+      moderator: optionalBoolean(record.moderator, `participants[${index}].moderator`) ?? false,
+    }
+  })
+  if (new Set(participants.map((participant) => participant.agent.adapter)).size !== participants.length) {
+    throw new HttpError(400, 'Each Session participant must use a different agent')
+  }
+  if (participants.filter((participant) => participant.moderator).length !== 1) {
+    throw new HttpError(400, 'Exactly one Session participant must be the moderator')
+  }
+  return [
+    ...participants.filter((participant) => !participant.moderator),
+    participants.find((participant) => participant.moderator)!,
+  ]
 }
 
 function parseManualArtifactsBody(body: unknown): { paths: string[]; summary?: string } {
@@ -1733,21 +1760,24 @@ function mcpTools(): McpTool[] {
     {
       name: 'passiton_create_session',
       title: 'Create Passiton session',
-      description: 'Create an agent-to-agent session. Use safe for read-only planning/review. For implementation, file writes, installs, builds, tests, commits, or command execution, provide cwd and permissionMode="trusted".',
+      description: 'Create a read-only multi-agent decision session. Sessions compare proposals, review decisions, diagnose problems, or discuss designs; use a task for implementation and filesystem changes.',
       inputSchema: objectSchema({
-        from: agentSchema('Planner or first speaker agent name.'),
-        to: agentSchema('Executor or second speaker agent name.'),
+        scenario: { type: 'string', enum: ['proposal', 'panel_review', 'diagnosis', 'design'] },
+        participants: {
+          type: 'array',
+          minItems: 2,
+          maxItems: 6,
+          items: objectSchema({
+            agent: agentSchema('Participant agent name or reference.'),
+            role: { type: 'string', description: 'The participant responsibility or perspective.' },
+            moderator: { type: 'boolean', description: 'Exactly one participant must be the moderator who produces the final decision.' },
+          }, ['agent', 'role', 'moderator']),
+        },
         initialPrompt: { type: 'string' },
-        mode: { type: 'string', enum: ['collaborate', 'discuss', 'review', 'freeform'] },
-        maxRounds: { type: 'integer' },
-        approveMode: { type: 'boolean' },
-        permissionMode: { type: 'string', enum: ['safe', 'trusted'], description: 'safe (default) does not bypass CLI sandbox/approval prompts; trusted enables supported CLI auto-approve/full-access behavior and requires cwd.' },
+        maxRounds: { type: 'integer', description: 'Maximum complete discussion cycles. Default comes from Passiton settings.' },
         idempotencyKey: { type: 'string', description: 'Optional stable key to avoid duplicate session creation on retries.' },
-        cwd: { type: 'string' },
-        systemPromptFrom: { type: 'string' },
-        systemPromptTo: { type: 'string' },
         context: contextSchema(),
-      }, ['from', 'to', 'initialPrompt']),
+      }, ['scenario', 'participants', 'initialPrompt']),
       annotations: { destructiveHint: false },
     },
     {
@@ -1916,16 +1946,11 @@ function findReusableMcpTask(userId: string, params: {
 
 function findReusableMcpSession(userId: string, params: {
   idempotencyKey?: string
-  from: AgentRef
-  to: AgentRef
+  scenario: SessionScenario
+  participants: SessionParticipant[]
   initialPrompt: string
-  mode?: SessionMode
   context?: SessionContext
-  systemPrompts?: { from: string; to: string }
   maxRounds?: number
-  approveMode?: boolean
-  permissionMode?: Session['permissionMode']
-  cwd?: string
 }): Session | undefined {
   if (params.idempotencyKey) {
     return state.getSessionByIdempotencyKey(userId, params.idempotencyKey)
@@ -1934,22 +1959,15 @@ function findReusableMcpSession(userId: string, params: {
     .filter((session) => session.status === 'active' || session.status === 'paused')
   const prompts = state.getFirstHumanMessages(candidates.map((session) => session.id))
   const cheapMatch = candidates.filter((session) => (
-    sameAgentRef(session.from, params.from) &&
-    sameAgentRef(session.to, params.to) &&
+    session.scenario === params.scenario &&
+    stableJson(session.participants) === stableJson(params.participants) &&
     prompts.get(session.id) === params.initialPrompt &&
-    sameOptionalString(session.cwd, params.cwd) &&
-    session.mode === (params.mode ?? 'freeform') &&
-    session.maxRounds === (params.maxRounds ?? loadConfig().defaults.maxRounds) &&
-    session.approveMode === (params.approveMode ?? false) &&
-    session.permissionMode === (params.permissionMode ?? 'safe')
+    session.maxRounds === (params.maxRounds ?? loadConfig().defaults.maxRounds)
   ))
   for (const candidate of cheapMatch) {
     const full = state.getSession(candidate.id, userId)
     if (!full) continue
-    if (
-      stableJson(full.context) === stableJson(params.context) &&
-      (params.systemPrompts === undefined || stableJson(full.systemPrompts) === stableJson(params.systemPrompts))
-    ) {
+    if (stableJson(full.context) === stableJson(params.context)) {
       return full
     }
   }
@@ -2045,21 +2063,18 @@ function mcpGetTaskResult(args: unknown, ctx: McpContext): unknown {
 async function mcpCreateSession(args: unknown, ctx: McpContext): Promise<unknown> {
   const defaults = loadConfig().defaults
   const params = parseSessionBody(normalizeSessionArgs(args))
-  assertAllowedWorkspace(params.cwd)
-  assertPermissionModeAllowed(params.permissionMode, params.cwd)
-  assertSessionFilesystemCapability(ctx.authUser.userId, params.to, params.cwd)
-  await assertMcpAgentUsable(ctx, params.from, 'from')
-  await assertMcpAgentUsable(ctx, params.to, 'to')
-  const context = resolveSessionContext(params.context, params.cwd)
+  for (const participant of params.participants) {
+    await assertMcpAgentUsable(ctx, participant.agent, `participant ${participant.agent.adapter}`)
+  }
+  const context = resolveSessionContext(params.context)
   const normalized = {
     ...params,
     context,
-    mode: params.mode ?? defaults.mode,
     maxRounds: params.maxRounds ?? defaults.maxRounds,
   }
   const existing = findReusableMcpSession(ctx.authUser.userId, normalized)
   if (existing) return { session: summarizeSession(existing), url: `/sessions/${existing.id}`, reused: true }
-  const session = ctx.router.startSession({
+  const session = ctx.router.startMeeting({
     userId: ctx.authUser.userId,
     ...normalized,
   })
@@ -2210,15 +2225,15 @@ function summarizeSession(session: Session): Record<string, unknown> {
   return {
     id: session.id,
     status: session.status,
-    mode: session.mode,
-    from: agentLabel(session.from),
-    to: agentLabel(session.to),
-    nextTurn: session.nextTurn,
+    scenario: session.scenario,
+    participants: session.participants?.map((participant) => ({
+      agent: agentLabel(participant.agent),
+      role: participant.role,
+      moderator: Boolean(participant.moderator),
+    })),
+    nextParticipantIndex: session.nextParticipantIndex,
     currentRound: session.currentRound,
     maxRounds: session.maxRounds,
-    approveMode: session.approveMode,
-    permissionMode: session.permissionMode,
-    cwd: session.cwd,
     errorType: session.errorType,
     errorMessage: truncateText(session.errorMessage, 1000),
     lastAgentOutput: truncateText(session.lastAgentOutput, 2000),
@@ -2959,10 +2974,18 @@ function normalizeTaskArgs(args: unknown): unknown {
 
 function normalizeSessionArgs(args: unknown): unknown {
   const data = requireRecord(args, 'arguments')
+  const participants = Array.isArray(data.participants)
+    ? data.participants.map((raw, index) => {
+        const participant = requireRecord(raw, `participants[${index}]`)
+        return {
+          ...participant,
+          agent: normalizeAgentArg(participant.agent, `participants[${index}].agent`),
+        }
+      })
+    : data.participants
   return {
     ...data,
-    from: normalizeAgentArg(data.from, 'from'),
-    to: normalizeAgentArg(data.to, 'to'),
+    participants,
   }
 }
 
@@ -3002,19 +3025,18 @@ function sessionApiDocs() {
     createSession: {
       method: 'POST',
       path: '/api/sessions',
-      description: 'Use safe for read-only collaboration. Use trusted with cwd when either local CLI agent must implement changes or run commands.',
+      description: 'Create a read-only multi-agent decision Session. Use Task for implementation or filesystem work.',
       body: {
-        from: { adapter: 'opencode' },
-        to: { adapter: 'claude-code' },
-        initialPrompt: 'Create docs/article.md from this brief...',
-        mode: 'freeform',
-        maxRounds: 1,
-        permissionMode: 'trusted',
-        cwd: '/optional/project/path',
+        scenario: 'design',
+        participants: [
+          { agent: { adapter: 'opencode' }, role: 'Product strategist', moderator: false },
+          { agent: { adapter: 'claude-code' }, role: 'Technical reviewer and moderator', moderator: true },
+        ],
+        initialPrompt: 'Decide the implementation approach for this feature.',
+        maxRounds: 3,
         context: {
           text: 'Background context',
-          rules: 'Output markdown only',
-          files: ['docs/brief.md'],
+          rules: 'Return a decision that can be handed to a Task.',
         },
       },
     },
@@ -4034,21 +4056,14 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
       if (pathname === '/api/sessions' && method === 'POST') {
         const defaults = loadConfig().defaults
         const params = parseSessionBody(await parseBody(req))
-        assertAllowedWorkspace(params.cwd)
-        assertPermissionModeAllowed(params.permissionMode, params.cwd)
-        assertSessionFilesystemCapability(authUser!.userId, params.to, params.cwd)
-        const template = params.templateId ? templates.find((item) => item.id === params.templateId) : undefined
-        if (params.templateId && !template) {
-          throw new HttpError(400, 'Unknown template_id')
+        for (const participant of params.participants) {
+          await assertTaskAgentAccepted(authUser!.userId, router, agentCatalog, participant.agent, undefined)
         }
-        const templateConfig = template?.config
-        const session = router.startSession({
+        const session = router.startMeeting({
           userId: authUser!.userId,
           ...params,
-          context: resolveSessionContext(params.context, params.cwd),
-          systemPrompts: params.systemPrompts ?? templateConfig?.systemPrompts,
-          mode: params.mode ?? templateConfig?.mode ?? defaults.mode,
-          maxRounds: params.maxRounds ?? templateConfig?.maxRounds ?? defaults.maxRounds,
+          context: resolveSessionContext(params.context, undefined),
+          maxRounds: params.maxRounds ?? defaults.maxRounds,
         })
         return json(res, 201, session)
       }

@@ -28,6 +28,14 @@ export interface WorkflowStepContract {
 // Session modes determine the system prompts and interaction style
 export type SessionMode = 'collaborate' | 'discuss' | 'review' | 'freeform'
 
+export type SessionScenario = 'proposal' | 'panel_review' | 'diagnosis' | 'design'
+
+export interface SessionParticipant {
+  agent: AgentRef
+  role: string
+  moderator?: boolean
+}
+
 export interface AgentRef {
   adapter: string   // adapter name (e.g. "codex", "claude-code")
   label?: string    // display name
@@ -99,6 +107,10 @@ export interface Session {
     from: string
     to: string
   }
+  /** Public multi-agent Session model. Workflow-owned sessions omit these fields. */
+  scenario?: SessionScenario
+  participants?: SessionParticipant[]
+  nextParticipantIndex?: number
   templateId?: string
   gitSnapshot?: string
   artifacts?: SessionArtifacts

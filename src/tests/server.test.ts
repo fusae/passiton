@@ -908,46 +908,33 @@ test('CLI task create authenticates locally and creates a task', async () => {
   })
 })
 
-test('POST /api/sessions rejects cwd outside allowed workspaces', async () => {
-  const allowed = mkdtempSync(join(tmpdir(), 'turing-allowed-workspace-'))
-  const denied = mkdtempSync(join(tmpdir(), 'turing-denied-workspace-'))
-  process.env.PASSITON_ALLOWED_WORKSPACES = allowed
-  try {
-    await withServer(async (baseUrl) => {
-      const auth = await register(baseUrl, 'workspace@example.com')
-      const response = await fetch(`${baseUrl}/api/sessions`, {
-        method: 'POST',
-        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
-        body: JSON.stringify({
-          from: { adapter: 'codex' },
-          to: { adapter: 'claude-code' },
-          initialPrompt: 'test',
-          cwd: denied,
-        }),
-      })
-      assert.equal(response.status, 403)
-    })
-  } finally {
-    rmSync(allowed, { recursive: true, force: true })
-    rmSync(denied, { recursive: true, force: true })
-    delete process.env.PASSITON_ALLOWED_WORKSPACES
-  }
-})
-
-test('POST /api/sessions rejects trusted permission mode without cwd', async () => {
+test('POST /api/sessions requires multiple agents and exactly one moderator', async () => {
   await withServer(async (baseUrl) => {
-    const auth = await register(baseUrl, 'trusted-cwd@example.com')
-    const response = await fetch(`${baseUrl}/api/sessions`, {
+    const auth = await register(baseUrl, 'meeting-validation@example.com')
+    const tooFew = await fetch(`${baseUrl}/api/sessions`, {
       method: 'POST',
       headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
       body: JSON.stringify({
-        from: { adapter: 'codex' },
-        to: { adapter: 'claude-code' },
-        initialPrompt: 'test',
-        permissionMode: 'trusted',
+        scenario: 'design',
+        participants: [{ agent: { adapter: 'codex' }, role: 'designer', moderator: true }],
+        initialPrompt: 'design a feature',
       }),
     })
-    assert.equal(response.status, 400)
+    assert.equal(tooFew.status, 400)
+
+    const twoModerators = await fetch(`${baseUrl}/api/sessions`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        scenario: 'design',
+        participants: [
+          { agent: { adapter: 'codex' }, role: 'designer', moderator: true },
+          { agent: { adapter: 'opencode' }, role: 'reviewer', moderator: true },
+        ],
+        initialPrompt: 'design a feature',
+      }),
+    })
+    assert.equal(twoModerators.status, 400)
   })
 })
 
@@ -1488,10 +1475,12 @@ test('POST /mcp reuses duplicate session idempotency keys', async () => {
           params: {
             name: 'passiton_create_session',
             arguments: {
-              from: 'opencode',
-              to: 'codex',
+              scenario: 'panel_review',
+              participants: [
+                { agent: 'opencode', role: 'reviewer' },
+                { agent: 'codex', role: 'moderator', moderator: true },
+              ],
               initialPrompt: 'build once',
-              mode: 'review',
               maxRounds: 2,
               idempotencyKey: 'mcp-session-key',
             },
@@ -1508,6 +1497,11 @@ test('POST /mcp reuses duplicate session idempotency keys', async () => {
     assert.equal(second.session.id, first.session.id)
     assert.equal(first.reused, false)
     assert.equal(second.reused, true)
+    await waitFor(async () => {
+      const response = await fetch(`${baseUrl}/api/sessions/${first.session.id}`, { headers: authHeaders(auth.token) })
+      const session = await response.json() as { status: string }
+      return session.status === 'done'
+    })
   }, {
     allowRegistration: true,
     configureRouter: (router) => {
@@ -1518,6 +1512,8 @@ test('POST /mcp reuses duplicate session idempotency keys', async () => {
 })
 
 test('POST /mcp reuses duplicate sessions without explicit idempotency keys', async () => {
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => { release = resolve })
   await withServer(async (baseUrl) => {
     const auth = await register(baseUrl, 'mcp-session-dedupe@example.com')
 
@@ -1532,10 +1528,12 @@ test('POST /mcp reuses duplicate sessions without explicit idempotency keys', as
           params: {
             name: 'passiton_create_session',
             arguments: {
-              from: 'opencode',
-              to: 'codex',
+              scenario: 'panel_review',
+              participants: [
+                { agent: 'opencode', role: 'reviewer' },
+                { agent: 'codex', role: 'moderator', moderator: true },
+              ],
               initialPrompt: 'build once without key',
-              mode: 'review',
               maxRounds: 2,
             },
           },
@@ -1547,22 +1545,24 @@ test('POST /mcp reuses duplicate sessions without explicit idempotency keys', as
     }
 
     const first = await create(1)
-    await waitFor(async () => {
-      const response = await fetch(`${baseUrl}/api/sessions/${first.session.id}`, { headers: authHeaders(auth.token) })
-      const session = await response.json() as { status: string }
-      return session.status === 'paused'
-    })
     const second = await create(2)
     assert.equal(second.session.id, first.session.id)
     assert.equal(first.reused, false)
     assert.equal(second.reused, true)
+    release()
+    await waitFor(async () => {
+      const response = await fetch(`${baseUrl}/api/sessions/${first.session.id}`, { headers: authHeaders(auth.token) })
+      const session = await response.json() as { status: string }
+      return session.status === 'done'
+    })
   }, {
     allowRegistration: true,
     configureRouter: (router) => {
-      router.registerAdapter(new StubAdapter('opencode', async () => '[DONE]'))
-      router.registerAdapter(new StubAdapter('codex', async () => {
-        throw new Error('quota exceeded')
+      router.registerAdapter(new StubAdapter('opencode', async () => {
+        await gate
+        return 'reviewed'
       }))
+      router.registerAdapter(new StubAdapter('codex', async () => '[RESULT]approved[/RESULT]\n[DONE]'))
     },
   })
 })

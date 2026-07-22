@@ -6,7 +6,7 @@ import { promisify } from 'util'
 import fs from 'fs'
 import path from 'path'
 import { v4 as uuidv4 } from 'uuid'
-import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts, Task, WorkspaceDirtyState, ExternalJob, WorkflowNodeType, WorkflowStepContract, ExternalTaskProvider, RouterExternalTaskHooks } from './types.js'
+import type { Session, Message, Adapter, AdapterSendOpts, PolicyConfig, WsEvent, AgentRef, SessionMode, SessionScenario, SessionParticipant, SessionContext, AdapterResponse, RoundMetadata, SessionErrorType, Pipeline, SessionArtifacts, Task, WorkspaceDirtyState, ExternalJob, WorkflowNodeType, WorkflowStepContract, ExternalTaskProvider, RouterExternalTaskHooks } from './types.js'
 import * as state from './state.js'
 import { decryptKey } from './keyvault.js'
 import {
@@ -15,7 +15,7 @@ import {
   detectCompletion,
   DEFAULT_POLICY,
 } from './policy.js'
-import { generateSystemPrompts, generateTaskSystemPrompt } from './prompts.js'
+import { generateSystemPrompts, generateTaskSystemPrompt, generateMeetingSystemPrompt } from './prompts.js'
 import { collectGitCommitsDuringWindow, normalizePathForComparison, resolveWorkspacePath, WorkspaceAccessError } from './workspace.js'
 
 const MAX_HISTORY_MESSAGES = 20
@@ -431,6 +431,48 @@ export class Router extends EventEmitter {
   }
 
   // ── Session control ─────────────────────────────────────────────────────────
+
+  startMeeting(params: {
+    userId?: string
+    idempotencyKey?: string
+    scenario: SessionScenario
+    participants: SessionParticipant[]
+    initialPrompt: string
+    context?: SessionContext
+    maxRounds?: number
+  }): Session {
+    if (params.idempotencyKey && params.userId) {
+      const existing = state.getSessionByIdempotencyKey(params.userId, params.idempotencyKey)
+      if (existing) return existing
+    }
+    if (params.participants.length < 2) throw new Error('A Session requires at least two participants')
+    const moderatorCount = params.participants.filter((participant) => participant.moderator).length
+    if (moderatorCount !== 1) throw new Error('A Session requires exactly one moderator')
+
+    const moderator = params.participants.find((participant) => participant.moderator)!
+    const ordered = [
+      ...params.participants.filter((participant) => !participant.moderator),
+      moderator,
+    ]
+    const session = this.createSessionRecord({
+      userId: params.userId,
+      idempotencyKey: params.idempotencyKey,
+      from: ordered[0].agent,
+      to: ordered[1].agent,
+      initialPrompt: params.initialPrompt,
+      mode: 'freeform',
+      context: params.context,
+      maxRounds: params.maxRounds,
+      permissionMode: 'safe',
+      scenario: params.scenario,
+      participants: ordered,
+      nextParticipantIndex: 0,
+    }, 'active')
+
+    this.emitLog('info', `Multi-agent Session started [${session.id.slice(0, 8)}] scenario=${params.scenario} participants=${ordered.length}`, session.id)
+    this.startRunLoop(session.id, params.initialPrompt)
+    return session
+  }
 
   startSession(params: {
     userId?: string
@@ -1032,6 +1074,9 @@ export class Router extends EventEmitter {
     roundOverride?: number
   ): Promise<{ done: boolean; waiting?: boolean; nextMessage: string }> {
     const session = state.getSession(sessionId)!
+    if (session.scenario && session.participants?.length) {
+      return this.processMeetingTurn(session, message, epoch, roundOverride)
+    }
     const recipient = session.nextTurn
     const target = recipient === 'to' ? session.to : session.from
     const round = roundOverride ?? (recipient === 'to' ? session.currentRound + 1 : session.currentRound)
@@ -1153,6 +1198,98 @@ export class Router extends EventEmitter {
     return { done: false, nextMessage: content }
   }
 
+  private async processMeetingTurn(
+    session: Session,
+    message: string,
+    epoch: number,
+    roundOverride?: number
+  ): Promise<{ done: boolean; waiting?: boolean; nextMessage: string }> {
+    const participants = session.participants!
+    const index = Math.min(session.nextParticipantIndex ?? 0, participants.length - 1)
+    const participant = participants[index]
+    const target = participant.agent
+    const round = roundOverride ?? session.currentRound + 1
+    const adapter = this.resolveAdapter(target.adapter, session.userId)
+    if (!adapter) throw new Error(`Adapter not found: ${target.adapter}`)
+
+    this.emitLog('info', `Meeting turn: ${target.adapter} [${session.id.slice(0, 8)}] cycle=${round} participant=${index + 1}/${participants.length}`, session.id)
+    let lastOutput = 'Starting...'
+    const startedAt = Date.now()
+    let lastProgressPersistedAt = startedAt
+    state.updateSession(session.id, { lastAgentOutput: lastOutput })
+    const emitHeartbeat = () => {
+      this.emit('event', {
+        type: 'heartbeat',
+        sessionId: session.id,
+        round,
+        agent: target.adapter,
+        status: 'running',
+        elapsed: Date.now() - startedAt,
+        lastOutput,
+      } satisfies WsEvent)
+    }
+    const heartbeat = setInterval(emitHeartbeat, 10_000)
+    heartbeat.unref()
+    emitHeartbeat()
+
+    const opts = this.buildMeetingSendOpts(session, participant, adapter)
+    const controller = new AbortController()
+    this.turnControllers.set(session.id, controller)
+    opts.signal = controller.signal
+    opts.onOutput = (line) => {
+      lastOutput = line
+      const now = Date.now()
+      if (now - lastProgressPersistedAt > 5_000) {
+        lastProgressPersistedAt = now
+        state.updateSession(session.id, { lastAgentOutput: lastOutput })
+      }
+      this.emit('event', {
+        type: 'message:delta',
+        payload: { sessionId: session.id, content: line, from: target.adapter },
+      } satisfies WsEvent)
+      this.emitStreamStep(session.id, line)
+    }
+
+    let response: AdapterResponse
+    try {
+      response = await this.callWithRetry(adapter, session, message, opts)
+    } catch (err) {
+      if (err && typeof err === 'object') Object.assign(err, { lastAgentOutput: lastOutput, errorRound: round })
+      throw err
+    } finally {
+      clearInterval(heartbeat)
+      if (this.turnControllers.get(session.id) === controller) {
+        this.timeoutExtensions.delete(session.id)
+        this.turnControllers.delete(session.id)
+      }
+    }
+    if (this.runEpochs.get(session.id) !== epoch || !this.runningLoops.has(session.id)) {
+      return { done: false, nextMessage: message }
+    }
+
+    const content = response.content
+    this.recordMessage(session.id, target.adapter, content, round, {
+      ...response.metadata,
+      duration: Date.now() - startedAt,
+    })
+    this.emitStreamStep(session.id, content, 'done')
+
+    const nextIndex = (index + 1) % participants.length
+    const cycleComplete = nextIndex === 0
+    state.updateSession(session.id, {
+      nextParticipantIndex: nextIndex,
+      currentRound: cycleComplete ? round : session.currentRound,
+    })
+
+    if (detectHumanInputWait(content)) {
+      await this.pauseSession(session.id)
+      return { done: false, waiting: true, nextMessage: content }
+    }
+    const moderatorFinished = Boolean(participant.moderator && cycleComplete && detectCompletion(content))
+    const reachedLimit = Boolean(participant.moderator && cycleComplete && round >= session.maxRounds)
+    return { done: moderatorFinished || reachedLimit, nextMessage: content }
+  }
+
   /**
    * Build AdapterSendOpts with system prompt and conversation history.
    * `perspective` determines which agent we're building for.
@@ -1176,6 +1313,23 @@ export class Router extends EventEmitter {
 
     const opts: AdapterSendOpts = { systemPrompt, history }
     opts.getTimeoutExtensionMs = () => this.timeoutExtensions.get(session.id) ?? 0
+    this.applyAdapterSecret(adapter, session.userId, opts)
+    return opts
+  }
+
+  private buildMeetingSendOpts(session: Session, participant: SessionParticipant, adapter: Adapter): AdapterSendOpts {
+    const messages = state.getMessages(session.id)
+    const task = messages.find((msg) => msg.from === 'human' && msg.round === 0)?.content ?? ''
+    const selfAdapter = participant.agent.adapter
+    const history = messages.slice(-MAX_HISTORY_MESSAGES).map((msg) => ({
+      role: msg.from === selfAdapter ? 'assistant' as const : 'user' as const,
+      content: msg.content,
+    }))
+    const opts: AdapterSendOpts = {
+      systemPrompt: generateMeetingSystemPrompt(session.scenario!, participant, session.participants!, task, session.context),
+      history,
+      getTimeoutExtensionMs: () => this.timeoutExtensions.get(session.id) ?? 0,
+    }
     this.applyAdapterSecret(adapter, session.userId, opts)
     return opts
   }
@@ -1315,15 +1469,15 @@ export class Router extends EventEmitter {
     approveMode?: boolean
     permissionMode?: Session['permissionMode']
     cwd?: string
+    scenario?: SessionScenario
+    participants?: SessionParticipant[]
+    nextParticipantIndex?: number
   }, initialStatus: 'active' | 'paused'): Session {
     if (params.permissionMode === 'trusted' && !params.cwd) {
       throw new Error('Trusted permission mode requires cwd')
     }
 
     const mode = params.mode ?? 'freeform'
-    const fromAdapter = this.resolveAdapter(params.from.adapter, params.userId)
-    const toAdapter = this.resolveAdapter(params.to.adapter, params.userId)
-
     // Only persist user-provided system prompts.  Generated prompts are
     // reconstructed at runtime via resolveSystemPrompts() — they embed the
     // full context and would otherwise bloat the DB with redundant copies.
@@ -1338,6 +1492,9 @@ export class Router extends EventEmitter {
       mode,
       context: params.context,
       systemPrompts,
+      scenario: params.scenario,
+      participants: params.participants,
+      nextParticipantIndex: params.nextParticipantIndex,
       templateId: params.templateId,
       nextTurn: 'to',
       maxRounds: params.maxRounds ?? this.policy.maxRounds,

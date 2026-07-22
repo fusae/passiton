@@ -567,29 +567,29 @@ const MESSAGES = {
 
     // New Session modal
     'newSession.title': 'New Session',
-    'newSession.choosePreset': 'Choose a scenario preset.',
-    'newSession.desc': 'Create an assistant collaboration session.',
-    'newSession.noAgents': 'No API assistants configured yet.',
-    'newSession.addOneFirst': 'Add one first',
-    'newSession.templateBadge': 'Template: {name}',
-    'newSession.agentA': 'Agent A',
-    'newSession.agentB': 'Agent B',
-    'newSession.agentBHint': 'executor; needs filesystem for cwd',
-    'newSession.mode': 'Mode',
-    'newSession.mode.collaborate': 'Collaboration',
-    'newSession.mode.discuss': 'Discuss',
-    'newSession.mode.review': 'Review',
-    'newSession.mode.freeform': 'Freeform',
-    'newSession.maxTurns': 'Max Turns',
-    'newSession.systemPromptA': 'Agent A System Prompt',
-    'newSession.systemPromptB': 'Agent B System Prompt',
-    'newSession.workingDir': 'Working Directory',
-    'newSession.workingDirPlaceholder': '/path/to/project',
-    'newSession.permissionMode': 'Permission mode',
-    'newSession.permissionSafe': 'Safe',
-    'newSession.permissionTrusted': 'Trusted · skip CLI approvals',
-    'newSession.prompt': 'Prompt',
-    'newSession.promptPlaceholder': 'Describe the session…',
+    'newSession.chooseScenario': 'Choose a multi-agent decision scenario.',
+    'newSession.needAgents': 'At least 2 Ready local agents are required.',
+    'newSession.checkAgents': 'Check agents',
+    'newSession.participants': 'Participants',
+    'newSession.participantsHint': 'Choose 2–6 and assign one moderator',
+    'newSession.moderator': 'Moderator',
+    'newSession.roleModerator': 'Moderator and final synthesizer',
+    'newSession.roleProposer': 'Independent proposer',
+    'newSession.roleReviewer': 'Critical reviewer',
+    'newSession.topic': 'Discussion topic',
+    'newSession.topicPlaceholder': 'Describe the problem, goal, and decision criteria.',
+    'newSession.maxTurns': 'Max discussion rounds',
+    'newSession.validation.participants': 'Choose 2–6 agents',
+    'newSession.validation.moderator': 'Choose one moderator',
+    'newSession.validation.roles': 'Give every agent a role',
+    'newSession.scenario.proposal': 'Proposal competition',
+    'newSession.scenario.proposalDesc': 'Agents propose independently; the moderator compares them and selects a direction.',
+    'newSession.scenario.panel_review': 'Panel review',
+    'newSession.scenario.panel_reviewDesc': 'Review an existing plan or artifact from product, engineering, and risk perspectives.',
+    'newSession.scenario.diagnosis': 'Problem diagnosis',
+    'newSession.scenario.diagnosisDesc': 'Test evidence-based hypotheses and converge on the most likely root cause.',
+    'newSession.scenario.design': 'Design discussion',
+    'newSession.scenario.designDesc': 'Resolve architecture and product tradeoffs into a decision ready for a Task.',
     'newSession.context': 'Context',
     'newSession.contextRules': 'Rules / Constraints',
     'newSession.contextBackground': 'Background',
@@ -1253,29 +1253,29 @@ const MESSAGES = {
 
     // New Session modal
     'newSession.title': '新建会话',
-    'newSession.choosePreset': '选择一个场景预设。',
-    'newSession.desc': '创建一个 AI 助手协作会话。',
-    'newSession.noAgents': '暂无已配置的 API 助手。',
-    'newSession.addOneFirst': '先添加一个',
-    'newSession.templateBadge': '模板：{name}',
-    'newSession.agentA': 'Agent A',
-    'newSession.agentB': 'Agent B',
-    'newSession.agentBHint': '执行者；需要文件系统支持',
-    'newSession.mode': '模式',
-    'newSession.mode.collaborate': '协作',
-    'newSession.mode.discuss': '讨论',
-    'newSession.mode.review': '审查',
-    'newSession.mode.freeform': '自由',
-    'newSession.maxTurns': '最大轮次',
-    'newSession.systemPromptA': 'Agent A 系统提示词',
-    'newSession.systemPromptB': 'Agent B 系统提示词',
-    'newSession.workingDir': '工作目录',
-    'newSession.workingDirPlaceholder': '/path/to/project',
-    'newSession.permissionMode': '权限模式',
-    'newSession.permissionSafe': '安全',
-    'newSession.permissionTrusted': '信任 · 跳过 CLI 审批',
-    'newSession.prompt': '提示词',
-    'newSession.promptPlaceholder': '描述会话…',
+    'newSession.chooseScenario': '选择一个多 Agent 决策场景。',
+    'newSession.needAgents': '至少需要 2 个 Ready 的本地 Agent。',
+    'newSession.checkAgents': '检查 Agent',
+    'newSession.participants': '参与者',
+    'newSession.participantsHint': '选择 2–6 个，并指定一名主持人',
+    'newSession.moderator': '主持',
+    'newSession.roleModerator': '主持人和最终汇总者',
+    'newSession.roleProposer': '独立方案提出者',
+    'newSession.roleReviewer': '批判性评审者',
+    'newSession.topic': '讨论议题',
+    'newSession.topicPlaceholder': '说明要解决的问题、目标和判断标准。',
+    'newSession.maxTurns': '最大讨论轮次',
+    'newSession.validation.participants': '请选择 2–6 个 Agent',
+    'newSession.validation.moderator': '请选择一名主持人',
+    'newSession.validation.roles': '请为每个 Agent 填写角色',
+    'newSession.scenario.proposal': '方案竞赛',
+    'newSession.scenario.proposalDesc': '多个 Agent 独立提出方案，主持人比较后选出最佳方向。',
+    'newSession.scenario.panel_review': '联合评审',
+    'newSession.scenario.panel_reviewDesc': '从产品、技术、风险等视角审查已有方案或产出。',
+    'newSession.scenario.diagnosis': '问题会诊',
+    'newSession.scenario.diagnosisDesc': '基于证据提出并验证假设，收敛到最可能的根因。',
+    'newSession.scenario.design': '设计讨论',
+    'newSession.scenario.designDesc': '讨论架构与产品取舍，形成可交给 Task 的明确决策。',
     'newSession.context': '上下文',
     'newSession.contextRules': '规则 / 约束',
     'newSession.contextBackground': '背景',
@@ -3339,8 +3339,8 @@ function renderSessionCards() {
         <span class="badge badge-${session.status}">${statusDisplay}</span>
       </div>
       <div class="session-card-route">
-        <span>${escapeHtml(session.mode || 'session')}</span>
-        ${session.cwd ? `<span class="route-arrow">·</span><span>${escapeHtml(session.cwd)}</span>` : ''}
+        <span>${escapeHtml(sessionScenarioLabel(session))}</span>
+        ${session.participants?.length ? `<span class="route-arrow">·</span><span>${escapeHtml(session.participants.map(item => agentLabel(item.agent)).join(' / '))}</span>` : ''}
       </div>
       <div class="session-card-meta">
         <span>⟳ ${t('sessions.turns', { count: session.currentRound })}</span>
@@ -4501,6 +4501,10 @@ function sessionTitle(session) {
   return session?.cwd ? `${mode} · ${session.cwd}` : mode
 }
 
+function sessionScenarioLabel(session) {
+  return session?.scenario ? t(`newSession.scenario.${session.scenario}`) : session?.mode || 'Session'
+}
+
 function taskTitle(task) {
   const firstLine = String(task?.prompt || '').split('\n').map(line => line.trim()).find(Boolean)
   if (!firstLine) return t('task_untitled')
@@ -4790,19 +4794,16 @@ function renderSessionPanel(session) {
           <span class="kv-label">${t('session.idLabel')}</span>
           <span class="kv-value mono" style="font-size: 0.78rem;">${escapeHtml(session.id.slice(0, 12))}</span>
         </div>
-        <div class="panel-kv-row">
-          <span class="kv-label">${t('session.agentA')}</span>
-          <span class="kv-value">${escapeHtml(agentLabel(session.from))}</span>
-        </div>
-        <div class="panel-kv-row">
-          <span class="kv-label">${t('session.agentB')}</span>
-          <span class="kv-value">${escapeHtml(agentLabel(session.to))}</span>
-        </div>
-        <div class="panel-kv-row">
-          <span class="kv-label">${t('session.mode')}</span>
-          <span class="kv-value">${escapeHtml(session.mode)}</span>
-        </div>
-        ${session.templateId ? `<div class="panel-kv-row"><span class="kv-label">${t('session.template')}</span><span class="kv-value">${escapeHtml(session.templateId)}</span></div>` : ''}
+        ${session.scenario ? `
+          <div class="panel-kv-row"><span class="kv-label">场景</span><span class="kv-value">${escapeHtml(sessionScenarioLabel(session))}</span></div>
+          <div class="session-roster">${(session.participants || []).map(participant => `
+            <div class="session-roster-item"><strong>${escapeHtml(agentLabel(participant.agent))}</strong><span>${escapeHtml(participant.role)}${participant.moderator ? ' · 主持人' : ''}</span></div>
+          `).join('')}</div>
+        ` : `
+          <div class="panel-kv-row"><span class="kv-label">${t('session.agentA')}</span><span class="kv-value">${escapeHtml(agentLabel(session.from))}</span></div>
+          <div class="panel-kv-row"><span class="kv-label">${t('session.agentB')}</span><span class="kv-value">${escapeHtml(agentLabel(session.to))}</span></div>
+          <div class="panel-kv-row"><span class="kv-label">${t('session.mode')}</span><span class="kv-value">${escapeHtml(session.mode)}</span></div>
+        `}
         <div class="panel-kv-row">
           <span class="kv-label">${t('session.turnsLabel')}</span>
           <span class="kv-value">${session.currentRound} / ${session.maxRounds}</span>
@@ -4812,14 +4813,9 @@ function renderSessionPanel(session) {
           <span class="badge badge-${session.status}" style="margin: 0;">${t('session.status.' + session.status)}</span>
         </div>
         <div class="panel-kv-row">
-          <span class="kv-label">${t('session.permission')}</span>
-          <span class="kv-value ${session.permissionMode === 'trusted' ? 'permission-trusted' : ''}">${escapeHtml(session.permissionMode || 'safe')}</span>
-        </div>
-        <div class="panel-kv-row">
           <span class="kv-label">${t('session.created')}</span>
           <span class="kv-value">${new Date(session.createdAt).toLocaleString()}</span>
         </div>
-        ${session.cwd ? `<div class="panel-kv-row"><span class="kv-label">${t('session.cwd')}</span><span class="kv-value mono">${escapeHtml(session.cwd)}</span></div>` : ''}
       </div>
       ${renderSessionCreationDetails(session)}
     </div>
@@ -6309,41 +6305,36 @@ window.saveAllowedWorkspaces = async function() {
   }
 }
 
+const SESSION_SCENARIOS = [
+  { id: 'proposal', icon: '◇' },
+  { id: 'panel_review', icon: '✓' },
+  { id: 'diagnosis', icon: '◎' },
+  { id: 'design', icon: '▦' },
+]
+
+function sessionScenarioCopy(scenario) {
+  return {
+    ...scenario,
+    title: t(`newSession.scenario.${scenario.id}`),
+    description: t(`newSession.scenario.${scenario.id}Desc`),
+  }
+}
+
 window.showTemplateGalleryModal = async function() {
-  if (!state.templates.length) await loadTemplates()
   if (!state.agents.length) await loadAgents()
-
-  const templates = [...state.templates].sort((a, b) => {
-    if (a.id === 'custom') return 1
-    if (b.id === 'custom') return -1
-    return 0
-  })
-  const agentNotice = state.agents.length ? '' : `
-    <div class="template-empty-agents">
-      <span>${t('newSession.noAgents')}</span>
-      <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">${t('newSession.addOneFirst')}</button>
-    </div>
-  `
-
+  const readyCount = state.agents.filter(agent => agent.kind === 'local' && agent.status === 'ready').length
   showModal(`
     <div class="modal-card template-modal">
       <div class="modal-head">
-        <div>
-          <h3>${t('newSession.title')}</h3>
-          <p>${t('newSession.choosePreset')}</p>
-        </div>
+        <div><h3>${t('newSession.title')}</h3><p>${t('newSession.chooseScenario')}</p></div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
       </div>
-      ${agentNotice}
+      ${readyCount < 2 ? `<div class="template-empty-agents"><span>${t('newSession.needAgents')}</span><button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">${t('newSession.checkAgents')}</button></div>` : ''}
       <div class="template-grid">
-        ${templates.map(template => `
-          <button class="card template-card" type="button" onclick='window.showNewSessionModal(${jsString(template.id)})'>
-            <div class="template-icon">${escapeHtml(template.icon || '⚙️')}</div>
-            <div class="template-body">
-              <div class="template-title">${escapeHtml(template.nameEn || template.name)}</div>
-              <p>${escapeHtml(template.description || '')}</p>
-              <div class="template-tags">${(template.tags || template.config?.tags || []).map(tag => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
-            </div>
+        ${SESSION_SCENARIOS.map(sessionScenarioCopy).map(scenario => `
+          <button class="card template-card" type="button" onclick='window.showNewSessionModal(${jsString(scenario.id)})' ${readyCount < 2 ? 'disabled' : ''}>
+            <div class="template-icon">${scenario.icon}</div>
+            <div class="template-body"><div class="template-title">${scenario.title}</div><p>${scenario.description}</p></div>
           </button>
         `).join('')}
       </div>
@@ -6351,150 +6342,85 @@ window.showTemplateGalleryModal = async function() {
   `)
 }
 
-window.showNewSessionModal = async function(templateId = 'custom') {
-  if (!state.templates.length) await loadTemplates()
+window.showNewSessionModal = async function(scenarioId = 'proposal') {
   if (!state.agents.length) await loadAgents()
-  const template = state.templates.find(item => item.id === templateId) || state.templates.find(item => item.id === 'custom')
-  const localAgents = state.agents.filter(agent => agent.kind === 'local')
-  const readyAgents = sortAgentsByPriority(localAgents.filter(agent => agent.status === 'ready'))
-  const agents = readyAgents.length ? readyAgents : sortAgentsByPriority(localAgents)
-  const defaultFrom = preferredAgentName(agents, template?.config?.preferredAdapters?.from)
-  const defaultTo = preferredAgentName(agents, template?.config?.preferredAdapters?.to, defaultFrom)
-  const optionHtml = (selected) => agentOptionHtml(agents, selected)
-  const mode = template?.config?.mode || state.config?.defaults?.mode || 'collaborate'
-  const maxRounds = template?.config?.maxRounds || state.config?.defaults?.maxRounds || 5
-  const prompts = template?.config?.systemPrompts || { from: '', to: '' }
-  const templateBadge = template && template.id !== 'custom'
-    ? `<div class="template-selected-badge">${t('newSession.templateBadge', { name: escapeHtml(template.nameEn || template.name) })}</div>`
-    : ''
-  const noAgents = agents.length === 0
-
+  const scenario = sessionScenarioCopy(SESSION_SCENARIOS.find(item => item.id === scenarioId) || SESSION_SCENARIOS[0])
+  const agents = sortAgentsByPriority(state.agents.filter(agent => agent.kind === 'local' && agent.status === 'ready')).slice(0, 6)
+  const selectedCount = Math.min(3, agents.length)
   showModal(`
-    <div class="modal-card">
+    <div class="modal-card session-create-modal">
       <div class="modal-head">
-        <div>
-          <h3>${t('newSession.title')}</h3>
-          <p>${t('newSession.desc')}</p>
-        </div>
+        <div><h3>${scenario.title}</h3><p>${scenario.description}</p></div>
         <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
       </div>
-      ${templateBadge}
-      ${noAgents ? `
-        <div class="template-empty-agents" style="margin-bottom: 20px;">
-          <span>${t('newSession.noAgents')}</span>
-          <button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">${t('newSession.addOneFirst')}</button>
-        </div>
-      ` : ''}
       <form onsubmit="window.createSession(event)">
-        <input type="hidden" name="templateId" value="${escapeAttr(template?.id || 'custom')}">
-        <div class="form-row">
-          <div class="form-group">
-            <label>${t('newSession.agentA')}</label>
-            <select class="input" name="from" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultFrom)}</select>
-          </div>
-          <div class="form-group">
-            <label>${t('newSession.agentB')} <span class="field-hint">${t('newSession.agentBHint')}</span></label>
-            <select class="input" name="to" required ${noAgents ? 'disabled' : ''}>${optionHtml(defaultTo)}</select>
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>${t('newSession.mode')}</label>
-            <select class="input" name="mode">
-              <option value="collaborate" ${mode === 'collaborate' ? 'selected' : ''}>${t('newSession.mode.collaborate')}</option>
-              <option value="discuss" ${mode === 'discuss' ? 'selected' : ''}>${t('newSession.mode.discuss')}</option>
-              <option value="review" ${mode === 'review' ? 'selected' : ''}>${t('newSession.mode.review')}</option>
-              <option value="freeform" ${mode === 'freeform' ? 'selected' : ''}>${t('newSession.mode.freeform')}</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>${t('newSession.maxTurns')}</label>
-            <input class="input" type="number" name="maxRounds" min="1" value="${maxRounds}">
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>${t('newSession.systemPromptA')}</label>
-            <textarea class="input" name="systemPromptFrom" rows="4">${escapeHtml(prompts.from)}</textarea>
-          </div>
-          <div class="form-group">
-            <label>${t('newSession.systemPromptB')}</label>
-            <textarea class="input" name="systemPromptTo" rows="4">${escapeHtml(prompts.to)}</textarea>
-          </div>
-        </div>
+        <input type="hidden" name="scenario" value="${escapeAttr(scenario.id)}">
         <div class="form-group">
-          <label>${t('newSession.workingDir')}</label>
-          <input class="input" name="cwd" placeholder="${t('newSession.workingDirPlaceholder')}">
+          <label>${t('newSession.participants')} <span class="field-hint">${t('newSession.participantsHint')}</span></label>
+          <div class="session-participant-list">
+            ${agents.map((agent, index) => {
+              const selected = index < selectedCount
+              const moderator = index === selectedCount - 1
+              const defaultRole = moderator ? t('newSession.roleModerator') : index === 0 ? t('newSession.roleProposer') : t('newSession.roleReviewer')
+              return `<div class="session-participant ${selected ? 'selected' : ''}" data-agent="${escapeAttr(agent.name)}">
+                <label class="session-participant-select"><input type="checkbox" name="selected" ${selected ? 'checked' : ''} onchange="window.syncSessionParticipantRow(this)"><strong>${escapeHtml(agent.name)}</strong></label>
+                <input class="input participant-role" name="role" value="${defaultRole}" ${selected ? '' : 'disabled'} aria-label="${escapeAttr(agent.name)} role">
+                <label class="moderator-choice"><input type="radio" name="moderator" value="${escapeAttr(agent.name)}" ${moderator ? 'checked' : ''} ${selected ? '' : 'disabled'}> ${t('newSession.moderator')}</label>
+              </div>`
+            }).join('')}
+          </div>
         </div>
-        <div class="form-group">
-          <label>${t('newSession.permissionMode')}</label>
-          <select class="input" name="permissionMode">
-            <option value="safe">${t('newSession.permissionSafe')}</option>
-            <option value="trusted">${t('newSession.permissionTrusted')}</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>${t('newSession.prompt')}</label>
-          <textarea class="input" name="prompt" rows="5" required placeholder="${t('newSession.promptPlaceholder')}"></textarea>
+        <div class="form-group"><label>${t('newSession.topic')}</label><textarea class="input" name="prompt" rows="6" required placeholder="${t('newSession.topicPlaceholder')}"></textarea></div>
+        <div class="form-row">
+          <div class="form-group"><label>${t('newSession.maxTurns')}</label><input class="input" type="number" name="maxRounds" min="1" max="10" value="3"></div>
         </div>
         <details class="context-details">
           <summary>${t('newSession.context')}</summary>
-          <div class="form-group">
-            <label>${t('newSession.contextRules')}</label>
-            <textarea class="input" name="contextRules" rows="3"></textarea>
-          </div>
-          <div class="form-group">
-            <label>${t('newSession.contextBackground')}</label>
-            <textarea class="input" name="contextText" rows="3"></textarea>
-          </div>
-          <div class="form-group">
-            <label>${t('newSession.contextFiles')}</label>
-            <textarea class="input" name="contextFiles" rows="2" placeholder="${t('newSession.contextFilesPlaceholder')}"></textarea>
-          </div>
+          <div class="form-group"><label>${t('newSession.contextRules')}</label><textarea class="input" name="contextRules" rows="3"></textarea></div>
+          <div class="form-group"><label>${t('newSession.contextBackground')}</label><textarea class="input" name="contextText" rows="4"></textarea></div>
         </details>
-        <label class="check-row">
-          <input type="checkbox" name="approveMode">
-          <span>${t('newSession.approveMode')}</span>
-        </label>
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" onclick="window.showTemplateGalleryModal()">${t('newSession.back')}</button>
-          <button type="submit" class="btn btn-primary" ${noAgents ? 'disabled' : ''}>${t('newSession.create')}</button>
+          <button type="submit" class="btn btn-primary">${t('newSession.create')}</button>
         </div>
       </form>
     </div>
   `)
 }
 
+window.syncSessionParticipantRow = function(input) {
+  const row = input.closest('.session-participant')
+  row.classList.toggle('selected', input.checked)
+  row.querySelector('.participant-role').disabled = !input.checked
+  const moderator = row.querySelector('.moderator-choice input')
+  moderator.disabled = !input.checked
+  if (!input.checked && moderator.checked) moderator.checked = false
+}
+
 window.createSession = async function(e) {
   e.preventDefault()
-  const fd = new FormData(e.target)
+  const form = e.target
+  const fd = new FormData(form)
+  const moderatorName = String(fd.get('moderator') || '')
+  const participants = [...form.querySelectorAll('.session-participant')]
+    .filter(row => row.querySelector('input[name="selected"]').checked)
+    .map(row => ({
+      agent: { adapter: row.dataset.agent },
+      role: row.querySelector('.participant-role').value.trim(),
+      moderator: row.dataset.agent === moderatorName,
+    }))
+  if (participants.length < 2 || participants.length > 6) return showToast(t('newSession.validation.participants'))
+  if (!moderatorName || participants.filter(item => item.moderator).length !== 1) return showToast(t('newSession.validation.moderator'))
+  if (participants.some(item => !item.role)) return showToast(t('newSession.validation.roles'))
   const context = buildContextFromForm(fd)
-  const systemPromptFrom = String(fd.get('systemPromptFrom') || '').trim()
-  const systemPromptTo = String(fd.get('systemPromptTo') || '').trim()
-  const cwd = String(fd.get('cwd') || '').trim()
-  const toName = String(fd.get('to') || '')
-  if (cwd && !agentHasFilesystem(toName)) {
-    showToast(t('session.toast.cwdRequiresFilesystem'))
-    return
-  }
-  const body = {
-    from: { adapter: fd.get('from') },
-    to: { adapter: fd.get('to') },
-    initialPrompt: String(fd.get('prompt') || '').trim(),
-    template_id: String(fd.get('templateId') || '').trim() || undefined,
-    mode: fd.get('mode') || state.config?.defaults?.mode || 'collaborate',
-    maxRounds: parseInt(fd.get('maxRounds')) || state.config?.defaults?.maxRounds || 5,
-    approveMode: fd.get('approveMode') === 'on',
-    permissionMode: fd.get('permissionMode') || 'safe',
-    cwd: cwd || undefined,
-    context,
-  }
-  if (systemPromptFrom && systemPromptTo) {
-    body.systemPrompts = { from: systemPromptFrom, to: systemPromptTo }
-  }
-
   try {
-    const session = await api('/api/sessions', 'POST', body)
+    const session = await api('/api/sessions', 'POST', {
+      scenario: fd.get('scenario'),
+      participants,
+      initialPrompt: String(fd.get('prompt') || '').trim(),
+      maxRounds: parseInt(fd.get('maxRounds')) || 3,
+      context,
+    })
     closeModal()
     navigate(`/session/${session.id}`)
   } catch (err) {
@@ -7775,23 +7701,22 @@ function buildContextFromForm(fd) {
 
 function renderSessionCreationDetails(session) {
   const initialPrompt = sessionInitialPrompt()
+  const participantRows = session.scenario
+    ? (session.participants || []).map(participant => `<div class="panel-kv-row"><span class="kv-label">${escapeHtml(agentLabel(participant.agent))}</span><span class="kv-value">${escapeHtml(participant.role)}${participant.moderator ? ' · 主持人' : ''}</span></div>`).join('')
+    : `
+      <div class="panel-kv-row"><span class="kv-label">${t('session.agentA')}</span><span class="kv-value">${escapeHtml(agentLabel(session.from))}</span></div>
+      <div class="panel-kv-row"><span class="kv-label">${t('session.agentB')}</span><span class="kv-value">${escapeHtml(agentLabel(session.to))}</span></div>
+    `
   return `
     <div class="divider"></div>
     <details class="creation-details">
       <summary>${t('session.creationParams')}</summary>
       <div class="panel-kv creation-kv">
-        <div class="panel-kv-row"><span class="kv-label">${t('session.agentA')}</span><span class="kv-value">${escapeHtml(agentLabel(session.from))}</span></div>
-        <div class="panel-kv-row"><span class="kv-label">${t('session.agentB')}</span><span class="kv-value">${escapeHtml(agentLabel(session.to))}</span></div>
-        <div class="panel-kv-row"><span class="kv-label">${t('session.mode')}</span><span class="kv-value">${escapeHtml(session.mode)}</span></div>
+        <div class="panel-kv-row"><span class="kv-label">场景</span><span class="kv-value">${escapeHtml(sessionScenarioLabel(session))}</span></div>
+        ${participantRows}
         <div class="panel-kv-row"><span class="kv-label">${t('session.maxTurnsLabel')}</span><span class="kv-value">${escapeHtml(session.maxRounds)}</span></div>
-        <div class="panel-kv-row"><span class="kv-label">${t('session.approve')}</span><span class="kv-value">${session.approveMode ? 'on' : 'off'}</span></div>
-        <div class="panel-kv-row"><span class="kv-label">${t('session.permission')}</span><span class="kv-value">${escapeHtml(session.permissionMode || 'safe')}</span></div>
-        ${session.templateId ? `<div class="panel-kv-row"><span class="kv-label">${t('session.template')}</span><span class="kv-value">${escapeHtml(session.templateId)}</span></div>` : ''}
-        ${session.cwd ? `<div class="panel-kv-row"><span class="kv-label">${t('session.cwd')}</span><span class="kv-value mono">${escapeHtml(session.cwd)}</span></div>` : ''}
       </div>
       ${renderPromptBlock(t('session.initialPrompt'), initialPrompt)}
-      ${renderPromptBlock(t('newSession.systemPromptA'), session.systemPrompts?.from)}
-      ${renderPromptBlock(t('newSession.systemPromptB'), session.systemPrompts?.to)}
       ${renderContextDetails(session.context)}
     </details>
   `
@@ -8105,12 +8030,19 @@ async function copyText(content) {
 }
 
 function buildSessionExport(session, messages) {
+  const participants = session.participants || []
+  const heading = session.scenario
+    ? `${sessionScenarioLabel(session)} · ${participants.map(item => agentLabel(item.agent)).join(', ')}`
+    : `${agentLabel(session.from)} -> ${agentLabel(session.to)}`
   const lines = [
-    `# ${agentLabel(session.from)} -> ${agentLabel(session.to)}`,
+    `# ${heading}`,
     '',
     `- Session ID: ${session.id}`,
     `- Status: ${session.status}`,
-    `- Mode: ${session.mode}`,
+    ...(session.scenario ? [
+      `- Scenario: ${sessionScenarioLabel(session)}`,
+      `- Participants: ${participants.map(item => `${agentLabel(item.agent)} (${item.role}${item.moderator ? ', moderator' : ''})`).join('; ')}`,
+    ] : [`- Mode: ${session.mode}`]),
     `- Turns: ${session.currentRound}/${session.maxRounds}`,
     `- Exported At: ${new Date().toLocaleString()}`,
     '',

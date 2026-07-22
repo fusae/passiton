@@ -12,6 +12,8 @@ import type {
   AgentRef,
   SessionStatus,
   SessionMode,
+  SessionScenario,
+  SessionParticipant,
   SessionContext,
   SessionArtifacts,
   RoundMetadata,
@@ -212,6 +214,9 @@ function createTables(): void {
       cwd          TEXT,
       context      TEXT,
       system_prompts TEXT,
+      scenario      TEXT,
+      participants  TEXT,
+      next_participant_index INTEGER NOT NULL DEFAULT 0,
       template_id  TEXT,
       git_snapshot TEXT,
       artifacts    TEXT,
@@ -374,6 +379,15 @@ function createTables(): void {
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE sessions ADD COLUMN system_prompts TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN scenario TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN participants TEXT`)
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE sessions ADD COLUMN next_participant_index INTEGER NOT NULL DEFAULT 0`)
   } catch { /* column already exists */ }
   try {
     db.exec(`ALTER TABLE sessions ADD COLUMN template_id TEXT`)
@@ -869,6 +883,10 @@ function rowToSession(row: Record<string, unknown>): Session {
   if (row.artifacts) {
     try { artifacts = JSON.parse(row.artifacts as string) } catch { /* ignore */ }
   }
+  let participants: SessionParticipant[] | undefined
+  if (row.participants) {
+    try { participants = JSON.parse(row.participants as string) } catch { /* ignore */ }
+  }
   return {
     id: row.id as string,
     userId: row.user_id as string | undefined,
@@ -885,6 +903,9 @@ function rowToSession(row: Record<string, unknown>): Session {
     cwd: row.cwd as string | undefined,
     context,
     systemPrompts,
+    scenario: row.scenario as SessionScenario | undefined,
+    participants,
+    nextParticipantIndex: (row.next_participant_index as number | undefined) ?? 0,
     templateId: row.template_id as string | undefined,
     gitSnapshot: row.git_snapshot as string | undefined,
     artifacts,
@@ -907,6 +928,9 @@ export function createSession(params: {
   mode?: SessionMode
   context?: SessionContext
   systemPrompts?: { from: string; to: string }
+  scenario?: SessionScenario
+  participants?: SessionParticipant[]
+  nextParticipantIndex?: number
   templateId?: string
   gitSnapshot?: string
   artifacts?: SessionArtifacts
@@ -919,9 +943,10 @@ export function createSession(params: {
   const now = Date.now()
   const stmt = db.prepare(`
     INSERT INTO sessions (id, user_id, idempotency_key, from_adapter, from_label, to_adapter, to_label,
-      status, mode, next_turn, max_rounds, current_round, approve_mode, permission_mode, cwd, context, system_prompts, template_id,
+      status, mode, next_turn, max_rounds, current_round, approve_mode, permission_mode, cwd, context, system_prompts,
+      scenario, participants, next_participant_index, template_id,
       git_snapshot, artifacts, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   stmt.run(
     params.id,
@@ -939,6 +964,9 @@ export function createSession(params: {
     params.cwd ?? null,
     params.context ? JSON.stringify(clampSessionContext(params.context) ?? params.context) : null,
     params.systemPrompts ? JSON.stringify(params.systemPrompts) : null,
+    params.scenario ?? null,
+    params.participants ? JSON.stringify(params.participants) : null,
+    params.nextParticipantIndex ?? 0,
     params.templateId ?? null,
     params.gitSnapshot ?? null,
     params.artifacts ? JSON.stringify(params.artifacts) : null,
@@ -960,7 +988,7 @@ export function getSessionByIdempotencyKey(userId: string, idempotencyKey: strin
   return row ? rowToSession(row) : undefined
 }
 
-export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'from' | 'to' | 'currentRound' | 'maxRounds' | 'approveMode' | 'permissionMode' | 'nextTurn' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount' | 'context' | 'systemPrompts' | 'gitSnapshot' | 'artifacts'>>, userId?: string): Session {
+export function updateSession(id: string, updates: Partial<Pick<Session, 'status' | 'from' | 'to' | 'currentRound' | 'maxRounds' | 'approveMode' | 'permissionMode' | 'nextTurn' | 'scenario' | 'participants' | 'nextParticipantIndex' | 'errorType' | 'errorRound' | 'errorMessage' | 'lastAgentOutput' | 'resumeCount' | 'context' | 'systemPrompts' | 'gitSnapshot' | 'artifacts'>>, userId?: string): Session {
   const fields: string[] = ['updated_at = ?']
   const values: unknown[] = [Date.now()]
 
@@ -974,6 +1002,9 @@ export function updateSession(id: string, updates: Partial<Pick<Session, 'status
     values.push(updates.to.adapter, updates.to.label ?? null)
   }
   if (updates.nextTurn !== undefined) { fields.push('next_turn = ?'); values.push(updates.nextTurn) }
+  if (updates.scenario !== undefined) { fields.push('scenario = ?'); values.push(updates.scenario) }
+  if (updates.participants !== undefined) { fields.push('participants = ?'); values.push(JSON.stringify(updates.participants)) }
+  if (updates.nextParticipantIndex !== undefined) { fields.push('next_participant_index = ?'); values.push(updates.nextParticipantIndex) }
   if (updates.currentRound !== undefined) { fields.push('current_round = ?'); values.push(updates.currentRound) }
   if (updates.maxRounds !== undefined) { fields.push('max_rounds = ?'); values.push(updates.maxRounds) }
   if (updates.approveMode !== undefined) { fields.push('approve_mode = ?'); values.push(updates.approveMode ? 1 : 0) }
@@ -1064,6 +1095,7 @@ const SESSION_SLIM_COLUMNS = [
   'id', 'user_id', 'idempotency_key',
   'from_adapter', 'from_label', 'to_adapter', 'to_label',
   'status', 'mode', 'next_turn', 'max_rounds', 'current_round',
+  'scenario', 'participants', 'next_participant_index',
   'approve_mode', 'permission_mode', 'cwd', 'template_id',
   'error_type', 'error_round', 'error_message', 'last_agent_output',
   'resume_count', 'created_at', 'updated_at',

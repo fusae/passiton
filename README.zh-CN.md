@@ -2,13 +2,13 @@
 
 [English](./README.md)
 
-Passiton 是一个本地优先的控制台，用来编排你已经装好的 CLI 编程 agent——Claude Code、Codex、Gemini 等。跑单个任务、两个 agent 协作、或带人工审核的多步工作流。既能在 Web UI 里手动操作，也能完全通过自描述的 HTTP API 交给另一个 AI 来驱动。
+Passiton 是一个本地优先的 CLI Agent 控制台：Task 负责执行，多 Agent Session 负责决策，Workflow 负责编排，并支持人工审核。
 
 ![Agent handoff demo: a task fails on one agent and is continued by another, which verifies the workspace and finishes only the remaining work](https://raw.githubusercontent.com/fusae/passiton/main/docs/assets/handoff-demo.gif)
 
 ## 核心能力
 
-- **Task / Session / Workflow**：运行单 agent、让两个 agent 协作，或把多步骤任务串成带依赖和审批的工作流。
+- **Task / Session / Workflow**：Task 执行具体工作；多人 Session 用于方案竞赛、联合评审、问题会诊和设计讨论；Workflow 用依赖和审批编排两者。
 - **UI 或 API 操作**：创建 agents、分派任务、运行 workflows、handoff 失败任务等所有操作，都可在 Web UI 中完成，也可通过 AI operator 能驱动的自描述 HTTP API（`GET /api/docs`）完成。
 - **任意 CLI agent**：Claude Code、Codex、Gemini CLI 和 OpenCode 会自动发现、自动配置并自动验证；其他 agent（aider、goose、qwen-code 等）可在 UI 中注册为 custom CLI agent，也可通过 `POST /api/config/agents` 注册。
 - **Agent priority**：Settings 中用箭头调整顺序即可设置优先级；未显式指定 agent 的任务会分派给优先级最高的可用 agent。
@@ -54,6 +54,19 @@ npm test
 6. 未被自动发现的 agent 可在 `Settings` → `Agents` → `Add custom agent` 中添加为 custom CLI agent，也可用 `POST /api/config/agents` 和 adapter `custom-cli` 添加；详见 [Community adapters](./docs/community-adapters.md)。
 
 带 `cwd` 的任务需要具备文件系统能力的本地 CLI agent。API assistant 可以规划和评审，但不能直接读写本地文件。
+
+## 多 Agent Session
+
+Session 是决策室，不是执行任务。选择 2–6 个 Ready Agent，为每个 Agent 指定角色，并指定唯一主持人；参与者按轮次发言，最后由主持人输出结构化结论，再交给 Task 或 Workflow 执行。
+
+场景包括：
+
+- `proposal`：各自提出方案，比较后选出方向
+- `panel_review`：从产品、技术、风险等角度联合评审
+- `diagnosis`：基于证据验证假设并收敛根因
+- `design`：讨论架构与产品取舍，形成明确决策
+
+Session 默认只讨论、不写文件；需要改代码、运行命令、测试或提交时使用 Task。
 
 Windows 自定义 Agent 应优先填写 `.exe`、npm 生成的 `.ps1`，或 `node.exe + CLI JavaScript 入口`；Passiton 会把带有同名 `.ps1` 的 `.cmd` 自动切换到 PowerShell shim，避免多行 Prompt 被 `cmd.exe` 拆分。
 

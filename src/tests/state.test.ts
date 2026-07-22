@@ -159,7 +159,7 @@ test('task persists permission mode and idempotency key', () => {
   }
 })
 
-test('session persists idempotency key', () => {
+test('session persists meeting scenario, participants, and idempotency key', () => {
   const dir = mkdtempSync(join(tmpdir(), 'turing-state-'))
 
   try {
@@ -170,10 +170,20 @@ test('session persists idempotency key', () => {
       idempotencyKey: 'session-key-1',
       from: { adapter: 'opencode' },
       to: { adapter: 'codex' },
+      scenario: 'panel_review',
+      participants: [
+        { agent: { adapter: 'opencode' }, role: 'reviewer' },
+        { agent: { adapter: 'codex' }, role: 'moderator', moderator: true },
+      ],
+      nextParticipantIndex: 1,
     })
 
     assert.equal(session.idempotencyKey, 'session-key-1')
-    assert.equal(state.getSessionByIdempotencyKey('local', 'session-key-1')?.id, 'idem-session')
+    const persisted = state.getSessionByIdempotencyKey('local', 'session-key-1')
+    assert.equal(persisted?.id, 'idem-session')
+    assert.equal(persisted?.scenario, 'panel_review')
+    assert.equal(persisted?.nextParticipantIndex, 1)
+    assert.deepEqual(persisted?.participants?.map((item) => item.agent.adapter), ['opencode', 'codex'])
   } finally {
     state.closeDb()
     rmSync(dir, { recursive: true, force: true })

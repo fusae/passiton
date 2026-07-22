@@ -1,6 +1,6 @@
 // Prompts module — system prompt templates for each session mode
 
-import type { SessionMode, AgentRef, SessionContext, SessionContextFile } from './types.js'
+import type { SessionMode, SessionScenario, SessionParticipant, AgentRef, SessionContext, SessionContextFile } from './types.js'
 
 // ── Context clamping ──────────────────────────────────────────────────────────
 
@@ -169,6 +169,52 @@ export function generateTaskSystemPrompt(context?: SessionContext): string {
     `When the task is complete, wrap your final result or summary in [RESULT]...[/RESULT] tags.`,
     PROGRESS_OUTPUT_GUIDANCE,
     formatContextBlock(context),
+  ].filter(Boolean).join('\n')
+}
+
+const SCENARIO_INSTRUCTIONS: Record<SessionScenario, string> = {
+  proposal: 'Produce a distinct proposal, compare alternatives fairly, and optimize for the stated goal rather than consensus for its own sake.',
+  panel_review: 'Review the submitted work from your assigned professional perspective. Cite concrete strengths, risks, and required changes.',
+  diagnosis: 'Form and test hypotheses using available evidence. Separate observed facts from inference and converge on the most likely root cause.',
+  design: 'Explore design choices and trade-offs. Challenge assumptions and converge on a decision that can be handed to an execution Task.',
+}
+
+export function generateMeetingSystemPrompt(
+  scenario: SessionScenario,
+  participant: SessionParticipant,
+  participants: SessionParticipant[],
+  task: string,
+  context?: SessionContext
+): string {
+  const name = participant.agent.label || participant.agent.adapter
+  const roster = participants
+    .map((item) => `- ${item.agent.label || item.agent.adapter}: ${item.role}${item.moderator ? ' (moderator)' : ''}`)
+    .join('\n')
+  const moderatorGuidance = participant.moderator
+    ? [
+        'You are the moderator and final synthesizer.',
+        'After the other participants have contributed, resolve conflicts and produce a decision-oriented final synthesis.',
+        'Your final synthesis must contain: Final Decision, Alternatives Considered, Disagreements and Risks, Recommended Actions.',
+        'Only when the discussion has genuinely converged, wrap the synthesis in [RESULT]...[/RESULT] and end with [DONE].',
+      ].join('\n')
+    : [
+        'Do not act as the final moderator.',
+        'Give a substantive contribution from your assigned role, respond to prior participants, and expose unresolved trade-offs.',
+        'Do not use [DONE].',
+      ].join('\n')
+
+  return [
+    `You are "${name}" in a Passiton multi-agent decision session.`,
+    `Your assigned role is: ${participant.role}.`,
+    `Scenario: ${scenario}.`,
+    SCENARIO_INSTRUCTIONS[scenario],
+    'This Session is for reasoning and decision-making, not implementation. Do not edit files, run destructive commands, commit, publish, or claim execution.',
+    'Address concrete points from the shared conversation and avoid repeating earlier contributions.',
+    moderatorGuidance,
+    HUMAN_SUMMON_PROTOCOL,
+    `Participants:\n${roster}`,
+    formatContextBlock(context),
+    `## Shared question\n${task}`,
   ].filter(Boolean).join('\n')
 }
 
