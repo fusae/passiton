@@ -756,6 +756,7 @@ export function createTask(params: {
   idempotencyKey?: string
   agent: AgentRef
   prompt: string
+  status?: TaskStatus
   permissionMode?: Task['permissionMode']
   cwd?: string
   context?: SessionContext
@@ -767,7 +768,7 @@ export function createTask(params: {
     INSERT INTO tasks (
       id, user_id, idempotency_key, agent_adapter, agent_label, prompt, status, permission_mode, cwd, context, system_prompt, metadata, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     params.id,
     params.userId ?? DEFAULT_USER_ID,
@@ -775,6 +776,7 @@ export function createTask(params: {
     params.agent.adapter,
     params.agent.label ?? null,
     params.prompt,
+    params.status ?? 'queued',
     params.permissionMode ?? 'safe',
     params.cwd ?? null,
     params.context ? JSON.stringify(clampSessionContext(params.context) ?? params.context) : null,

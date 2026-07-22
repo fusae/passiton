@@ -387,6 +387,7 @@ const MESSAGES = {
     'task_restart': '↻ Restart',
     'task_feedback_rerun': '✎ Feedback & Rerun',
     'task_status_running': 'Running',
+    'task_status_draft': 'Draft',
     'task_status_queued': 'Queued',
     'task_status_done': 'Completed',
     'task_status_error': 'Failed',
@@ -556,6 +557,16 @@ const MESSAGES = {
     'session.maxTurnsLabel': 'Max Turns',
     'session.approve': 'Approve',
     'session.initialPrompt': 'Initial Prompt',
+    'session.createTaskDraft': 'Create Task',
+    'session.taskDraft.title': 'Create Task from Session',
+    'session.taskDraft.desc': 'Review the selected action first. The Task will be saved as a draft and will not run until you start it.',
+    'session.taskDraft.action': 'Action to execute',
+    'session.taskDraft.actionPlaceholder': 'Implement the final decision and recommended actions.',
+    'session.taskDraft.create': 'Create Draft',
+    'session.taskDraft.created': 'Task draft created',
+    'task.startDraft': 'Start Task',
+    'task.sourceSession': 'Source Session',
+    'task.permissionMode': 'Permission Mode',
 
     // Session — live status helpers
     'session.status.processing': 'Processing…',
@@ -1073,6 +1084,7 @@ const MESSAGES = {
     'task_restart': '↻ 重启',
     'task_feedback_rerun': '✎ 反馈并重跑',
     'task_status_running': '运行中',
+    'task_status_draft': '草稿',
     'task_status_queued': '排队中',
     'task_status_done': '已完成',
     'task_status_error': '失败',
@@ -1242,6 +1254,16 @@ const MESSAGES = {
     'session.maxTurnsLabel': '最大轮次',
     'session.approve': '审批',
     'session.initialPrompt': '初始提示词',
+    'session.createTaskDraft': '创建任务',
+    'session.taskDraft.title': '从 Session 创建 Task',
+    'session.taskDraft.desc': '先确认执行内容。Task 将保存为草稿，只有点击启动后才会运行。',
+    'session.taskDraft.action': '要执行的行动',
+    'session.taskDraft.actionPlaceholder': '落实最终决策及建议行动。',
+    'session.taskDraft.create': '创建草稿',
+    'session.taskDraft.created': 'Task 草稿已创建',
+    'task.startDraft': '启动任务',
+    'task.sourceSession': '来源 Session',
+    'task.permissionMode': '权限模式',
 
     // Session — live status helpers
     'session.status.processing': '处理中…',
@@ -3441,6 +3463,12 @@ async function renderTask(id) {
 }
 
 function renderTaskActions(task) {
+  if (task.status === 'draft') {
+    return `
+      <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">${t('task_ask_ops')}</button>
+      <button class="btn btn-primary btn-sm" onclick="window.startCurrentTask()">${t('task.startDraft')}</button>
+    `
+  }
   if (task.status === 'queued' || task.status === 'running') {
     const handoffButton = task.status === 'running'
       ? `<button class="btn btn-primary btn-sm" onclick="window.showTaskHandoffModal()">${t('handoff_running_button')}</button>`
@@ -3601,6 +3629,7 @@ function renderTaskContent(task) {
         <div class="panel-kv-row"><span class="kv-label">${t('task_info_agent')}</span><span class="kv-value">${escapeHtml(agentLabel(task.agent))}</span></div>
         <div class="panel-kv-row"><span class="kv-label">${t('task_info_status')}</span><span class="badge ${taskBadgeClass(task.status)}">${escapeHtml(taskStatusLabel(task.status))}</span></div>
         ${task.metadata?.continuedFromTaskId ? `<div class="panel-kv-row"><span class="kv-label">${t('handoff_source')}</span><span class="kv-value mono">${escapeHtml(String(task.metadata.continuedFromTaskId).slice(0, 8))}</span></div>` : ''}
+        ${task.metadata?.sourceSessionId ? `<div class="panel-kv-row"><span class="kv-label">${t('task.sourceSession')}</span><a class="kv-value mono" href="/session/${encodeURIComponent(task.metadata.sourceSessionId)}">${escapeHtml(String(task.metadata.sourceSessionId).slice(0, 8))}</a></div>` : ''}
         <div class="panel-kv-row"><span class="kv-label">${t('task_info_created')}</span><span class="kv-value">${new Date(task.createdAt).toLocaleString()}</span></div>
         ${task.startedAt ? `<div class="panel-kv-row"><span class="kv-label">${t('task_info_started')}</span><span class="kv-value">${new Date(task.startedAt).toLocaleString()}</span></div>` : ''}
         ${task.finishedAt ? `<div class="panel-kv-row"><span class="kv-label">${t('task_info_finished')}</span><span class="kv-value">${new Date(task.finishedAt).toLocaleString()}</span></div>` : ''}
@@ -3614,7 +3643,11 @@ function renderTaskContent(task) {
           <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="window.showTaskHandoffModal()">${t('handoff_running_button')}</button>
         </div>
       ` : ''}
-      ${task.status !== 'queued' && task.status !== 'running' ? `
+      ${task.status === 'draft' ? `
+        <div class="divider"></div>
+        <button class="btn btn-primary btn-sm" style="width: 100%;" onclick="window.startCurrentTask()">${t('task.startDraft')}</button>
+      ` : ''}
+      ${task.status !== 'draft' && task.status !== 'queued' && task.status !== 'running' ? `
         <div class="divider"></div>
         <div style="display: grid; gap: 10px;">
           <button class="btn btn-secondary btn-sm" style="width: 100%;" onclick="window.restartCurrentTask()">${t('task_restart')}</button>
@@ -4755,12 +4788,78 @@ function renderSessionActions(session) {
   return `
     <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">${t('session.askOps')}</button>
     <button class="btn btn-secondary btn-sm" onclick="window.exportCurrentSession()">${t('session.export')}</button>
+    ${session.status === 'done' ? `<button class="btn btn-primary btn-sm" onclick="window.showSessionTaskDraftModal()">${t('session.createTaskDraft')}</button>` : ''}
     ${session.status === 'active' ? `<button class="btn btn-secondary btn-sm" onclick="window.extendSessionTimeout()">${t('session.extend')}</button>` : ''}
     ${session.status === 'active' ? `<button class="btn btn-secondary btn-sm" onclick="window.pauseSession()">${t('session.pause')}</button>` : ''}
     ${session.status === 'paused' ? `<button class="btn btn-primary btn-sm" onclick="window.resumeSession()">${t('session.resume')}</button>` : ''}
     ${session.status === 'error' ? `<button class="btn btn-primary btn-sm" onclick="window.resumeSession()">${t('session.retry')}</button>` : ''}
     ${session.status === 'active' || session.status === 'paused' ? `<button class="btn btn-danger btn-sm" onclick="window.stopSession()">${t('session.stop')}</button>` : ''}
   `
+}
+
+window.showSessionTaskDraftModal = async function() {
+  const session = state.currentSession
+  if (!session || session.status !== 'done') return
+  if (!state.agents.length) await loadAgents()
+  const accepted = sortAgentsByPriority(state.agents.filter(agent => agent.kind === 'local' && taskAgentAccepted(agent)))
+  const ready = accepted.filter(agent => agent.status === 'ready')
+  const agents = ready.length ? ready : accepted.filter(agent => agent.status === 'unverified')
+  const options = `<option value="__auto__">${t('task_modal_auto_agent')}</option>${agentOptionHtml(agents)}`
+  showModal(`
+    <div class="modal-card">
+      <div class="modal-head">
+        <div><h3>${t('session.taskDraft.title')}</h3><p>${t('session.taskDraft.desc')}</p></div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
+      </div>
+      <form onsubmit="window.createTaskDraftFromSession(event)">
+        <div class="form-group">
+          <label>${t('task_agent')}</label>
+          <select class="input" name="agent">${options}</select>
+        </div>
+        <div class="form-group">
+          <label>${t('session.taskDraft.action')}</label>
+          <textarea class="input" name="action" rows="5" placeholder="${t('session.taskDraft.actionPlaceholder')}"></textarea>
+        </div>
+        <div class="form-group">
+          <label>${t('task_modal_working_dir')}</label>
+          <input class="input" name="cwd" placeholder="${t('task_modal_working_dir_placeholder')}">
+        </div>
+        <div class="form-group">
+          <label>${t('task.permissionMode')}</label>
+          <select class="input" name="permissionMode">
+            <option value="safe">safe</option>
+            <option value="trusted">trusted</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="window.closeModal()">${t('common.cancel')}</button>
+          <button type="submit" class="btn btn-primary">${t('session.taskDraft.create')}</button>
+        </div>
+      </form>
+    </div>
+  `)
+}
+
+window.createTaskDraftFromSession = async function(e) {
+  e.preventDefault()
+  const session = state.currentSession
+  if (!session) return
+  const fd = new FormData(e.target)
+  const agentName = String(fd.get('agent') || '')
+  const body = compactObject({
+    agent: agentName && agentName !== '__auto__' ? { adapter: agentName } : undefined,
+    action: String(fd.get('action') || '').trim() || undefined,
+    cwd: String(fd.get('cwd') || '').trim() || undefined,
+    permissionMode: String(fd.get('permissionMode') || 'safe'),
+  })
+  try {
+    const task = await api(`/api/sessions/${encodeURIComponent(session.id)}/task-drafts`, 'POST', body)
+    closeModal()
+    showToast(t('session.taskDraft.created'))
+    navigate(`/task/${task.id}`)
+  } catch (err) {
+    showToast(err.message)
+  }
 }
 
 function renderSessionHeader(session) {
@@ -6645,6 +6744,17 @@ window.rerunTaskWithFeedback = async function(e) {
       submit.disabled = false
       submit.textContent = t('task_feedback_create_new')
     }
+  }
+}
+
+window.startCurrentTask = async function() {
+  const task = state.currentTask
+  if (!task || task.status !== 'draft') return
+  try {
+    const started = await api(`/api/tasks/${encodeURIComponent(task.id)}/start`, 'POST')
+    applyTaskUpdate(started)
+  } catch (err) {
+    showToast(err.message)
   }
 }
 

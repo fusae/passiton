@@ -12,7 +12,7 @@ import WebSocket from 'ws'
 import { Router } from '../router.js'
 import { createServer, recommendationForError, registerPersistedUserAgents } from '../server.js'
 import * as state from '../state.js'
-import type { Adapter, AdapterSendOpts, Session } from '../types.js'
+import type { Adapter, AdapterSendOpts, Session, Task } from '../types.js'
 import { encryptSecret } from '../keyvault.js'
 
 class StubAgentCatalog {
@@ -935,6 +935,109 @@ test('POST /api/sessions requires multiple agents and exactly one moderator', as
       }),
     })
     assert.equal(twoModerators.status, 400)
+  })
+})
+
+test('Session decision creates a Task draft that runs only after explicit start', async () => {
+  let executions = 0
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'session-task-draft@example.com')
+    state.createSession({
+      id: 'decision-session',
+      userId: auth.userId,
+      from: { adapter: 'codex' },
+      to: { adapter: 'opencode' },
+      scenario: 'design',
+      participants: [
+        { agent: { adapter: 'opencode' }, role: 'reviewer' },
+        { agent: { adapter: 'codex' }, role: 'moderator', moderator: true },
+      ],
+      context: { rules: 'Keep compatibility' },
+    })
+    state.addMessage({ id: 'decision-topic', sessionId: 'decision-session', from: 'human', content: 'Choose a cache design', timestamp: 1, round: 0 })
+    state.addMessage({
+      id: 'decision-result',
+      sessionId: 'decision-session',
+      from: 'codex',
+      content: '[RESULT]\n## Final Decision\nUse an LRU cache.\n## Recommended Actions\n1. Add the cache module\n2. Add eviction tests\n[/RESULT]',
+      timestamp: 2,
+      round: 1,
+    })
+    state.updateSession('decision-session', {
+      status: 'done',
+      lastAgentOutput: '[RESULT]\n## Final Decision\nUse an LRU cache.\n## Recommended Actions\n1. Add the cache module\n2. Add eviction tests\n[/RESULT]',
+    }, auth.userId)
+
+    const create = await fetch(`${baseUrl}/api/sessions/decision-session/task-drafts`, {
+      method: 'POST',
+      headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+      body: JSON.stringify({ agent: { adapter: 'codex' }, actionIndex: 2 }),
+    })
+    assert.equal(create.status, 201)
+    const draft = await create.json() as Task
+    assert.equal(draft.status, 'draft')
+    assert.equal(draft.metadata?.sourceSessionId, 'decision-session')
+    assert.match(draft.prompt, /Add eviction tests/)
+    assert.equal(executions, 0)
+
+    const start = await fetch(`${baseUrl}/api/tasks/${draft.id}/start`, {
+      method: 'POST',
+      headers: authHeaders(auth.token),
+    })
+    assert.equal(start.status, 200)
+    assert.equal((await start.json() as Task).status, 'queued')
+    await waitFor(async () => state.getTask(draft.id, auth.userId)?.status === 'done')
+    assert.equal(executions, 1)
+  }, {
+    configureRouter: (router) => {
+      router.registerAdapter(new StubAdapter('codex', async () => {
+        executions += 1
+        return '[RESULT]implemented[/RESULT]'
+      }))
+    },
+  })
+})
+
+test('MCP exposes Session-to-Task draft creation and explicit start', async () => {
+  await withServer(async (baseUrl) => {
+    const auth = await register(baseUrl, 'mcp-session-task-draft@example.com')
+    state.createSession({
+      id: 'mcp-decision-session',
+      userId: auth.userId,
+      from: { adapter: 'codex' },
+      to: { adapter: 'codex' },
+      scenario: 'proposal',
+    })
+    state.addMessage({ id: 'mcp-topic', sessionId: 'mcp-decision-session', from: 'human', content: 'Pick an implementation', timestamp: 1, round: 0 })
+    state.updateSession('mcp-decision-session', { status: 'done', lastAgentOutput: '[RESULT]Use option B.[/RESULT]' }, auth.userId)
+
+    const call = async (id: number, name: string, args: Record<string, unknown>) => {
+      const response = await fetch(`${baseUrl}/mcp`, {
+        method: 'POST',
+        headers: { ...authHeaders(auth.token), 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }),
+      })
+      assert.equal(response.status, 200)
+      const payload = await response.json() as { result: { content: Array<{ text: string }> } }
+      return JSON.parse(payload.result.content[0]!.text) as { task: Task; message: string }
+    }
+
+    const created = await call(1, 'passiton_create_task_from_session', {
+      sessionId: 'mcp-decision-session',
+      agent: 'codex',
+      action: 'Implement option B',
+    })
+    assert.equal(created.task.status, 'draft')
+    assert.match(created.task.prompt, /Implement option B/)
+    assert.match(created.message, /explicit approval/)
+
+    const started = await call(2, 'passiton_start_task', { taskId: created.task.id })
+    assert.equal(started.task.status, 'queued')
+    await waitFor(async () => state.getTask(created.task.id, auth.userId)?.status === 'done')
+  }, {
+    configureRouter: (router) => {
+      router.registerAdapter(new StubAdapter('codex', async () => '[RESULT]done[/RESULT]'))
+    },
   })
 })
 

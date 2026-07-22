@@ -65,7 +65,7 @@ Available scenarios:
 - `diagnosis`: evidence-based hypotheses and root-cause convergence
 - `design`: architecture and product tradeoffs resolved into an actionable decision
 
-Sessions run read-only by design. Use a Task when the requested outcome requires files, commands, tests, or commits.
+Sessions run read-only by design. After a Session completes, **Create Task** converts its decision into a non-running Task draft with the original topic, final decision, context, and selected action. Review the draft, then explicitly start it. HTTP and MCP expose the same two-step flow so AI operators cannot execute a discussion outcome without approval.
 
 On Windows, custom agents should use a native `.exe`, an npm-generated `.ps1` shim, or `node.exe` plus the CLI JavaScript entrypoint. Passiton automatically switches a `.cmd` shim to its matching `.ps1` sibling so `cmd.exe` cannot split multi-line prompts.
 
@@ -168,6 +168,8 @@ Tool names use the `passiton_*` prefix, including:
 - `passiton_create_task`
 - `passiton_get_task_result`
 - `passiton_create_session`
+- `passiton_create_task_from_session`
+- `passiton_start_task`
 - `passiton_send_feedback`
 - `passiton_get_progress`
 - `passiton_create_workflow`

@@ -1178,10 +1178,10 @@ function parseTaskStatus(value: string | null): TaskStatus | null {
   if (value === null) {
     return null
   }
-  if (value === 'queued' || value === 'running' || value === 'done' || value === 'error' || value === 'stopped') {
+  if (value === 'draft' || value === 'queued' || value === 'running' || value === 'done' || value === 'error' || value === 'stopped') {
     return value
   }
-  throw new HttpError(400, '"status" must be one of queued, running, done, error, stopped')
+  throw new HttpError(400, '"status" must be one of draft, queued, running, done, error, stopped')
 }
 
 function parseSessionMode(value: unknown): SessionMode | undefined {
@@ -1368,6 +1368,18 @@ function parseTaskHandoffBody(body: unknown): { agent: AgentRef } {
   }
 }
 
+function parseSessionTaskDraftBody(body: unknown) {
+  const data = requireRecord(body, 'body')
+  return {
+    idempotencyKey: optionalString(data.idempotencyKey, 'idempotencyKey'),
+    agent: data.agent === undefined ? undefined : parseAgentRef(data.agent, 'agent'),
+    action: optionalString(data.action, 'action'),
+    actionIndex: optionalPositiveInt(data.actionIndex, 'actionIndex'),
+    permissionMode: parsePermissionMode(data.permissionMode),
+    cwd: optionalString(data.cwd, 'cwd'),
+  }
+}
+
 async function assertTaskAgentAccepted(userId: string, router: Router, agentCatalog: AgentCatalog, agent: AgentRef, cwd?: string): Promise<void> {
   assertTaskFilesystemCapability(userId, agent, cwd)
   if (router.getAdapter(agent.adapter)) return
@@ -1452,6 +1464,56 @@ export function buildTaskHandoffPrompt(source: Task): string {
     '## Continuation instructions',
     'Verify the current state first (git diff, read the files). Do not redo completed work. Finish only what remains. Report what you found versus what you did.',
   ].filter(Boolean).join('\n')
+}
+
+function sessionFinalDecision(session: Session, messages: Message[]): string {
+  const source = session.lastAgentOutput || [...messages].reverse().find((message) => message.from !== 'human')?.content || ''
+  const tagged = source.match(/\[RESULT\]([\s\S]*?)\[\/RESULT\]/i)?.[1]?.trim()
+  return tagged || source.trim()
+}
+
+function sessionRecommendedActions(decision: string): string[] {
+  const section = decision.match(/(?:^|\n)#{1,6}\s*(?:Recommended Actions|建议行动|推荐行动|后续行动)\s*\n([\s\S]*?)(?=\n#{1,6}\s|$)/i)?.[1] ?? ''
+  return section
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s*)/, '').trim())
+    .filter(Boolean)
+}
+
+export function buildTaskFromSessionPrompt(session: Session, messages: Message[], action?: string, actionIndex?: number): string {
+  const topic = messages.find((message) => message.from === 'human')?.content?.trim() || 'No original topic recorded.'
+  const decision = sessionFinalDecision(session, messages) || 'No final decision was recorded.'
+  const indexedAction = actionIndex ? sessionRecommendedActions(decision)[actionIndex - 1] : undefined
+  const selectedAction = action?.trim() || indexedAction || 'Implement the final decision and its recommended actions.'
+  return [
+    '# Task created from Session decision',
+    '',
+    `Source Session: ${session.id}`,
+    '',
+    '## Original topic',
+    topic,
+    '',
+    '## Final decision',
+    decision,
+    '',
+    '## Selected action',
+    selectedAction,
+    '',
+    '## Execution requirements',
+    '- Implement only the selected action while respecting the final decision and recorded constraints.',
+    '- Verify the result with the most relevant checks available in the working directory.',
+    '- Report changed files, verification evidence, residual risks, and any follow-up work.',
+  ].join('\n')
+}
+
+function taskContextFromSession(session: Session): SessionContext {
+  return {
+    ...(session.context ?? {}),
+    text: [
+      session.context?.text,
+      `[[Passiton Source Session]]\nSession ID: ${session.id}\nScenario: ${session.scenario ?? 'unknown'}\n[[End Passiton Source Session]]`,
+    ].filter(Boolean).join('\n\n'),
+  }
 }
 
 function parseFilePreviewBody(body: unknown): { path: string; cwd?: string } {
@@ -1781,6 +1843,28 @@ function mcpTools(): McpTool[] {
       annotations: { destructiveHint: false },
     },
     {
+      name: 'passiton_create_task_from_session',
+      title: 'Create task draft from Session',
+      description: 'Convert a completed Session decision into a Task draft. This does not execute the Task. Use passiton_start_task only after the user explicitly approves the draft.',
+      inputSchema: objectSchema({
+        sessionId: { type: 'string' },
+        agent: agentSchema('Optional Task agent. Passiton selects the highest-priority usable agent when omitted.'),
+        action: { type: 'string', description: 'Optional explicit action to execute from the Session decision.' },
+        actionIndex: { type: 'integer', description: 'Optional 1-based item from the Recommended Actions section.' },
+        cwd: { type: 'string', description: 'Optional working directory. Required for filesystem work.' },
+        permissionMode: { type: 'string', enum: ['safe', 'trusted'] },
+        idempotencyKey: { type: 'string' },
+      }, ['sessionId']),
+      annotations: { destructiveHint: false },
+    },
+    {
+      name: 'passiton_start_task',
+      title: 'Start approved Task draft',
+      description: 'Start a Task draft created from a Session. Call only after the user explicitly approves execution.',
+      inputSchema: objectSchema({ taskId: { type: 'string' } }, ['taskId']),
+      annotations: { destructiveHint: true },
+    },
+    {
       name: 'passiton_send_feedback',
       title: 'Send feedback to Passiton session',
       description: 'Inject human feedback into a running or paused session and let the agents continue.',
@@ -1839,6 +1923,10 @@ async function callMcpTool(name: string, args: unknown, ctx: McpContext): Promis
       return mcpGetTaskResult(args, ctx)
     case 'passiton_create_session':
       return mcpCreateSession(args, ctx)
+    case 'passiton_create_task_from_session':
+      return mcpCreateTaskFromSession(args, ctx)
+    case 'passiton_start_task':
+      return mcpStartTask(args, ctx)
     case 'passiton_get_session':
       return mcpGetSession(args, ctx)
     case 'passiton_create_workflow':
@@ -2081,6 +2169,53 @@ async function mcpCreateSession(args: unknown, ctx: McpContext): Promise<unknown
   return { session: summarizeSession(session), url: `/sessions/${session.id}`, reused: false }
 }
 
+async function mcpCreateTaskFromSession(args: unknown, ctx: McpContext): Promise<unknown> {
+  const data = requireRecord(args, 'arguments')
+  const sessionId = requireNonEmptyString(data.sessionId, 'sessionId')
+  const session = state.getSession(sessionId, ctx.authUser.userId)
+  if (!session) throw new HttpError(404, 'Session not found')
+  if (session.status !== 'done') throw new HttpError(400, 'Only a completed Session can create a Task draft')
+  const params = parseSessionTaskDraftBody(normalizeTaskArgs(data))
+  assertAllowedWorkspace(params.cwd)
+  assertPermissionModeAllowed(params.permissionMode, params.cwd)
+  const agent = params.agent ?? await selectDefaultTaskAgent(ctx.authUser.userId, ctx.agentCatalog, params.cwd)
+  assertTaskFilesystemCapability(ctx.authUser.userId, agent, params.cwd)
+  await assertMcpAgentUsable(ctx, agent, 'agent')
+  const task = ctx.router.createTaskDraft({
+    userId: ctx.authUser.userId,
+    idempotencyKey: params.idempotencyKey,
+    agent,
+    prompt: buildTaskFromSessionPrompt(session, state.getMessages(session.id), params.action, params.actionIndex),
+    context: taskContextFromSession(session),
+    cwd: params.cwd,
+    permissionMode: params.permissionMode,
+    metadata: { sourceSessionId: session.id, sourceActionIndex: params.actionIndex },
+  })
+  return {
+    task: summarizeTask(task),
+    url: `/tasks/${task.id}`,
+    message: `Task draft ${task.id} created. Review it with the user, then call passiton_start_task only after explicit approval.`,
+  }
+}
+
+async function mcpStartTask(args: unknown, ctx: McpContext): Promise<unknown> {
+  const data = requireRecord(args, 'arguments')
+  const taskId = requireNonEmptyString(data.taskId, 'taskId')
+  const task = state.getTask(taskId, ctx.authUser.userId)
+  if (!task) throw new HttpError(404, 'Task not found')
+  if (task.status !== 'draft') throw new HttpError(400, 'Only a Task draft can be started')
+  assertAllowedWorkspace(task.cwd)
+  assertPermissionModeAllowed(task.permissionMode, task.cwd)
+  assertTaskFilesystemCapability(ctx.authUser.userId, task.agent, task.cwd)
+  await assertMcpAgentUsable(ctx, task.agent, 'agent')
+  const started = ctx.router.startTaskDraft(task.id, ctx.authUser.userId)
+  return {
+    task: summarizeTask(started),
+    url: `/tasks/${started.id}`,
+    message: `Task ${started.id} started. Use passiton_get_task_result to check progress.`,
+  }
+}
+
 async function assertMcpAgentUsable(ctx: McpContext, agent: AgentRef, field: string): Promise<void> {
   if (API_ADAPTERS.has(agent.adapter)) return
   const names = Array.from(new Set([agent.label, agent.adapter].filter(Boolean))) as string[]
@@ -2192,6 +2327,8 @@ function summarizeTask(task: Task, includeOutput = false): Record<string, unknow
     agent: agentLabel(task.agent),
     permissionMode: task.permissionMode,
     cwd: task.cwd,
+    prompt: task.status === 'draft' ? truncateText(task.prompt, 8000) : undefined,
+    metadata: task.metadata,
     result: truncateText(task.result, 4000),
     errorMessage: truncateText(task.errorMessage, 1000),
     gitCommits: task.gitCommits ?? [],
@@ -2968,7 +3105,7 @@ function normalizeTaskArgs(args: unknown): unknown {
   const data = requireRecord(args, 'arguments')
   return {
     ...data,
-    agent: normalizeAgentArg(data.agent, 'agent'),
+    ...(data.agent !== undefined ? { agent: normalizeAgentArg(data.agent, 'agent') } : {}),
   }
 }
 
@@ -3055,6 +3192,22 @@ function sessionApiDocs() {
           files: ['docs/brief.md'],
         },
       },
+    },
+    createTaskFromSession: {
+      method: 'POST',
+      path: '/api/sessions/:id/task-drafts',
+      description: 'Create a non-running Task draft from a completed Session decision.',
+      body: {
+        actionIndex: 1,
+        agent: { adapter: 'opencode' },
+        cwd: '/optional/project/path',
+        permissionMode: 'trusted',
+      },
+    },
+    startTaskDraft: {
+      method: 'POST',
+      path: '/api/tasks/:id/start',
+      description: 'Start an approved Task draft.',
     },
     handoffTask: {
       method: 'POST',
@@ -4068,6 +4221,30 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
         return json(res, 201, session)
       }
 
+      // POST /api/sessions/:id/task-drafts
+      const sessionTaskDraftMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/task-drafts$/)
+      if (sessionTaskDraftMatch && method === 'POST') {
+        const session = state.getSession(sessionTaskDraftMatch[1], authUser!.userId)
+        if (!session) return json(res, 404, { error: 'Not found' })
+        if (session.status !== 'done') throw new HttpError(400, 'Only a completed Session can create a Task draft')
+        const params = parseSessionTaskDraftBody(await parseBody(req))
+        assertAllowedWorkspace(params.cwd)
+        assertPermissionModeAllowed(params.permissionMode, params.cwd)
+        const agent = params.agent ?? await selectDefaultTaskAgent(authUser!.userId, agentCatalog, params.cwd)
+        await assertTaskAgentAccepted(authUser!.userId, router, agentCatalog, agent, params.cwd)
+        const task = router.createTaskDraft({
+          userId: authUser!.userId,
+          idempotencyKey: params.idempotencyKey,
+          agent,
+          prompt: buildTaskFromSessionPrompt(session, state.getMessages(session.id), params.action, params.actionIndex),
+          context: taskContextFromSession(session),
+          cwd: params.cwd,
+          permissionMode: params.permissionMode,
+          metadata: { sourceSessionId: session.id, sourceActionIndex: params.actionIndex },
+        })
+        return json(res, 201, task)
+      }
+
       // GET /api/sessions/:id
       const sessionMatch = pathname.match(/^\/api\/sessions\/([^/]+)$/)
       if (sessionMatch && method === 'GET') {
@@ -4113,6 +4290,18 @@ export function createServer(router: Router, port: number, agentCatalog: AgentCa
           metadata: { continuedFromTaskId: source.id },
         })
         return json(res, 201, task)
+      }
+
+      // POST /api/tasks/:id/start
+      const taskStartMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/start$/)
+      if (taskStartMatch && method === 'POST') {
+        const task = state.getTask(taskStartMatch[1], authUser!.userId)
+        if (!task) return json(res, 404, { error: 'Not found' })
+        if (task.status !== 'draft') throw new HttpError(400, 'Only a Task draft can be started')
+        assertAllowedWorkspace(task.cwd)
+        assertPermissionModeAllowed(task.permissionMode, task.cwd)
+        await assertTaskAgentAccepted(authUser!.userId, router, agentCatalog, task.agent, task.cwd)
+        return json(res, 200, router.startTaskDraft(task.id, authUser!.userId))
       }
 
       // POST /api/tasks/:id/stop

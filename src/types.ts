@@ -1,7 +1,7 @@
 // Core type definitions for Passiton
 
 export type SessionStatus = 'active' | 'paused' | 'done' | 'error' | 'stopped'
-export type TaskStatus = 'queued' | 'running' | 'done' | 'error' | 'stopped'
+export type TaskStatus = 'draft' | 'queued' | 'running' | 'done' | 'error' | 'stopped'
 export type PermissionMode = 'safe' | 'trusted'
 /**
  * Workflow node types are intentionally open-ended: the engine only treats a
@@ -145,6 +145,8 @@ export interface GitCommitRecord {
 
 export interface TaskMetadata {
   continuedFromTaskId?: string
+  sourceSessionId?: string
+  sourceActionIndex?: number
 }
 
 export interface Task {

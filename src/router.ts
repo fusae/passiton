@@ -179,6 +179,48 @@ export class Router extends EventEmitter {
     return task
   }
 
+  createTaskDraft(params: {
+    userId?: string
+    idempotencyKey?: string
+    agent: AgentRef
+    prompt: string
+    context?: SessionContext
+    systemPrompt?: string
+    permissionMode?: Task['permissionMode']
+    cwd?: string
+    metadata?: Task['metadata']
+  }): Task {
+    if (params.idempotencyKey && params.userId) {
+      const existing = state.getTaskByIdempotencyKey(params.userId, params.idempotencyKey)
+      if (existing) return existing
+    }
+    const task = state.createTask({
+      id: uuidv4(),
+      userId: params.userId,
+      idempotencyKey: params.idempotencyKey,
+      agent: params.agent,
+      prompt: params.prompt,
+      status: 'draft',
+      context: params.context,
+      systemPrompt: params.systemPrompt,
+      permissionMode: params.permissionMode ?? 'safe',
+      cwd: params.cwd,
+      metadata: params.metadata,
+    })
+    this.emit('event', { type: 'task:created', payload: task } satisfies WsEvent)
+    return task
+  }
+
+  startTaskDraft(id: string, userId?: string): Task {
+    const task = state.getTask(id, userId)
+    if (!task) throw new Error(`Task ${id} not found`)
+    if (task.status !== 'draft') throw new Error(`Task ${id} is not a draft`)
+    const queued = state.updateTask(id, { status: 'queued' }, userId)
+    this.emit('event', { type: 'task:updated', payload: queued } satisfies WsEvent)
+    this.scheduleTask(id)
+    return queued
+  }
+
   recoverTasks(): void {
     for (const task of state.listTasks({ status: 'running' })) {
       if (task.cwd) {
