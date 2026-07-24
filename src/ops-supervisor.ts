@@ -14,6 +14,7 @@
 
 import { v4 as uuidv4 } from 'uuid'
 import * as state from './state.js'
+import { logEvent } from './event-log.js'
 import type {
   Task,
   WsEvent,
@@ -229,7 +230,9 @@ export class OpsSupervisor {
     if (this.timer || this.disposed || !this.config.enabled) return
     this.timer = setInterval(() => {
       this.tick().catch((err) => {
-        console.error('[ops-supervisor] tick error:', err)
+        logEvent('error', 'ops-supervisor-error', {
+          errorMessage: err instanceof Error ? err.message : String(err),
+        })
       })
     }, this.config.intervalMs)
     this.timer.unref()
@@ -324,6 +327,16 @@ export class OpsSupervisor {
       detectedAt: now,
     })
 
+    logEvent('warn', 'ops-incident-created', {
+      incidentId: incident.id,
+      userId: incident.userId,
+      targetKind: incident.targetKind,
+      targetId: incident.targetId,
+      targetAgent: incident.targetAgent,
+      classification: incident.classification,
+      severity: incident.severity,
+      status: incident.status,
+    })
     this.emitIncident(incident)
 
     // Attempt auto-remediation

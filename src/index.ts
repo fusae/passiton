@@ -8,8 +8,10 @@ import { registerBuiltinAdapters, registerConfiguredAdapters, registerGeminiImag
 import { createServer, registerPersistedUserAgents } from './server.js'
 import { installGracefulShutdown } from './shutdown.js'
 import { registerDreamina } from './examples/dreamina/index.js'
+import { logEvent } from './event-log.js'
 
 async function main(): Promise<void> {
+  logEvent('info', 'service-starting')
   const config = loadConfig()
   validateExposureConfig(config)
 
@@ -34,14 +36,18 @@ async function main(): Promise<void> {
   // Recover persisted work only after this process owns the listening port.
   // A duplicate launchd/manual instance must not mutate the shared database.
   const server = createServer(router, config.server.port, agentCatalog, config.server.host, () => {
+    logEvent('info', 'service-recovery-started')
     router.recoverTasks()
     router.recoverSessions()
     router.recoverExternalJobs()
+    logEvent('info', 'service-recovery-completed')
   })
   installGracefulShutdown(server)
 }
 
 main().catch((err) => {
-  console.error('[fatal]', err)
+  logEvent('error', 'service-fatal-error', {
+    errorMessage: err instanceof Error ? err.message : String(err),
+  })
   process.exit(1)
 })

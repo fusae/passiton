@@ -31,6 +31,7 @@ import type { AdapterResponse, AgentConfig, AgentListResponse, ApiAgentInfo, App
 import { pipelineTemplates, templates } from './templates.js'
 import { resolveWorkspacePath, validateAllowedWorkspaces, WorkspaceAccessError } from './workspace.js'
 import { OpsSupervisor, acknowledgeIncident, listIncidents } from './ops-supervisor.js'
+import { logEvent } from './event-log.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WEB_DIR = path.join(__dirname, 'web')
@@ -3979,6 +3980,12 @@ export function createServer(
         const global = parseGlobalConfigBody(await parseBody(req))
         const allowedWorkspaces = global.allowedWorkspaces === undefined ? undefined : validateAllowedWorkspaces(global.allowedWorkspaces)
         if (allowedWorkspaces && allowedWorkspaces.ok.length === 0 && allowedWorkspaces.rejected.length > 0) {
+          for (const rejected of allowedWorkspaces.rejected) {
+            logEvent('warn', 'workspace-validation-rejected', {
+              path: rejected.path,
+              reason: rejected.reason,
+            })
+          }
           throw new HttpError(400, `No safe allowedWorkspaces entries were provided; ${formatAllowedWorkspaceRejections(allowedWorkspaces.rejected)}`)
         }
         const updated: AppConfig = {
@@ -3993,6 +4000,14 @@ export function createServer(
         }
         writeConfig(updated)
         const saved = loadConfig()
+        if (allowedWorkspaces) {
+          for (const rejected of allowedWorkspaces.rejected) {
+            logEvent('warn', 'workspace-validation-rejected', {
+              path: rejected.path,
+              reason: rejected.reason,
+            })
+          }
+        }
         return json(res, 200, allowedWorkspaces && allowedWorkspaces.rejected.length > 0
           ? { ...saved, warning: `Dropped unsafe allowedWorkspaces entries; ${formatAllowedWorkspaceRejections(allowedWorkspaces.rejected)}` }
           : saved)
@@ -4464,7 +4479,11 @@ export function createServer(
       if (err instanceof HttpError || err instanceof AuthError || err instanceof KeyVaultError) {
         return json(res, err.status, { error: err.message })
       }
-      console.error('[server] error:', err)
+      logEvent('error', 'server-request-failed', {
+        method,
+        path: pathname,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      })
       json(res, 500, { error: String(err) })
     }
   })
@@ -4575,13 +4594,25 @@ export function createServer(
     onReady?.()
     supervisor?.start()
     const displayHost = host === '0.0.0.0' ? '127.0.0.1' : host
-    console.log(`[server] Passiton running at http://${displayHost ?? 'localhost'}:${port}`)
+    logEvent('info', 'service-port-bound', {
+      host: displayHost ?? 'localhost',
+      port,
+      url: `http://${displayHost ?? 'localhost'}:${port}`,
+    })
   }
   server.on('error', (err: NodeJS.ErrnoException) => {
     if (err.code === 'EADDRINUSE') {
-      console.error(`[server] Port ${port} is already in use. Another Passiton instance may be running; stop it, or change server.port in ${getConfigPath()} and retry.`)
+      logEvent('error', 'service-startup-failed', {
+        errorCode: err.code,
+        errorMessage: `Port ${port} is already in use. Another Passiton instance may be running; stop it, or change server.port in ${getConfigPath()} and retry.`,
+        port,
+      })
     } else {
-      console.error(`[server] Startup failed: ${err.code ?? ''} ${err.message}`)
+      logEvent('error', 'service-startup-failed', {
+        errorCode: err.code,
+        errorMessage: err.message,
+        port,
+      })
     }
     process.exit(1)
   })

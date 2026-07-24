@@ -17,6 +17,7 @@ import {
 } from './policy.js'
 import { generateSystemPrompts, generateTaskSystemPrompt, generateMeetingSystemPrompt } from './prompts.js'
 import { collectGitCommitsDuringWindow, normalizePathForComparison, resolveWorkspacePath, WorkspaceAccessError } from './workspace.js'
+import { logEvent } from './event-log.js'
 
 const MAX_HISTORY_MESSAGES = 20
 const DISCUSS_MIN_ROUNDS = 3
@@ -172,6 +173,7 @@ export class Router extends EventEmitter {
       metadata: params.metadata,
     })
 
+    logEvent('info', 'task-created', taskEventFields(task))
     this.emit('event', { type: 'task:created', payload: task } satisfies WsEvent)
 
     this.scheduleTask(task.id)
@@ -207,6 +209,7 @@ export class Router extends EventEmitter {
       cwd: params.cwd,
       metadata: params.metadata,
     })
+    logEvent('info', 'task-created', taskEventFields(task))
     this.emit('event', { type: 'task:created', payload: task } satisfies WsEvent)
     return task
   }
@@ -232,6 +235,11 @@ export class Router extends EventEmitter {
             finishedAt: Date.now(),
             ...(workspaceState ? { workspaceState } : {}),
           }, task.userId)
+          logEvent('warn', 'task-failed', {
+            ...taskEventFields(failed),
+            errorMessage: failed.errorMessage,
+            errorCode: 'server-restart',
+          })
           this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
         }).catch(() => { /* best-effort */ })
       } else {
@@ -240,9 +248,15 @@ export class Router extends EventEmitter {
           errorMessage: 'Task interrupted by server restart',
           finishedAt: Date.now(),
         }, task.userId)
+        logEvent('warn', 'task-failed', {
+          ...taskEventFields(failed),
+          errorMessage: failed.errorMessage,
+          errorCode: 'server-restart',
+        })
         this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
       }
     }
+    logEvent('info', 'tasks-recovered')
     // Re-enqueue any previously-queued tasks through the concurrency limiter.
     this.drainTaskQueue()
   }
@@ -264,7 +278,7 @@ export class Router extends EventEmitter {
       this.taskSlotsInUse += 1
       setImmediate(() => {
         this.runTask(taskId)
-          .catch((err) => console.error(`[router] task error ${taskId}:`, err))
+          .catch((err) => logEvent('error', 'task-runner-failed', { taskId, errorMessage: errorMessage(err) }))
           .finally(() => { this.taskSlotsInUse -= 1; this.drainTaskQueue() })
       })
     }
@@ -280,7 +294,7 @@ export class Router extends EventEmitter {
       this.taskSlotsInUse += 1
       setImmediate(() => {
         this.runTask(task.id)
-          .catch((err) => console.error(`[router] queued task error ${task.id}:`, err))
+          .catch((err) => logEvent('error', 'task-runner-failed', { taskId: task.id, errorMessage: errorMessage(err) }))
           .finally(() => { this.taskSlotsInUse -= 1; this.drainTaskQueue() })
       })
     }
@@ -289,8 +303,13 @@ export class Router extends EventEmitter {
   recoverSessions(): void {
     for (const session of state.listSessions({ status: 'active' })) {
       state.updateSession(session.id, { status: 'paused' })
+      logEvent('warn', 'session-paused', {
+        ...sessionEventFields(session),
+        reason: 'server-restart',
+      })
       this.emitLog('warn', `Recovered interrupted session as paused [${session.id.slice(0, 8)}]`, session.id)
     }
+    logEvent('info', 'sessions-recovered')
   }
 
   private startActiveSessionWatchdog(): void {
@@ -368,6 +387,16 @@ export class Router extends EventEmitter {
         gitCommits,
         ...(workspaceState ? { workspaceState } : {}),
       }, task.userId)
+      logEvent('error', 'agent-dispatch-failed', {
+        agent: task.agent.adapter,
+        errorCode: 'adapter-not-found',
+        errorMessage: `Adapter not found: ${task.agent.adapter}`,
+      })
+      logEvent('error', 'task-failed', {
+        ...taskEventFields(failed),
+        errorCode: 'adapter-not-found',
+        errorMessage: failed.errorMessage,
+      })
       this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
       return
     }
@@ -376,6 +405,7 @@ export class Router extends EventEmitter {
       status: 'running',
       startedAt: Date.now(),
     }, task.userId)
+    logEvent('info', 'task-started', taskEventFields(running))
     this.emit('event', { type: 'task:updated', payload: running } satisfies WsEvent)
 
     if (task.cwd) {
@@ -424,6 +454,7 @@ export class Router extends EventEmitter {
         gitCommits,
         workspaceState: null,
       }, task.userId)
+      logEvent('info', 'task-completed', taskEventFields(done))
       this.emit('event', { type: 'task:done', payload: done } satisfies WsEvent)
     } catch (err) {
       if (state.getTask(task.id, task.userId)?.status === 'stopped') return
@@ -440,6 +471,17 @@ export class Router extends EventEmitter {
         gitCommits,
         ...(workspaceState ? { workspaceState } : {}),
       }, task.userId)
+      logEvent('error', 'agent-dispatch-failed', {
+        agent: task.agent.adapter,
+        taskId: task.id,
+        errorCode: classifyError(errorMessage(err)),
+        errorMessage: errorMessage(err),
+      })
+      logEvent('error', 'task-failed', {
+        ...taskEventFields(failed),
+        errorCode: classifyError(errorMessage(err)),
+        errorMessage: failed.errorMessage,
+      })
       this.emit('event', { type: 'task:error', payload: failed } satisfies WsEvent)
     } finally {
       this.taskControllers.delete(task.id)
@@ -623,7 +665,10 @@ export class Router extends EventEmitter {
 
     if (params.steps.some((step) => step.manualDone) && initialPipelineStatus !== 'done') {
       this.resumePipelineReadySteps(pipeline).catch((err) => {
-        console.error(`[router] pipeline resume error for ${pipeline.id}:`, err)
+        logEvent('error', 'pipeline-resume-failed', {
+          pipelineId: pipeline.id,
+          errorMessage: errorMessage(err),
+        })
       })
     }
 
@@ -636,6 +681,7 @@ export class Router extends EventEmitter {
     this.nextRunEpoch(id)
     this.abortActiveTurn(id)
     const session = state.updateSession(id, { status: 'paused' })
+    logEvent('info', 'session-paused', sessionEventFields(session))
     this.emit('event', { type: 'session:paused', payload: session } satisfies WsEvent)
     this.emitLog('info', `Session paused [${id.slice(0, 8)}] at round ${session.currentRound}`, id)
     return session
@@ -720,7 +766,10 @@ export class Router extends EventEmitter {
     const epoch = this.nextRunEpoch(id)
     setImmediate(() => {
       this.runSession(id, resumePrompt, epoch, failedRound).catch((err) => {
-        console.error(`[router] resumeErrorSession error for ${id}:`, err)
+        logEvent('error', 'session-error', {
+          sessionId: id,
+          errorMessage: errorMessage(err),
+        })
         this.emitLog('error', `Session checkpoint resume error [${id.slice(0, 8)}]: ${String(err)}`, id)
         this.markError(id, err)
       })
@@ -1089,7 +1138,13 @@ export class Router extends EventEmitter {
         if (this.runEpochs.get(sessionId) !== epoch || !this.runningLoops.has(sessionId)) {
           break
         }
-        console.error(`[router] round error session ${sessionId}:`, err)
+        const failedSession = state.getSession(sessionId)
+        logEvent('error', 'agent-dispatch-failed', {
+          sessionId,
+          agent: failedSession?.nextTurn === 'to' ? failedSession.to.adapter : failedSession?.from.adapter,
+          errorCode: classifyError(errorMessage(err)),
+          errorMessage: errorMessage(err),
+        })
         this.emitLog('error', `Round error [${sessionId.slice(0, 8)}]: ${String(err)}`, sessionId)
         if (await this.completeWorkflowStepAfterAdapterError(sessionId, err)) {
           break
@@ -1442,10 +1497,23 @@ export class Router extends EventEmitter {
         if (opts?.signal?.aborted) break
         if (attempt < this.policy.retries) {
           this.emitLog('warn', `Adapter ${adapter.name} attempt ${attempt + 1} failed, retrying… [${session.id.slice(0, 8)}]`, session.id)
-          console.warn(`[router] adapter ${adapter.name} attempt ${attempt + 1} failed, retrying...`)
+          logEvent('warn', 'agent-dispatch-failed', {
+            sessionId: session.id,
+            agent: adapter.name,
+            attempt: attempt + 1,
+            errorCode: classifyError(errorMessage(err)),
+            errorMessage: errorMessage(err),
+          })
           await sleep(1000)
         } else {
           this.emitLog('error', `Adapter ${adapter.name} failed after ${attempt + 1} attempts [${session.id.slice(0, 8)}]: ${String(err)}`, session.id)
+          logEvent('error', 'agent-dispatch-failed', {
+            sessionId: session.id,
+            agent: adapter.name,
+            attempts: attempt + 1,
+            errorCode: classifyError(errorMessage(err)),
+            errorMessage: errorMessage(err),
+          })
         }
       }
     }
@@ -1490,6 +1558,12 @@ export class Router extends EventEmitter {
         errorRound: errorRound ?? errorRoundFromError(err) ?? (session ? this.inferFailedRound(session) : undefined),
         errorMessage: message,
         lastAgentOutput: lastAgentOutputFromError(err),
+      })
+      logEvent(recoverable ? 'warn' : 'error', recoverable ? 'session-paused' : 'session-error', {
+        ...sessionEventFields(updated),
+        errorCode: type,
+        errorMessage: message,
+        errorRound: updated.errorRound,
       })
       this.emit('event', { type: recoverable ? 'session:paused' : 'session:error', payload: updated } satisfies WsEvent)
       this.emitLog(recoverable ? 'warn' : 'error', `${recoverable ? 'Recoverable' : 'Fatal'} session error [${sessionId.slice(0, 8)}]: ${type}`, sessionId)
@@ -1552,6 +1626,7 @@ export class Router extends EventEmitter {
       : created
 
     this.emit('event', { type: 'session:created', payload: session } satisfies WsEvent)
+    logEvent(initialStatus === 'active' ? 'info' : 'warn', initialStatus === 'active' ? 'session-started' : 'session-paused', sessionEventFields(session))
     this.emitLog(session.permissionMode === 'trusted' ? 'warn' : 'info', `Permission mode: ${session.permissionMode}${session.permissionMode === 'trusted' ? ' — CLI approvals may be bypassed' : ''}`, session.id)
     return session
   }
@@ -1559,7 +1634,10 @@ export class Router extends EventEmitter {
   private startRunLoop(sessionId: string, firstMessage: string, epoch = this.nextRunEpoch(sessionId)): void {
     setImmediate(() => {
       this.runSession(sessionId, firstMessage, epoch).catch((err) => {
-        console.error(`[router] runSession error for ${sessionId}:`, err)
+        logEvent('error', 'session-error', {
+          sessionId,
+          errorMessage: errorMessage(err),
+        })
         this.emitLog('error', `Session run error [${sessionId.slice(0, 8)}]: ${String(err)}`, sessionId)
         this.markError(sessionId, err)
       })
@@ -1702,7 +1780,10 @@ export class Router extends EventEmitter {
 
     if (nextStatus !== 'done') {
       this.resumePipelineReadySteps(updated).catch((err) => {
-        console.error(`[router] pipeline resume error for ${pipeline.id}:`, err)
+        logEvent('error', 'pipeline-resume-failed', {
+          pipelineId: pipeline.id,
+          errorMessage: errorMessage(err),
+        })
       })
     }
   }
@@ -1782,6 +1863,7 @@ export class Router extends EventEmitter {
       .find((message) => message.from !== 'human' && message.content.trim())
       ?.content
     const completed = state.updateSession(sessionId, { status: 'done', artifacts, ...(lastAgentOutput ? { lastAgentOutput } : {}) })
+    logEvent('info', 'session-done', sessionEventFields(completed))
     this.clearRuntimeState(sessionId)
     return completed
   }
@@ -2891,6 +2973,32 @@ function parseGitDiffStat(stat: string): SessionArtifacts['filesChanged'] {
       }
     })
     .filter((item): item is NonNullable<SessionArtifacts['filesChanged']>[number] => Boolean(item))
+}
+
+function taskEventFields(task: Task): Record<string, unknown> {
+  return {
+    taskId: task.id,
+    userId: task.userId,
+    agent: task.agent.adapter,
+    status: task.status,
+    cwd: task.cwd,
+    permissionMode: task.permissionMode,
+  }
+}
+
+function sessionEventFields(session: Session): Record<string, unknown> {
+  return {
+    sessionId: session.id,
+    userId: session.userId,
+    status: session.status,
+    mode: session.mode,
+    fromAgent: session.from.adapter,
+    toAgent: session.to.adapter,
+    currentRound: session.currentRound,
+    maxRounds: session.maxRounds,
+    cwd: session.cwd,
+    permissionMode: session.permissionMode,
+  }
 }
 
 function runGitDiff(cwd: string, args: string[]): Promise<string> {
