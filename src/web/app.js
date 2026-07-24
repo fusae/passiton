@@ -5897,12 +5897,11 @@ function sessionShareCardFilename(session, ext) {
 function buildSessionShareCardSvg(session, messages) {
   const colors = sessionShareCardColors()
   const data = sessionShareCardData(session, messages)
-  const topicLines = wrapSvgText(data.topic, 39, 2)
-  const participantLines = wrapSvgText(data.participants, 76, 2)
-  const titleLines = wrapSvgText(data.decisionTitle, 45, 2)
-  const bulletLines = data.decisionBullets.slice(0, 3).map(item => truncateShareText(item, 58))
-  const decisionStartY = 398 + (titleLines.length > 1 ? 0 : 8)
-  const bulletStartY = decisionStartY + titleLines.length * 42 + 28
+  const topicLines = wrapSvgText(data.topic, 38, 2)
+  const participantLines = wrapSvgText(data.participants, 64, 1)
+  const titleLines = wrapSvgText(data.decisionTitle, 46, 2)
+  const bulletLines = data.decisionBullets.slice(0, 2).map(item => truncateShareText(item, 52))
+  const bulletStartY = 432 + titleLines.length * 34 + 26
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="${svgEscape(t('session.shareCard.title'))}">
   <defs>
@@ -5927,22 +5926,22 @@ function buildSessionShareCardSvg(session, messages) {
   <rect x="690" y="79" width="430" height="42" rx="21" fill="${colors.bgCard}" stroke="${colors.border}"/>
   <text x="905" y="106" text-anchor="middle" font-family="${SHARE_CARD_FONT}" font-size="18" font-weight="650" fill="${colors.textSecondary}">${svgEscape(data.scene)}</text>
 
-  <text x="80" y="172" font-family="${SHARE_CARD_FONT}" font-size="15" font-weight="800" letter-spacing="1.4" fill="${colors.accent}">${svgEscape(t('session.shareCard.topic').toUpperCase())}</text>
-  ${svgTspans(topicLines, 80, 219, 37, 34, 780, colors.textPrimary, 760)}
+  <text x="80" y="168" font-family="${SHARE_CARD_FONT}" font-size="15" font-weight="800" letter-spacing="1.4" fill="${colors.accent}">${svgEscape(t('session.shareCard.topic').toUpperCase())}</text>
+  ${svgTspans(topicLines, 80, 212, 36, 34, 780, colors.textPrimary, 1040)}
 
-  <text x="80" y="316" font-family="${SHARE_CARD_FONT}" font-size="14" font-weight="800" letter-spacing="1.2" fill="${colors.textMuted}">${svgEscape(t('session.shareCard.participants').toUpperCase())}</text>
-  ${svgTspans(participantLines, 80, 350, 28, 21, 500, colors.textSecondary, 1040)}
+  <text x="80" y="300" font-family="${SHARE_CARD_FONT}" font-size="14" font-weight="800" letter-spacing="1.2" fill="${colors.textMuted}">${svgEscape(t('session.shareCard.participants').toUpperCase())}</text>
+  ${svgTspans(participantLines, 80, 336, 30, 22, 520, colors.textSecondary, 1040)}
 
-  <rect x="80" y="382" width="1040" height="148" rx="18" fill="${colors.bgCard}" stroke="${colors.border}"/>
-  <rect x="80" y="382" width="6" height="148" rx="3" fill="url(#shareAccent)"/>
-  <text x="112" y="424" font-family="${SHARE_CARD_FONT}" font-size="14" font-weight="800" letter-spacing="1.2" fill="${colors.accent}">${svgEscape(t('session.shareCard.finalDecision').toUpperCase())}</text>
-  ${svgTspans(titleLines, 112, 463, 40, 29, 760, colors.textPrimary, 940)}
+  <rect x="80" y="360" width="1040" height="198" rx="18" fill="${colors.bgCard}" stroke="${colors.border}"/>
+  <rect x="80" y="360" width="6" height="198" rx="3" fill="url(#shareAccent)"/>
+  <text x="112" y="398" font-family="${SHARE_CARD_FONT}" font-size="14" font-weight="800" letter-spacing="1.2" fill="${colors.accent}">${svgEscape(t('session.shareCard.finalDecision').toUpperCase())}</text>
+  ${svgTspans(titleLines, 112, 432, 34, 27, 760, colors.textPrimary, 960)}
   ${bulletLines.map((line, index) => `
-  <circle cx="118" cy="${bulletStartY + index * 26 - 7}" r="3.5" fill="${colors.accentEnd}"/>
-  <text x="132" y="${bulletStartY + index * 26}" font-family="${SHARE_CARD_FONT}" font-size="20" font-weight="520" fill="${colors.textSecondary}">${svgEscape(line)}</text>`).join('')}
+  <circle cx="118" cy="${bulletStartY + index * 32 - 7}" r="3.5" fill="${colors.accentEnd}"/>
+  <text x="132" y="${bulletStartY + index * 32}" font-family="${SHARE_CARD_FONT}" font-size="19" font-weight="520" fill="${colors.textSecondary}">${svgEscape(line)}</text>`).join('')}
 
-  <text x="80" y="565" font-family="${SHARE_CARD_FONT}" font-size="22" font-weight="760" fill="${colors.textPrimary}">npx passiton</text>
-  <text x="1120" y="565" text-anchor="end" font-family="${SHARE_CARD_FONT}" font-size="18" font-weight="520" fill="${colors.textMuted}">${svgEscape(t('session.shareCard.madeWith'))}</text>
+  <text x="80" y="586" font-family="${SHARE_CARD_FONT}" font-size="22" font-weight="760" fill="${colors.textPrimary}">npx passiton</text>
+  <text x="1120" y="586" text-anchor="end" font-family="${SHARE_CARD_FONT}" font-size="18" font-weight="520" fill="${colors.textMuted}">${svgEscape(t('session.shareCard.madeWith'))}</text>
 </svg>`
 }
 
@@ -5986,10 +5985,12 @@ function sessionShareParticipants(session) {
         { agent: session?.from, role: 'agent' },
         { agent: session?.to, role: 'agent' },
       ].filter(item => item.agent)
+  // A share card wants glanceable names, not the full role prose — show the
+  // agent names and flag who moderated.
   return participants.map(participant => {
-    const role = participant.moderator ? t('session.shareCard.roleModerator') : String(participant.role || 'agent')
-    return `${agentLabel(participant.agent)} · ${role}`
-  }).join('  /  ')
+    const name = agentLabel(participant.agent)
+    return participant.moderator ? `${name} (${t('session.shareCard.roleModerator')})` : name
+  }).join('  ·  ')
 }
 
 function extractShareResult(content) {
