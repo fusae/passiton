@@ -181,6 +181,24 @@ const MESSAGES = {
     'modal.agentDiagnostics.passed': 'Passed',
     'modal.agentDiagnostics.notRun': 'Not run',
     'modal.agentDiagnostics.details': 'Technical details',
+    'modal.agentDiagnostics.fixTitle': 'How to fix',
+    'modal.agentDiagnostics.fix.not_installed.desc': 'The executable was not found or is not on PATH.',
+    'modal.agentDiagnostics.fix.not_installed.install': 'Confirm {agent} is installed and available on PATH.',
+    'modal.agentDiagnostics.fix.auth_required.desc': 'The agent is not logged in or its credentials expired.',
+    'modal.agentDiagnostics.fix.auth_required.login': 'Run this in your terminal to complete login:',
+    'modal.agentDiagnostics.fix.auth_required.fallback': 'Run {agent} once in your terminal to complete login.',
+    'modal.agentDiagnostics.fix.api_key_missing.desc': 'This agent is missing an API Key.',
+    'modal.agentDiagnostics.fix.rate_limited.desc': 'Quota is exhausted or the provider is rate limiting this agent.',
+    'modal.agentDiagnostics.fix.rate_limited.hint': 'Switch to another agent or try again later.',
+    'modal.agentDiagnostics.fix.timeout.desc': 'The check timed out. The network may be slow or the agent may be slow on first launch.',
+    'modal.agentDiagnostics.fix.timeout.hint': 'Check your network or proxy, then test again.',
+    'modal.agentDiagnostics.fix.unavailable.desc': 'The agent is currently unavailable.',
+    'modal.agentDiagnostics.action.rescan': 'Rescan',
+    'modal.agentDiagnostics.action.retest': 'Re-test',
+    'modal.agentDiagnostics.action.retestAfterLogin': 'Re-test after login',
+    'modal.agentDiagnostics.action.addApiKey': 'Add API Key',
+    'modal.agentDiagnostics.action.copy': 'Copy',
+    'modal.agentDiagnostics.action.copied': 'Copied',
 
     // Edit Local CLI Agent modal
     'modal.localCli.edit.title': 'Edit Local CLI Agent',
@@ -963,6 +981,24 @@ const MESSAGES = {
     'modal.agentDiagnostics.passed': '通过',
     'modal.agentDiagnostics.notRun': '未执行',
     'modal.agentDiagnostics.details': '技术详情',
+    'modal.agentDiagnostics.fixTitle': '怎么修',
+    'modal.agentDiagnostics.fix.not_installed.desc': '没找到可执行文件，或它不在 PATH 上。',
+    'modal.agentDiagnostics.fix.not_installed.install': '确认已安装 {agent}，并且它在 PATH 上。',
+    'modal.agentDiagnostics.fix.auth_required.desc': 'Agent 未登录，或凭证已过期。',
+    'modal.agentDiagnostics.fix.auth_required.login': '在终端运行下面的命令完成登录：',
+    'modal.agentDiagnostics.fix.auth_required.fallback': '在终端运行一次 {agent} 完成登录。',
+    'modal.agentDiagnostics.fix.api_key_missing.desc': '这个 Agent 缺少 API Key。',
+    'modal.agentDiagnostics.fix.rate_limited.desc': '额度已用尽，或服务正在限流这个 Agent。',
+    'modal.agentDiagnostics.fix.rate_limited.hint': '可以换一个 Agent，或稍后再试。',
+    'modal.agentDiagnostics.fix.timeout.desc': '诊断超时，可能是网络慢，或 Agent 首次启动较慢。',
+    'modal.agentDiagnostics.fix.timeout.hint': '检查网络或代理后再测试。',
+    'modal.agentDiagnostics.fix.unavailable.desc': 'Agent 当前不可用。',
+    'modal.agentDiagnostics.action.rescan': '重新扫描',
+    'modal.agentDiagnostics.action.retest': '重新测试',
+    'modal.agentDiagnostics.action.retestAfterLogin': '登录后重新测试',
+    'modal.agentDiagnostics.action.addApiKey': '去添加 API Key',
+    'modal.agentDiagnostics.action.copy': '复制',
+    'modal.agentDiagnostics.action.copied': '已复制',
 
     // Edit Local CLI Agent modal
     'modal.localCli.edit.title': '编辑本地 CLI 代理',
@@ -1634,6 +1670,7 @@ const state = {
   templates: [],
   pipelineTemplates: [],
   apiKeys: [],
+  pendingApiKeyModal: false,
   apiDocs: null,
   deployCheck: null,
   stats: null,
@@ -3261,7 +3298,6 @@ function renderSessionStats() {
 function renderOnboardingPanel() {
   const agents = (state.agents || []).filter((agent) => agent.kind === 'local')
   const ready = agents.filter((a) => a.status === 'ready')
-  const present = agents.filter((a) => a.status !== 'invalid')
 
   if (ready.length >= 2) {
     return `
@@ -3277,21 +3313,7 @@ function renderOnboardingPanel() {
     `
   }
 
-  if (ready.length < 2) {
-    return `
-      <div class="onboarding-panel">
-        <div class="onboarding-icon">◇</div>
-        <h3>${t('sessions.golden.title')}</h3>
-        <p>${t('sessions.golden.value')}</p>
-        <div class="template-empty-agents">
-          <span>${t('sessions.golden.needAgents')}</span>
-          <button class="btn btn-secondary btn-sm" onclick="window.navigate('/settings')">${t('newSession.checkAgents')}</button>
-        </div>
-      </div>
-    `
-  }
-
-  if (present.length === 0) {
+  if (agents.length === 0) {
     return `
       <div class="onboarding-panel">
         <div class="onboarding-icon">→</div>
@@ -3310,21 +3332,42 @@ function renderOnboardingPanel() {
     `
   }
 
-  // Agents exist but none verified-ready.
-  const unverified = present.filter((a) => a.status === 'unverified' || a.status === 'discovered' || a.status === 'verifying')
-  const unverifiedList = unverified.length
-    ? unverified.map((a) => `<li><span class="onboarding-agent-name">${escapeHtml(a.name)}</span><span class="onboarding-agent-status onboarding-agent-status--${a.status}">${statusLabel(a.status)}</span></li>`).join('')
-    : ''
+  if (ready.length === 0) {
+    const unverified = agents.filter((a) => a.status !== 'ready')
+    const unverifiedList = unverified.length
+      ? unverified.map((a) => `
+        <li>
+          <div>
+            <span class="onboarding-agent-name">${escapeHtml(a.name)}</span>
+            <span class="onboarding-agent-status onboarding-agent-status--${a.status}">${statusLabel(a.status)}</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick='window.showAgentDiagnostics(${jsString(a.name)})'>${t('settings.localCli.diagnose')}</button>
+        </li>
+      `).join('')
+      : ''
+    return `
+      <div class="onboarding-panel">
+        <div class="onboarding-icon">!</div>
+        <h3>${t('sessions.onboarding.unverifiedTitle')}</h3>
+        <p>${t('sessions.onboarding.unverifiedDesc', { cliCount: agents.length })}</p>
+        ${unverifiedList ? `<ul class="onboarding-agent-list">${unverifiedList}</ul>` : ''}
+        <p class="onboarding-hint">${t('sessions.onboarding.unverifiedHint')}</p>
+        <div class="onboarding-actions">
+          <button class="btn btn-primary" onclick="window.refreshAgentsAndRender()">${t('sessions.onboarding.retest')}</button>
+          <a class="btn btn-ghost" href="/settings">${t('sessions.onboarding.goToSettings')}</a>
+        </div>
+      </div>
+    `
+  }
+
   return `
     <div class="onboarding-panel">
-      <div class="onboarding-icon">!</div>
-      <h3>${t('sessions.onboarding.unverifiedTitle')}</h3>
-      <p>${t('sessions.onboarding.unverifiedDesc', { cliCount: present.length })}</p>
-      ${unverifiedList ? `<ul class="onboarding-agent-list">${unverifiedList}</ul>` : ''}
-      <p class="onboarding-hint">${t('sessions.onboarding.unverifiedHint')}</p>
-      <div class="onboarding-actions">
-        <button class="btn btn-primary" onclick="window.refreshAgentsAndRender()">${t('sessions.onboarding.retest')}</button>
-        <a class="btn btn-ghost" href="/settings">${t('sessions.onboarding.goToSettings')}</a>
+      <div class="onboarding-icon">◇</div>
+      <h3>${t('sessions.golden.title')}</h3>
+      <p>${t('sessions.golden.value')}</p>
+      <div class="template-empty-agents">
+        <span>${t('sessions.golden.needAgents')}</span>
+        <button class="btn btn-secondary btn-sm" onclick="window.navigate('/settings')">${t('newSession.checkAgents')}</button>
       </div>
     </div>
   `
@@ -5882,6 +5925,10 @@ async function renderSettings() {
   renderLocalCliAgentsList()
   renderDiagnosticsPanel()
   updateThemeButton()
+  if (state.pendingApiKeyModal) {
+    state.pendingApiKeyModal = false
+    window.showApiKeyModal()
+  }
 }
 
 function renderAgentsList() {
@@ -6128,13 +6175,76 @@ function renderDiagnosticsPanel() {
 
 window.refreshDiagnostics = async function() {
   await loadDeployCheck()
-  await loadAgents()
+  state.agents = await api('/api/agents?refresh=1')
   renderDiagnosticsPanel()
   renderLocalCliAgentsList()
 }
 
 window.showLocalCliAgentDiagnostics = async function(name, preface = '') {
   return window.showAgentDiagnostics(name, preface)
+}
+
+function agentCommandForUser(agentName, diagnostic) {
+  const command = diagnostic?.command || state.agents.find((agent) => agent.name === agentName)?.command || agentName
+  return String(command || agentName).trim()
+}
+
+function commandSnippet(command) {
+  return `
+    <div class="agent-fix-command">
+      <code>${escapeHtml(command)}</code>
+      <button class="btn btn-ghost btn-sm" onclick='window.copyAgentFixCommand(${jsString(command)})'>${t('modal.agentDiagnostics.action.copy')}</button>
+    </div>
+  `
+}
+
+function renderAgentFixBlock(diagnostic) {
+  const name = diagnostic?.name || ''
+  const code = diagnostic?.errorCode || (diagnostic?.commandExecutable === false ? 'not_installed' : 'unavailable')
+  const command = agentCommandForUser(name, diagnostic)
+  const retest = `<button class="btn btn-secondary btn-sm" onclick='window.showAgentDiagnostics(${jsString(name)})'>${t('modal.agentDiagnostics.action.retest')}</button>`
+  let body = ''
+  let actions = retest
+
+  switch (code) {
+    case 'not_installed':
+      body = `
+        <p>${t('modal.agentDiagnostics.fix.not_installed.desc')}</p>
+        <p>${t('modal.agentDiagnostics.fix.not_installed.install', { agent: escapeHtml(name || command) })}</p>
+      `
+      actions = `<button class="btn btn-secondary btn-sm" onclick='window.rescanAgentDiagnostics(${jsString(name)})'>${t('modal.agentDiagnostics.action.rescan')}</button>`
+      break
+    case 'auth_required':
+      body = `
+        <p>${t('modal.agentDiagnostics.fix.auth_required.desc')}</p>
+        <p>${command ? t('modal.agentDiagnostics.fix.auth_required.login') : t('modal.agentDiagnostics.fix.auth_required.fallback', { agent: escapeHtml(name) })}</p>
+        ${command ? commandSnippet(command) : ''}
+      `
+      actions = `<button class="btn btn-secondary btn-sm" onclick='window.showAgentDiagnostics(${jsString(name)})'>${t('modal.agentDiagnostics.action.retestAfterLogin')}</button>`
+      break
+    case 'api_key_missing':
+      body = `<p>${t('modal.agentDiagnostics.fix.api_key_missing.desc')}</p>`
+      actions = `<button class="btn btn-primary btn-sm" onclick="window.openApiKeySetup()">${t('modal.agentDiagnostics.action.addApiKey')}</button>`
+      break
+    case 'rate_limited':
+      body = `<p>${t('modal.agentDiagnostics.fix.rate_limited.desc')}</p><p>${t('modal.agentDiagnostics.fix.rate_limited.hint')}</p>`
+      break
+    case 'timeout':
+      body = `<p>${t('modal.agentDiagnostics.fix.timeout.desc')}</p><p>${t('modal.agentDiagnostics.fix.timeout.hint')}</p>`
+      break
+    case 'unavailable':
+    default:
+      body = `<p>${t('modal.agentDiagnostics.fix.unavailable.desc')}</p>${diagnostic?.error ? `<p>${escapeHtml(diagnostic.error)}</p>` : ''}`
+      break
+  }
+
+  return `
+    <div class="agent-diagnostic-fix">
+      <strong>${t('modal.agentDiagnostics.fixTitle')}</strong>
+      <div class="agent-diagnostic-fix-copy">${body}</div>
+      <div class="agent-diagnostic-fix-actions">${actions}</div>
+    </div>
+  `
 }
 
 function renderAgentDiagnosticResult(diagnostic) {
@@ -6155,11 +6265,36 @@ function renderAgentDiagnosticResult(diagnostic) {
       ${check(t('modal.agentDiagnostics.versionCheck'), diagnostic.versionOk)}
       ${check(t('modal.agentDiagnostics.modelCheck'), diagnostic.smokeOk)}
     </div>
+    ${ready ? '' : renderAgentFixBlock(diagnostic)}
     <details class="context-details">
       <summary>${t('modal.agentDiagnostics.details')}</summary>
       <pre class="code-block" style="white-space: pre-wrap; margin-top: 12px;">${escapeHtml(JSON.stringify(diagnostic, null, 2))}</pre>
     </details>
   `
+}
+
+window.copyAgentFixCommand = async function(command) {
+  try {
+    await navigator.clipboard.writeText(command)
+    showToast(t('modal.agentDiagnostics.action.copied'), 'success')
+  } catch (err) {
+    showToast(err.message)
+  }
+}
+
+window.openApiKeySetup = function() {
+  closeModal()
+  if (location.pathname === '/settings') {
+    window.showApiKeyModal()
+    return
+  }
+  state.pendingApiKeyModal = true
+  navigate('/settings')
+}
+
+window.rescanAgentDiagnostics = async function(name) {
+  await window.refreshDiagnostics()
+  window.showAgentDiagnostics(name)
 }
 
 window.showAgentDiagnostics = async function(name, preface = '') {
