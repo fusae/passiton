@@ -484,6 +484,14 @@ const MESSAGES = {
     'sessions.onboarding.unverifiedHint': 'Common causes: not logged in, expired credentials, lapsed subscription, or wrong binary path. Re-test or check in Settings.',
     'sessions.onboarding.retest': 'Re-test',
     'sessions.onboarding.goToSettings': 'Go to Settings',
+    'sessions.golden.title': 'Try multi-agent decisions',
+    'sessions.golden.value': 'Let several AIs argue from different angles, then converge on one decision. A single chat window cannot give you that.',
+    'sessions.golden.try': 'Try this example',
+    'sessions.golden.needAgents': 'Set up at least 2 agents first',
+    'sessions.golden.prompt': 'Help me create 3 completely different creative directions for a short video introducing my product, compare them, and pick the best one.',
+    'sessions.golden.roleProposerA': 'Creative direction proposer',
+    'sessions.golden.roleProposerB': 'Alternative creative proposer',
+    'sessions.golden.roleModerator': 'Moderator: compare options and make the final decision',
 
     // Session detail — header & actions
     'session.askOps': 'Ask Ops',
@@ -1181,6 +1189,14 @@ const MESSAGES = {
     'sessions.onboarding.unverifiedHint': '常见原因：未登录、凭证失效、订阅过期或二进制路径不对。重新检测或去 Settings 检查配置。',
     'sessions.onboarding.retest': '重新检测',
     'sessions.onboarding.goToSettings': '去 Settings 检查',
+    'sessions.golden.title': '体验多 Agent 决策',
+    'sessions.golden.value': '让几个 AI 各抒己见、再收敛成一个决策——这是单个聊天窗给不了的。',
+    'sessions.golden.try': '试试这个例子',
+    'sessions.golden.needAgents': '先配置好至少 2 个 agent',
+    'sessions.golden.prompt': '帮我为一条介绍我产品的短视频，想 3 个方向完全不同的创意，并对比选出最合适的一个。',
+    'sessions.golden.roleProposerA': '提出一个鲜明的创意方向',
+    'sessions.golden.roleProposerB': '提出另一个完全不同的创意方向',
+    'sessions.golden.roleModerator': '主持人：比较方案并给出最终决策',
 
     // Session detail — header & actions
     'session.askOps': 'Ask Ops',
@@ -3247,15 +3263,29 @@ function renderOnboardingPanel() {
   const ready = agents.filter((a) => a.status === 'ready')
   const present = agents.filter((a) => a.status !== 'invalid')
 
-  if (ready.length > 0) {
+  if (ready.length >= 2) {
     return `
       <div class="onboarding-panel">
-        <div class="onboarding-icon">✓</div>
-        <h3>${t('sessions.onboarding.ready')}</h3>
-        <p>${t('sessions.onboarding.readyDesc', { count: ready.length })}</p>
+        <div class="onboarding-icon">◇</div>
+        <h3>${t('sessions.golden.title')}</h3>
+        <p>${t('sessions.golden.value')}</p>
         <div class="onboarding-actions">
-          <button class="btn btn-primary" onclick="window.showTemplateGalleryModal()">${t('sessions.newSession')}</button>
+          <button class="btn btn-primary" onclick="window.startGoldenPathExample()">${t('sessions.golden.try')}</button>
           <a class="btn btn-ghost" href="/settings">${t('sessions.onboarding.manageAgents')}</a>
+        </div>
+      </div>
+    `
+  }
+
+  if (ready.length < 2) {
+    return `
+      <div class="onboarding-panel">
+        <div class="onboarding-icon">◇</div>
+        <h3>${t('sessions.golden.title')}</h3>
+        <p>${t('sessions.golden.value')}</p>
+        <div class="template-empty-agents">
+          <span>${t('sessions.golden.needAgents')}</span>
+          <button class="btn btn-secondary btn-sm" onclick="window.navigate('/settings')">${t('newSession.checkAgents')}</button>
         </div>
       </div>
     `
@@ -6441,11 +6471,45 @@ window.showTemplateGalleryModal = async function() {
   `)
 }
 
-window.showNewSessionModal = async function(scenarioId = 'proposal') {
+window.startGoldenPathExample = async function() {
+  if (!state.agents.length) await loadAgents()
+  const readyAgents = sortAgentsByPriority(state.agents.filter(agent => agent.kind === 'local' && agent.status === 'ready'))
+  if (readyAgents.length < 2) {
+    showModal(`
+      <div class="modal-card template-modal">
+        <div class="modal-head">
+          <div><h3>${t('sessions.golden.title')}</h3><p>${t('sessions.golden.value')}</p></div>
+          <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
+        </div>
+        <div class="template-empty-agents"><span>${t('newSession.needAgents')}</span><button class="btn btn-secondary btn-sm" onclick="window.closeModal(); window.navigate('/settings')">${t('newSession.checkAgents')}</button></div>
+      </div>
+    `)
+    return
+  }
+  const selectedAgents = readyAgents.slice(0, Math.min(3, readyAgents.length))
+  const moderatorIndex = selectedAgents.length - 1
+  const participants = selectedAgents.map((agent, index) => ({
+    agent: agent.name,
+    role: index === moderatorIndex
+      ? t('sessions.golden.roleModerator')
+      : index === 0
+        ? t('sessions.golden.roleProposerA')
+        : t('sessions.golden.roleProposerB'),
+    moderator: index === moderatorIndex,
+  }))
+  window.showNewSessionModal('proposal', {
+    prompt: t('sessions.golden.prompt'),
+    participants,
+  })
+}
+
+window.showNewSessionModal = async function(scenarioId = 'proposal', prefill = {}) {
   if (!state.agents.length) await loadAgents()
   const scenario = sessionScenarioCopy(SESSION_SCENARIOS.find(item => item.id === scenarioId) || SESSION_SCENARIOS[0])
   const agents = sortAgentsByPriority(state.agents.filter(agent => agent.kind === 'local' && agent.status === 'ready')).slice(0, 6)
-  const selectedCount = Math.min(3, agents.length)
+  const prefillParticipants = Array.isArray(prefill.participants) ? prefill.participants : []
+  const prefillByAgent = new Map(prefillParticipants.map(item => [item.agent, item]))
+  const selectedCount = prefillParticipants.length || Math.min(3, agents.length)
   showModal(`
     <div class="modal-card session-create-modal">
       <div class="modal-head">
@@ -6458,18 +6522,19 @@ window.showNewSessionModal = async function(scenarioId = 'proposal') {
           <label>${t('newSession.participants')} <span class="field-hint">${t('newSession.participantsHint')}</span></label>
           <div class="session-participant-list">
             ${agents.map((agent, index) => {
-              const selected = index < selectedCount
-              const moderator = index === selectedCount - 1
-              const defaultRole = moderator ? t('newSession.roleModerator') : index === 0 ? t('newSession.roleProposer') : t('newSession.roleReviewer')
+              const prefillParticipant = prefillByAgent.get(agent.name)
+              const selected = prefillParticipants.length ? Boolean(prefillParticipant) : index < selectedCount
+              const moderator = prefillParticipants.length ? Boolean(prefillParticipant?.moderator) : index === selectedCount - 1
+              const defaultRole = prefillParticipant?.role || (moderator ? t('newSession.roleModerator') : index === 0 ? t('newSession.roleProposer') : t('newSession.roleReviewer'))
               return `<div class="session-participant ${selected ? 'selected' : ''}" data-agent="${escapeAttr(agent.name)}">
                 <label class="session-participant-select"><input type="checkbox" name="selected" ${selected ? 'checked' : ''} onchange="window.syncSessionParticipantRow(this)"><strong>${escapeHtml(agent.name)}</strong></label>
-                <input class="input participant-role" name="role" value="${defaultRole}" ${selected ? '' : 'disabled'} aria-label="${escapeAttr(agent.name)} role">
+                <input class="input participant-role" name="role" value="${escapeAttr(defaultRole)}" ${selected ? '' : 'disabled'} aria-label="${escapeAttr(agent.name)} role">
                 <label class="moderator-choice"><input type="radio" name="moderator" value="${escapeAttr(agent.name)}" ${moderator ? 'checked' : ''} ${selected ? '' : 'disabled'}> ${t('newSession.moderator')}</label>
               </div>`
             }).join('')}
           </div>
         </div>
-        <div class="form-group"><label>${t('newSession.topic')}</label><textarea class="input" name="prompt" rows="6" required placeholder="${t('newSession.topicPlaceholder')}"></textarea></div>
+        <div class="form-group"><label>${t('newSession.topic')}</label><textarea class="input" name="prompt" rows="6" required placeholder="${t('newSession.topicPlaceholder')}">${escapeHtml(prefill.prompt || '')}</textarea></div>
         <div class="form-row">
           <div class="form-group"><label>${t('newSession.maxTurns')}</label><input class="input" type="number" name="maxRounds" min="1" max="10" value="3"></div>
         </div>
