@@ -514,6 +514,7 @@ const MESSAGES = {
     // Session detail — header & actions
     'session.askOps': 'Ask Ops',
     'session.export': 'Export',
+    'session.share': 'Share',
     'session.extend': '+5m',
     'session.pause': '⏸ Pause',
     'session.resume': '▶ Resume',
@@ -590,6 +591,19 @@ const MESSAGES = {
     'session.taskDraft.actionPlaceholder': 'Implement the final decision and recommended actions.',
     'session.taskDraft.create': 'Create Draft',
     'session.taskDraft.created': 'Task draft created',
+    'session.shareCard.title': 'Share Session Card',
+    'session.shareCard.desc': 'Preview a polished 1200×630 card for social sharing.',
+    'session.shareCard.downloadPng': 'Download PNG',
+    'session.shareCard.downloadSvg': 'Download SVG',
+    'session.shareCard.topic': 'Topic',
+    'session.shareCard.participants': 'Participants',
+    'session.shareCard.finalDecision': 'Final decision',
+    'session.shareCard.scene': 'Multi-agent decision · {scenario}',
+    'session.shareCard.roleModerator': 'moderator',
+    'session.shareCard.fallbackTopic': 'A multi-agent Passiton session',
+    'session.shareCard.fallbackResult': 'Several AI agents debated independently, then converged on one decision.',
+    'session.shareCard.madeWith': 'made with Passiton',
+    'session.shareCard.downloadFailed': 'Download failed',
     'task.startDraft': 'Start Task',
     'task.sourceSession': 'Source Session',
     'task.permissionMode': 'Permission Mode',
@@ -1237,6 +1251,7 @@ const MESSAGES = {
     // Session detail — header & actions
     'session.askOps': 'Ask Ops',
     'session.export': '导出',
+    'session.share': '分享卡',
     'session.extend': '+5m',
     'session.pause': '⏸ 暂停',
     'session.resume': '▶ 恢复',
@@ -1313,6 +1328,19 @@ const MESSAGES = {
     'session.taskDraft.actionPlaceholder': '落实最终决策及建议行动。',
     'session.taskDraft.create': '创建草稿',
     'session.taskDraft.created': 'Task 草稿已创建',
+    'session.shareCard.title': '分享战报卡',
+    'session.shareCard.desc': '预览一张适合社交平台分享的 1200×630 战报卡。',
+    'session.shareCard.downloadPng': '下载 PNG',
+    'session.shareCard.downloadSvg': '下载 SVG',
+    'session.shareCard.topic': '议题',
+    'session.shareCard.participants': '参与者',
+    'session.shareCard.finalDecision': '最终决策',
+    'session.shareCard.scene': 'Multi-agent decision · {scenario}',
+    'session.shareCard.roleModerator': 'moderator',
+    'session.shareCard.fallbackTopic': '一场 Passiton 多 Agent 会话',
+    'session.shareCard.fallbackResult': '多个 AI 先各自提出判断，再收敛成一个决策。',
+    'session.shareCard.madeWith': 'made with Passiton',
+    'session.shareCard.downloadFailed': '下载失败',
     'task.startDraft': '启动任务',
     'task.sourceSession': '来源 Session',
     'task.permissionMode': '权限模式',
@@ -4861,6 +4889,7 @@ function renderSessionActions(session) {
   return `
     <button class="btn btn-secondary btn-sm" onclick="window.askOpsForCurrent()">${t('session.askOps')}</button>
     <button class="btn btn-secondary btn-sm" onclick="window.exportCurrentSession()">${t('session.export')}</button>
+    ${session.status === 'done' ? `<button class="btn btn-secondary btn-sm" onclick="window.showSessionShareCardModal()">${t('session.share')}</button>` : ''}
     ${session.status === 'done' ? `<button class="btn btn-primary btn-sm" onclick="window.showSessionTaskDraftModal()">${t('session.createTaskDraft')}</button>` : ''}
     ${session.status === 'active' ? `<button class="btn btn-secondary btn-sm" onclick="window.extendSessionTimeout()">${t('session.extend')}</button>` : ''}
     ${session.status === 'active' ? `<button class="btn btn-secondary btn-sm" onclick="window.pauseSession()">${t('session.pause')}</button>` : ''}
@@ -5790,6 +5819,252 @@ window.exportCurrentSession = function() {
   link.click()
   link.remove()
   URL.revokeObjectURL(url)
+}
+
+window.showSessionShareCardModal = function() {
+  const session = state.currentSession
+  if (!session || session.status !== 'done') return
+  const svg = buildSessionShareCardSvg(session, state.currentMessages)
+  showModal(`
+    <div class="modal-card share-card-modal">
+      <div class="modal-head">
+        <div>
+          <h3>${t('session.shareCard.title')}</h3>
+          <p>${t('session.shareCard.desc')}</p>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="window.closeModal()">${t('common.close')}</button>
+      </div>
+      <div class="share-card-preview" id="session-share-card-preview">${svg}</div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-secondary" onclick="window.downloadSessionShareCardSvg()">${t('session.shareCard.downloadSvg')}</button>
+        <button type="button" class="btn btn-primary" onclick="window.downloadSessionShareCardPng()">${t('session.shareCard.downloadPng')}</button>
+      </div>
+    </div>
+  `)
+}
+
+window.downloadSessionShareCardSvg = function() {
+  const session = state.currentSession
+  if (!session) return
+  const svg = buildSessionShareCardSvg(session, state.currentMessages)
+  downloadBlob(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), sessionShareCardFilename(session, 'svg'))
+}
+
+window.downloadSessionShareCardPng = async function() {
+  const session = state.currentSession
+  if (!session) return
+  try {
+    const svg = buildSessionShareCardSvg(session, state.currentMessages)
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.decoding = 'async'
+    const loaded = new Promise((resolve, reject) => {
+      img.onload = resolve
+      img.onerror = reject
+    })
+    img.src = url
+    await loaded
+    const canvas = document.createElement('canvas')
+    canvas.width = 1200
+    canvas.height = 630
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0)
+    URL.revokeObjectURL(url)
+    const pngBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
+    if (!pngBlob) throw new Error(t('session.shareCard.downloadFailed'))
+    downloadBlob(pngBlob, sessionShareCardFilename(session, 'png'))
+  } catch (err) {
+    showToast(err.message || t('session.shareCard.downloadFailed'))
+  }
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}
+
+function sessionShareCardFilename(session, ext) {
+  return `passiton-session-${String(session?.id || 'share').replace(/[^\w.-]+/g, '-')}.${ext}`
+}
+
+function buildSessionShareCardSvg(session, messages) {
+  const colors = sessionShareCardColors()
+  const data = sessionShareCardData(session, messages)
+  const topicLines = wrapSvgText(data.topic, 39, 2)
+  const participantLines = wrapSvgText(data.participants, 76, 2)
+  const titleLines = wrapSvgText(data.decisionTitle, 45, 2)
+  const bulletLines = data.decisionBullets.slice(0, 3).map(item => truncateShareText(item, 58))
+  const decisionStartY = 398 + (titleLines.length > 1 ? 0 : 8)
+  const bulletStartY = decisionStartY + titleLines.length * 42 + 28
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="${svgEscape(t('session.shareCard.title'))}">
+  <defs>
+    <linearGradient id="shareBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${colors.bgDeep}"/>
+      <stop offset="1" stop-color="${colors.bgBase}"/>
+    </linearGradient>
+    <linearGradient id="shareAccent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${colors.accent}"/>
+      <stop offset="1" stop-color="${colors.accentEnd}"/>
+    </linearGradient>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="630" fill="url(#shareBg)"/>
+  <rect x="38" y="38" width="1124" height="554" rx="24" fill="${colors.bgSurface}" stroke="${colors.border}" filter="url(#softShadow)"/>
+  <rect x="38" y="38" width="1124" height="8" rx="4" fill="url(#shareAccent)"/>
+  <rect x="80" y="78" width="44" height="44" rx="10" fill="url(#shareAccent)"/>
+  <text x="102" y="107" text-anchor="middle" font-family="${SHARE_CARD_FONT}" font-size="18" font-weight="800" fill="#ffffff">P</text>
+  <text x="142" y="108" font-family="${SHARE_CARD_FONT}" font-size="31" font-weight="800" fill="${colors.textPrimary}">Passiton</text>
+  <rect x="690" y="79" width="430" height="42" rx="21" fill="${colors.bgCard}" stroke="${colors.border}"/>
+  <text x="905" y="106" text-anchor="middle" font-family="${SHARE_CARD_FONT}" font-size="18" font-weight="650" fill="${colors.textSecondary}">${svgEscape(data.scene)}</text>
+
+  <text x="80" y="172" font-family="${SHARE_CARD_FONT}" font-size="15" font-weight="800" letter-spacing="1.4" fill="${colors.accent}">${svgEscape(t('session.shareCard.topic').toUpperCase())}</text>
+  ${svgTspans(topicLines, 80, 219, 37, 34, 780, colors.textPrimary, 760)}
+
+  <text x="80" y="316" font-family="${SHARE_CARD_FONT}" font-size="14" font-weight="800" letter-spacing="1.2" fill="${colors.textMuted}">${svgEscape(t('session.shareCard.participants').toUpperCase())}</text>
+  ${svgTspans(participantLines, 80, 350, 28, 21, 500, colors.textSecondary, 1040)}
+
+  <rect x="80" y="382" width="1040" height="148" rx="18" fill="${colors.bgCard}" stroke="${colors.border}"/>
+  <rect x="80" y="382" width="6" height="148" rx="3" fill="url(#shareAccent)"/>
+  <text x="112" y="424" font-family="${SHARE_CARD_FONT}" font-size="14" font-weight="800" letter-spacing="1.2" fill="${colors.accent}">${svgEscape(t('session.shareCard.finalDecision').toUpperCase())}</text>
+  ${svgTspans(titleLines, 112, 463, 40, 29, 760, colors.textPrimary, 940)}
+  ${bulletLines.map((line, index) => `
+  <circle cx="118" cy="${bulletStartY + index * 26 - 7}" r="3.5" fill="${colors.accentEnd}"/>
+  <text x="132" y="${bulletStartY + index * 26}" font-family="${SHARE_CARD_FONT}" font-size="20" font-weight="520" fill="${colors.textSecondary}">${svgEscape(line)}</text>`).join('')}
+
+  <text x="80" y="565" font-family="${SHARE_CARD_FONT}" font-size="22" font-weight="760" fill="${colors.textPrimary}">npx passiton</text>
+  <text x="1120" y="565" text-anchor="end" font-family="${SHARE_CARD_FONT}" font-size="18" font-weight="520" fill="${colors.textMuted}">${svgEscape(t('session.shareCard.madeWith'))}</text>
+</svg>`
+}
+
+const SHARE_CARD_FONT = 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif'
+
+function sessionShareCardColors() {
+  const styles = getComputedStyle(document.documentElement)
+  const read = (name, fallback) => styles.getPropertyValue(name).trim() || fallback
+  return {
+    bgDeep: read('--bg-deep', '#0a0a0f'),
+    bgBase: read('--bg-base', '#0e0e16'),
+    bgSurface: read('--bg-surface', '#12121a'),
+    bgCard: read('--bg-card', 'rgba(255,255,255,0.04)'),
+    border: read('--border', 'rgba(255,255,255,0.08)'),
+    textPrimary: read('--text-primary', '#f0f0f5'),
+    textSecondary: read('--text-secondary', '#8a8a9a'),
+    textMuted: read('--text-muted', '#55556a'),
+    accent: read('--accent', '#6366f1'),
+    accentEnd: read('--accent-end', '#8b5cf6'),
+  }
+}
+
+function sessionShareCardData(session, messages) {
+  const human = messages.find(msg => msg.from === 'human')?.content || ''
+  const lastAgent = [...messages].reverse().find(msg => msg.from !== 'human' && String(msg.content || '').trim())
+  const result = extractShareResult(lastAgent?.content || '')
+  const decision = summarizeShareDecision(result || t('session.shareCard.fallbackResult'))
+  return {
+    scene: t('session.shareCard.scene', { scenario: session?.scenario || sessionScenarioLabel(session) }),
+    topic: stripShareMarkdown(human) || t('session.shareCard.fallbackTopic'),
+    participants: sessionShareParticipants(session),
+    decisionTitle: decision.title,
+    decisionBullets: decision.bullets,
+  }
+}
+
+function sessionShareParticipants(session) {
+  const participants = Array.isArray(session?.participants) && session.participants.length
+    ? session.participants
+    : [
+        { agent: session?.from, role: 'agent' },
+        { agent: session?.to, role: 'agent' },
+      ].filter(item => item.agent)
+  return participants.map(participant => {
+    const role = participant.moderator ? t('session.shareCard.roleModerator') : String(participant.role || 'agent')
+    return `${agentLabel(participant.agent)} · ${role}`
+  }).join('  /  ')
+}
+
+function extractShareResult(content) {
+  const text = String(content || '')
+  const match = text.match(/\[RESULT\]([\s\S]*?)\[\/RESULT\]/i)
+  return (match ? match[1] : text).trim()
+}
+
+function stripShareMarkdown(text) {
+  return String(text || '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // [label](url) -> label
+    .replace(/(\*\*|__|~~|`+)/g, '')          // bold / strike / code fences
+    .replace(/(^|\s)[*_](?=\S)/g, '$1')       // stray leading emphasis marks
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function summarizeShareDecision(content) {
+  const lines = String(content || '')
+    .split(/\r?\n/)
+    .map(line => stripShareMarkdown(line.replace(/^#{1,6}\s*/, '').replace(/^[-*•\d.)\s]+/, '')))
+    .filter(Boolean)
+  const title = truncateShareText(lines[0] || t('session.shareCard.fallbackResult'), 62)
+  let bullets = lines.slice(1, 8).map(line => truncateShareText(line, 74))
+  if (!bullets.length) {
+    bullets = splitShareSentences(lines.slice(1).join(' ') || lines[0] || '').slice(1, 4)
+  }
+  if (!bullets.length) bullets = [t('session.shareCard.fallbackResult')]
+  return { title, bullets: bullets.slice(0, 3) }
+}
+
+function splitShareSentences(content) {
+  return String(content || '')
+    .split(/(?<=[。.!?！？])\s+/)
+    .map(item => truncateShareText(item.trim(), 74))
+    .filter(Boolean)
+}
+
+function wrapSvgText(content, maxChars, maxLines) {
+  const clean = String(content || '').replace(/\s+/g, ' ').trim()
+  if (!clean) return []
+  const lines = []
+  let rest = clean
+  while (rest && lines.length < maxLines) {
+    if (rest.length <= maxChars) {
+      lines.push(rest)
+      break
+    }
+    let cut = rest.lastIndexOf(' ', maxChars)
+    if (cut < Math.floor(maxChars * 0.55)) cut = maxChars
+    lines.push(rest.slice(0, cut).trim())
+    rest = rest.slice(cut).trim()
+  }
+  if (rest && lines.length) lines[lines.length - 1] = truncateShareText(lines[lines.length - 1], Math.max(8, maxChars - 3))
+  return lines
+}
+
+function truncateShareText(value, maxChars) {
+  const clean = String(value || '').replace(/\s+/g, ' ').trim()
+  return clean.length > maxChars ? `${clean.slice(0, Math.max(0, maxChars - 3)).trim()}...` : clean
+}
+
+function svgTspans(lines, x, y, lineHeight, fontSize, fontWeight, fill, width, dy = 0) {
+  return `<text x="${x}" y="${y}" font-family="${SHARE_CARD_FONT}" font-size="${fontSize}" font-weight="${fontWeight}" fill="${fill}">
+    ${lines.map((line, index) => `<tspan x="${x}" dy="${index === 0 ? dy : lineHeight}">${svgEscape(line)}</tspan>`).join('')}
+  </text>`
+}
+
+function svgEscape(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
 }
 
 async function renderSettings() {
