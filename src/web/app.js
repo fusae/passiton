@@ -6293,7 +6293,10 @@ window.openApiKeySetup = function() {
 }
 
 window.rescanAgentDiagnostics = async function(name) {
-  await window.refreshDiagnostics()
+  // Re-probe just this agent with the spinner that showAgentDiagnostics
+  // renders immediately. The old path awaited refreshDiagnostics(), which
+  // re-ran smoke tests on every agent with no visible feedback — a click
+  // that looked dead for tens of seconds.
   window.showAgentDiagnostics(name)
 }
 
