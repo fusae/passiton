@@ -477,6 +477,7 @@ export type AgentAdapterType =
   | 'amp'
   | 'openhands'
   | 'mistral-vibe'
+  | 'openworker'
   | 'custom-cli'
   | 'anthropic-api'
   | 'openai-api'

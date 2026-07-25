@@ -7,6 +7,7 @@ import { CodexAdapter } from './codex.js'
 import { CustomCliAdapter } from './custom-cli.js'
 import { GeminiAdapter } from './gemini.js'
 import { OpenCodeAdapter } from './opencode.js'
+import { OpenWorkerAdapter } from './openworker.js'
 import { AnthropicApiAdapter } from './api/anthropic.js'
 import { OpenAIApiAdapter } from './api/openai.js'
 import { ZhipuApiAdapter } from './api/zhipu.js'
@@ -93,6 +94,13 @@ export function createAdapter(agentCfg: AgentConfig): Adapter | undefined {
         timeout: agentCfg.timeout,
         model: agentCfg.model,
         env: agentCfg.env,
+      })
+      break
+    case 'openworker':
+      adapter = new OpenWorkerAdapter({
+        baseUrl: agentCfg.baseUrl,
+        model: agentCfg.model,
+        timeout: agentCfg.timeout,
       })
       break
     case 'custom-cli':

@@ -41,6 +41,7 @@ export interface AgentInfo {
   name: string
   adapter: string
   command?: string
+  baseUrl?: string
   args?: string[]
   timeout?: number
   env?: Record<string, string>
@@ -320,6 +321,20 @@ export class AgentCatalog {
 
     return Promise.all(entries.map(async (entry) => {
       if (!entry.command) {
+        if (entry.adapter === 'openworker' && entry.config) {
+          const probe = await this.probeServiceAgent(entry, opts.refresh === true)
+          return {
+            ...entry,
+            baseUrl: entry.config.baseUrl,
+            healthy: probe.healthy,
+            verified: probe.verified,
+            version: probe.version,
+            timeout: entry.config.timeout,
+            autoDiscovered: entry.config.autoDiscovered,
+            verificationAttemptedAt: entry.config.lastVerificationAttemptAt,
+            verificationError: entry.config.lastVerificationError,
+          }
+        }
         return {
           ...entry,
           healthy: entry.availableForSessions,
@@ -366,6 +381,26 @@ export class AgentCatalog {
     if (!entry) return undefined
     const envKeys = Object.keys(entry.config?.env ?? {}).sort()
     if (!entry.command) {
+      if (entry.adapter === 'openworker' && entry.config) {
+        const probe = await this.probeServiceAgent(entry, refresh)
+        return {
+          name: entry.name,
+          adapter: entry.adapter,
+          source: entry.source,
+          supported: entry.supported,
+          availableForSessions: entry.availableForSessions,
+          command: entry.config.baseUrl,
+          commandExecutable: probe.healthy,
+          timeout: entry.config.timeout,
+          envKeys,
+          version: probe.version,
+          versionOk: probe.healthy,
+          smokeOk: probe.smokeOk,
+          healthy: probe.healthy && (probe.smokeOk ?? true),
+          errorCode: probe.error ? classifyAgentError(probe.error, probe.healthy) : undefined,
+          error: probe.error,
+        }
+      }
       return {
         name: entry.name,
         adapter: entry.adapter,
@@ -514,10 +549,52 @@ export class AgentCatalog {
       entry.source,
       entry.name,
       entry.command,
+      entry.config?.baseUrl,
+      entry.config?.model,
       JSON.stringify(entry.config?.args ?? []),
       JSON.stringify(entry.config?.versionArgs ?? []),
       JSON.stringify(entry.config?.env ?? {}),
     ].join(':')
+  }
+
+  private async probeServiceAgent(
+    entry: AgentEntry,
+    refresh: boolean
+  ): Promise<{ healthy: boolean; verified: boolean; version: string; smokeOk?: boolean; error?: string }> {
+    const version = 'OpenWorker service'
+    const adapter = entry.config ? createAdapter(entry.config) : undefined
+    if (!adapter) {
+      return { healthy: false, verified: false, version, error: 'OpenWorker adapter is not configured' }
+    }
+
+    const healthy = await adapter.healthCheck()
+    if (!healthy) {
+      const error = `OpenWorker is unavailable at ${entry.config?.baseUrl ?? 'the configured endpoint'}`
+      if (refresh) this.persistFailedVerification(entry, error)
+      return { healthy: false, verified: false, version, error }
+    }
+
+    if (!refresh) {
+      return {
+        healthy: true,
+        verified: this.isPersistedVerificationCurrent(entry, entry.config?.lastVerifiedVersion ?? version),
+        version: entry.config?.lastVerifiedVersion ?? version,
+      }
+    }
+
+    const smoke = await smokeTestAgent(entry.name, entry.config!)
+    if (smoke.healthy) {
+      this.persistSuccessfulVerification(entry, version)
+    } else {
+      this.persistFailedVerification(entry, smoke.error ?? 'OpenWorker verification failed')
+    }
+    return {
+      healthy: true,
+      verified: smoke.healthy,
+      version,
+      smokeOk: smoke.healthy,
+      error: smoke.error,
+    }
   }
 
   private isPersistedVerificationCurrent(entry: AgentEntry, version: string | undefined): boolean {
@@ -1057,7 +1134,7 @@ function parseVersion(output: string): string | undefined {
   return line.length > 120 ? `${line.slice(0, 117)}...` : line
 }
 
-function classifyAgentError(error: string | undefined, commandExecutable: boolean): import('./types.js').AgentErrorCode {
+export function classifyAgentError(error: string | undefined, commandExecutable: boolean): import('./types.js').AgentErrorCode {
   const lower = (error ?? '').toLowerCase()
   if (!commandExecutable || lower.includes('enoent') || lower.includes('not found')) return 'not_installed'
   if (lower.includes('timed out') || lower.includes('timeout')) return 'timeout'

@@ -54,7 +54,7 @@ const DEFAULT_OPS_MODEL_AGENT_NAME = '__ops__'
 const API_ADAPTERS = new Set(['anthropic-api', 'openai-api', 'zhipu-api', 'deepseek-api', 'qwen-api', 'moonshot-api', 'custom-api'])
 const LOCAL_CLI_ADAPTERS = new Set([
   'claude-code', 'codex', 'gemini-cli', 'opencode', 'copilot-cli', 'cursor-agent',
-  'qwen-code', 'cline', 'aider', 'droid', 'amp', 'openhands', 'mistral-vibe', 'custom-cli',
+  'qwen-code', 'cline', 'aider', 'droid', 'amp', 'openhands', 'mistral-vibe', 'openworker', 'custom-cli',
 ])
 const PROVIDER_BY_ADAPTER: Record<string, string> = {
   'anthropic-api': 'Anthropic',
@@ -546,12 +546,33 @@ function parseAgentConfigBody(body: unknown, existing?: AgentConfig): { name: st
   const data = requireRecord(body, 'body')
   const name = requireNonEmptyString(data.name, 'name')
   const adapter = requireNonEmptyString(data.adapter, 'adapter')
-  const command = requireNonEmptyString(data.command, 'command')
   if (!LOCAL_CLI_ADAPTERS.has(adapter)) {
     throw new HttpError(400, `"adapter" must be one of ${Array.from(LOCAL_CLI_ADAPTERS).join(', ')}`)
   }
   const env = parseEnv(data.env, 'env')
   const priority = optionalAgentPriority(data.priority)
+  if (adapter === 'openworker') {
+    return {
+      name,
+      config: {
+        adapter,
+        baseUrl: optionalString(data.baseUrl, 'baseUrl')
+          ?? (existing?.adapter === adapter ? existing.baseUrl : undefined)
+          ?? 'http://127.0.0.1:55851',
+        model: optionalString(data.model, 'model')
+          ?? (existing?.adapter === adapter ? existing.model : undefined),
+        timeout: optionalPositiveInt(data.timeout, 'timeout')
+          ?? (existing?.adapter === adapter ? existing.timeout : undefined)
+          ?? 600_000,
+        ...(priority !== undefined ? { priority } : existing?.priority !== undefined ? { priority: existing.priority } : {}),
+        ...(existing?.lastVerifiedAt !== undefined ? { lastVerifiedAt: existing.lastVerifiedAt } : {}),
+        ...(existing?.lastVerifiedVersion !== undefined ? { lastVerifiedVersion: existing.lastVerifiedVersion } : {}),
+        ...(existing?.lastVerificationAttemptAt !== undefined ? { lastVerificationAttemptAt: existing.lastVerificationAttemptAt } : {}),
+        ...(existing?.lastVerificationError !== undefined ? { lastVerificationError: existing.lastVerificationError } : {}),
+      },
+    }
+  }
+  const command = requireNonEmptyString(data.command, 'command')
   if (adapter === 'custom-cli') {
     const args = requireStringArray(data.args, 'args')
     if (!args.some((arg) => arg.includes('{prompt}'))) {
@@ -919,6 +940,7 @@ async function listAgentModels(
         kind: 'local',
         source: agent.source,
         command: agent.command,
+        baseUrl: cfg?.baseUrl,
         args: cfg?.args ?? agent.args,
         timeout: cfg?.timeout ?? agent.timeout,
         priority: cfg?.priority,

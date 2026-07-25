@@ -188,8 +188,12 @@ function validateConfig(config: AppConfig): AppConfig {
   for (const [name, agent] of Object.entries(config.agents)) {
     assertNonEmptyString(agent.adapter, `agents.${name}.adapter`)
     const isApiAgent = isApiAdapter(agent.adapter)
+    const isServiceAgent = agent.adapter === 'openworker'
     if (isApiAgent) {
       assertNonEmptyString(agent.apiKey, `agents.${name}.apiKey`)
+    } else if (isServiceAgent) {
+      assertNonEmptyString(agent.baseUrl, `agents.${name}.baseUrl`)
+      assertPositiveInt(agent.timeout, `agents.${name}.timeout`)
     } else {
       assertNonEmptyString(agent.command, `agents.${name}.command`)
       assertStringArray(agent.args, `agents.${name}.args`)

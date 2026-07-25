@@ -1,13 +1,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { WebSocketServer, type WebSocket } from 'ws'
 import { AnthropicApiAdapter } from '../adapters/api/anthropic.js'
 import { OpenAIApiAdapter } from '../adapters/api/openai.js'
 import { ZhipuApiAdapter } from '../adapters/api/zhipu.js'
 import { ClaudeCodeAdapter } from '../adapters/claude-code.js'
 import { OpenCodeAdapter } from '../adapters/opencode.js'
+import { OpenWorkerAdapter } from '../adapters/openworker.js'
 import { createAdapter } from '../adapters/factory.js'
 import { prepareCommandForSpawn, withHint } from '../adapters/shared.js'
 import { Router } from '../router.js'
@@ -99,6 +103,65 @@ test('OpenCode uses the spawn cwd without adding a duplicate --dir argument', as
     assert.deepEqual(invocation.args.slice(-2), ['--model', 'test-model'])
   } finally {
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('OpenWorker adapter streams a Cowork turn and enables auto mode for trusted sessions', async () => {
+  const received: Array<Record<string, unknown>> = []
+  const streamed: string[] = []
+  const mock = await startOpenWorkerMock((socket, payload) => {
+    received.push(payload)
+    if (payload.type === 'user_message') {
+      socket.send(JSON.stringify({ type: 'assistant_delta', data: { text: 'TURING_' } }))
+      socket.send(JSON.stringify({ type: 'assistant_delta', data: { text: 'READY' } }))
+      socket.send(JSON.stringify({ type: 'assistant_message', data: { text: 'TURING_READY' } }))
+      socket.send(JSON.stringify({ type: 'turn_done', data: {} }))
+    }
+  })
+
+  try {
+    const adapter = new OpenWorkerAdapter({ baseUrl: mock.baseUrl, timeout: 5_000 })
+    const result = await adapter.send(
+      { ...session, permissionMode: 'trusted' },
+      'respond',
+      { onOutput: (chunk) => streamed.push(chunk) }
+    )
+
+    assert.equal(await adapter.healthCheck(), true)
+    assert.equal(result, 'TURING_READY')
+    assert.deepEqual(streamed, ['TURING_', 'READY'])
+    assert.ok(received.some((payload) => payload.type === 'set_mode' && payload.mode === 'auto'))
+    assert.ok(received.some((payload) => payload.type === 'user_message'))
+  } finally {
+    await mock.close()
+  }
+})
+
+test('OpenWorker adapter denies permission prompts in safe mode', async () => {
+  const received: Array<Record<string, unknown>> = []
+  const mock = await startOpenWorkerMock((socket, payload) => {
+    received.push(payload)
+    if (payload.type === 'user_message') {
+      socket.send(JSON.stringify({
+        type: 'permission_required',
+        data: { name: 'write_file', arguments: { path: 'blocked.txt' } },
+      }))
+    }
+    if (payload.type === 'approval') {
+      socket.send(JSON.stringify({ type: 'assistant_message', data: { text: 'WRITE_DENIED' } }))
+      socket.send(JSON.stringify({ type: 'turn_done', data: {} }))
+    }
+  })
+
+  try {
+    const adapter = new OpenWorkerAdapter({ baseUrl: mock.baseUrl, timeout: 5_000 })
+    const result = await adapter.send({ ...session, permissionMode: 'safe' }, 'write a file')
+
+    assert.equal(result, 'WRITE_DENIED')
+    assert.ok(received.some((payload) => payload.type === 'set_mode' && payload.mode === 'interactive'))
+    assert.ok(received.some((payload) => payload.type === 'approval' && payload.decision === 'deny'))
+  } finally {
+    await mock.close()
   }
 })
 
@@ -348,6 +411,19 @@ test('factory creates custom CLI adapter', async () => {
   assert.match(typeof output === 'string' ? output : output.content, /\[Current Message\]\nhello custom/)
 })
 
+test('factory creates OpenWorker as a filesystem-capable adapter', () => {
+  const adapter = createAdapter({
+    adapter: 'openworker',
+    baseUrl: 'http://127.0.0.1:55851',
+    timeout: 10_000,
+  })
+
+  assert.equal(adapter?.name, 'openworker')
+  assert.equal(adapter?.capabilities?.fileSystem, true)
+  assert.equal(adapter?.capabilities?.shell, true)
+  assert.equal(adapter?.config.baseUrl, 'http://127.0.0.1:55851')
+})
+
 test('withHint adds actionable hints to common adapter failures', () => {
   // 1. Non-zero exit with empty stderr is not enough evidence to claim auth failure.
   const silent = withHint('claude-code', '/bin/claude', 1, '', '[claude-code] exited with code 1: ', 60_000)
@@ -457,6 +533,38 @@ test('Windows cmd shims without a safe sibling fail with an actionable error', (
 
 function mockFetch(handler: (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => Promise<Response>): void {
   globalThis.fetch = handler as typeof fetch
+}
+
+async function startOpenWorkerMock(
+  onClientMessage: (socket: WebSocket, payload: Record<string, unknown>) => void
+): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+  const server = createServer((request, response) => {
+    if (request.url === '/v1/health') {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify({ status: 'ok' }))
+      return
+    }
+    response.writeHead(404)
+    response.end()
+  })
+  const sockets = new WebSocketServer({ server })
+  sockets.on('connection', (socket) => {
+    socket.send(JSON.stringify({ type: 'ready', data: { agent: 'cowork' } }))
+    socket.on('message', (raw) => {
+      onClientMessage(socket, JSON.parse(raw.toString()) as Record<string, unknown>)
+    })
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address() as AddressInfo
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}`,
+    close: async () => {
+      for (const client of sockets.clients) client.terminate()
+      await new Promise<void>((resolve, reject) => {
+        sockets.close(() => server.close((error) => error ? reject(error) : resolve()))
+      })
+    },
+  }
 }
 
 function streamResponse(events: unknown[]): Response {

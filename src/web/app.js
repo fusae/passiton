@@ -6385,12 +6385,13 @@ function renderLocalCliAgentsList() {
     const canReorder = agent.source === 'configured' && agent.status === 'ready'
     const badgeClass = statusBadgeClass(agent.status)
     const diagnosing = state.agentDiagnosticsPending.has(agent.name)
+    const endpoint = agent.command || agent.baseUrl || ''
     return `
     <div class="agent-item">
       <div class="agent-icon">${escapeHtml(agent.name.charAt(0).toUpperCase())}</div>
       <div class="agent-info">
         <div class="agent-name">${escapeHtml(agent.name)}</div>
-        <div class="agent-model" title="${escapeAttr(`${agent.adapter} · ${agent.command || ''}${agent.version ? ` · ${agent.version}` : ''}`)}">${escapeHtml(agent.adapter)} · ${escapeHtml(agent.command || '')}${agent.version ? ` · ${escapeHtml(agent.version)}` : ''}</div>
+        <div class="agent-model" title="${escapeAttr(`${agent.adapter} · ${endpoint}${agent.version ? ` · ${agent.version}` : ''}`)}">${escapeHtml(agent.adapter)} · ${escapeHtml(endpoint)}${agent.version ? ` · ${escapeHtml(agent.version)}` : ''}</div>
       </div>
       <span class="badge badge-${badgeClass}">${escapeHtml(statusLabel(agent.status))}</span>
       ${canReorder ? `
@@ -6413,6 +6414,8 @@ function localCliAgentUpdateBody(agent, priority) {
     name: agent.name,
     adapter: agent.adapter,
     command: agent.command,
+    baseUrl: agent.baseUrl,
+    model: agent.model,
     args: agent.args,
     timeout: agent.timeout,
     priority,
@@ -6732,6 +6735,7 @@ window.showAgentDiagnostics = async function(name, preface = '') {
 window.showLocalCliAgentModal = function(name) {
   const agent = state.agents.find(item => item.kind === 'local' && item.name === name)
   if (!agent) return
+  const isOpenWorker = agent.adapter === 'openworker'
   showModal(`
     <div class="modal-card">
       <div class="modal-head">
@@ -6752,14 +6756,25 @@ window.showLocalCliAgentModal = function(name) {
             <input class="input" name="adapter" required value="${escapeAttr(agent.adapter)}">
           </div>
         </div>
-        <div class="form-group">
-          <label>${t('common.command')}</label>
-          <input class="input" name="command" required value="${escapeAttr(agent.command || '')}">
-        </div>
-        <div class="form-group">
-          <label>${t('common.args')}</label>
-          <textarea class="input" name="args" rows="3">${escapeHtml((agent.args || []).join('\\n'))}</textarea>
-        </div>
+        ${isOpenWorker ? `
+          <div class="form-group">
+            <label>${t('modal.agent.baseUrl')}</label>
+            <input class="input" name="baseUrl" required value="${escapeAttr(agent.baseUrl || 'http://127.0.0.1:55851')}">
+          </div>
+          <div class="form-group">
+            <label>${t('common.model')}</label>
+            <input class="input" name="model" value="${escapeAttr(agent.model || '')}">
+          </div>
+        ` : `
+          <div class="form-group">
+            <label>${t('common.command')}</label>
+            <input class="input" name="command" required value="${escapeAttr(agent.command || '')}">
+          </div>
+          <div class="form-group">
+            <label>${t('common.args')}</label>
+            <textarea class="input" name="args" rows="3">${escapeHtml((agent.args || []).join('\\n'))}</textarea>
+          </div>
+        `}
         <div class="form-group">
           <label>${t('common.timeout')}</label>
           <input class="input" name="timeout" type="number" min="1" value="${escapeAttr(agent.timeout || '')}">
@@ -6854,6 +6869,8 @@ window.saveLocalCliAgent = async function(e, originalName) {
     name: String(fd.get('name') || '').trim(),
     adapter: String(fd.get('adapter') || '').trim(),
     command: String(fd.get('command') || '').trim(),
+    baseUrl: String(fd.get('baseUrl') || '').trim(),
+    model: String(fd.get('model') || '').trim(),
     args,
     timeout: parseInt(fd.get('timeout')) || undefined,
     env: parseEnvLines(String(fd.get('env') || '')),
