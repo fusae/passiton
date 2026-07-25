@@ -281,6 +281,7 @@ export type AgentErrorCode =
   | 'api_key_missing'
   | 'rate_limited'
   | 'timeout'
+  | 'no_output'
   | 'unavailable'
 
 export interface RoundMetadata {

@@ -13,7 +13,8 @@ import { ClaudeCodeAdapter } from '../adapters/claude-code.js'
 import { OpenCodeAdapter } from '../adapters/opencode.js'
 import { OpenWorkerAdapter } from '../adapters/openworker.js'
 import { createAdapter } from '../adapters/factory.js'
-import { prepareCommandForSpawn, withHint } from '../adapters/shared.js'
+import { prepareCommandForSpawn, runCommand, withHint } from '../adapters/shared.js'
+import { classifyAgentError } from '../agents.js'
 import { Router } from '../router.js'
 import * as state from '../state.js'
 import type { Adapter, AdapterResponse, AdapterSendOpts, Session } from '../types.js'
@@ -481,6 +482,89 @@ test('withHint adds actionable hints to common adapter failures', () => {
   )
   assert.match(storage, /status: storage_error/)
   assert.doesNotMatch(storage, /status: auth_required/)
+})
+
+test('runCommand fails with no_output when a POSIX process never emits meaningful output', { skip: process.platform === 'win32' }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-no-output-'))
+  try {
+    const script = join(dir, 'silent.mjs')
+    writeFileSync(script, 'setTimeout(() => {}, 5_000)\n')
+
+    await assert.rejects(
+      runCommand({
+        adapterName: 'test-agent',
+        command: process.execPath,
+        args: [script],
+        timeout: 5_000,
+        firstOutputTimeoutMs: 100,
+      }),
+      (error: unknown) => {
+        const message = String((error as Error).message)
+        assert.match(message, /status: no_output/)
+        assert.doesNotMatch(message, /status: timeout/)
+        assert.equal(classifyAgentError(message, true), 'no_output')
+        return true
+      }
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runCommand keeps idle timeout behavior after first meaningful output', { skip: process.platform === 'win32' }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-idle-after-output-'))
+  try {
+    const script = join(dir, 'idle.mjs')
+    writeFileSync(script, 'console.log("started")\nsetTimeout(() => {}, 5_000)\n')
+
+    await assert.rejects(
+      runCommand({
+        adapterName: 'test-agent',
+        command: process.execPath,
+        args: [script],
+        timeout: 400,
+        firstOutputTimeoutMs: 1_000,
+      }),
+      (error: unknown) => {
+        const message = String((error as Error).message)
+        assert.match(message, /status: timeout/)
+        assert.match(message, /idle timed out/)
+        assert.doesNotMatch(message, /status: no_output/)
+        return true
+      }
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('runCommand injects non-interactive env defaults and lets caller env override them', { skip: process.platform === 'win32' }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-noninteractive-env-'))
+  try {
+    const script = join(dir, 'env.mjs')
+    writeFileSync(script, 'console.log(JSON.stringify({ CI: process.env.CI, TERM: process.env.TERM, NO_COLOR: process.env.NO_COLOR }))\n')
+
+    const defaults = JSON.parse(await runCommand({
+      adapterName: 'test-agent',
+      command: process.execPath,
+      args: [script],
+      timeout: 5_000,
+      firstOutputTimeoutMs: 500,
+    })) as Record<string, string>
+    assert.deepEqual(defaults, { CI: '1', TERM: 'dumb', NO_COLOR: '1' })
+
+    const overridden = JSON.parse(await runCommand({
+      adapterName: 'test-agent',
+      command: process.execPath,
+      args: [script],
+      env: { CI: '0', TERM: 'xterm-256color', NO_COLOR: '0' },
+      timeout: 5_000,
+      firstOutputTimeoutMs: 500,
+    })) as Record<string, string>
+    assert.deepEqual(overridden, { CI: '0', TERM: 'xterm-256color', NO_COLOR: '0' })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('Windows PowerShell shims run through powershell with argument boundaries preserved', () => {

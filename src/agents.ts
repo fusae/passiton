@@ -1137,6 +1137,7 @@ function parseVersion(output: string): string | undefined {
 export function classifyAgentError(error: string | undefined, commandExecutable: boolean): import('./types.js').AgentErrorCode {
   const lower = (error ?? '').toLowerCase()
   if (!commandExecutable || lower.includes('enoent') || lower.includes('not found')) return 'not_installed'
+  if (lower.includes('status: no_output') || lower.includes('no output after')) return 'no_output'
   if (lower.includes('timed out') || lower.includes('timeout')) return 'timeout'
   if (lower.includes('rate limit') || lower.includes('429') || lower.includes('quota')) return 'rate_limited'
   if (lower.includes('api key') || lower.includes('apikey')) return 'api_key_missing'

@@ -3,6 +3,7 @@ import { existsSync } from 'fs'
 import type { AdapterSendOpts } from '../types.js'
 
 const HARD_TIMEOUT_MS = 2 * 60 * 60 * 1000
+export const FIRST_OUTPUT_TIMEOUT_MS = 90_000
 
 // --- Platform injection (for testability) ---
 let platformOverride: string | undefined
@@ -99,6 +100,7 @@ interface RunCommandOptions {
   signal?: AbortSignal
   onOutput?: (line: string) => void
   getTimeoutExtensionMs?: () => number
+  firstOutputTimeoutMs?: number
 }
 
 export function buildPrompt(message: string, opts?: AdapterSendOpts): string {
@@ -129,12 +131,13 @@ export function runCommand({
   signal,
   onOutput,
   getTimeoutExtensionMs,
+  firstOutputTimeoutMs = FIRST_OUTPUT_TIMEOUT_MS,
 }: RunCommandOptions): Promise<string> {
   return new Promise((resolve, reject) => {
     const invocation = prepareCommandForSpawn(command, args)
     const proc = spawn(invocation.command, invocation.args, {
       cwd: cwd ?? process.cwd(),
-      env: { ...process.env, ...env },
+      env: { ...process.env, CI: '1', TERM: 'dumb', NO_COLOR: '1', ...env },
       stdio: [stdinMode, 'pipe', 'pipe'],
       ...(invocation.shell ? { shell: true } : {}),
       ...(currentPlatform() !== 'win32' ? { detached: true } : {}),
@@ -152,12 +155,15 @@ export function runCommand({
     const startedAt = Date.now()
     let lastActivityAt = startedAt
     let settled = false
+    let hasMeaningfulOutput = false
     let idleTimer: NodeJS.Timeout | undefined
     let hardTimer: NodeJS.Timeout | undefined
+    let firstOutputTimer: NodeJS.Timeout | undefined
 
     const cleanupTimers = () => {
       if (idleTimer) clearTimeout(idleTimer)
       if (hardTimer) clearTimeout(hardTimer)
+      if (firstOutputTimer) clearTimeout(firstOutputTimer)
     }
 
     const currentIdleTimeout = () => timeout + Math.max(0, getTimeoutExtensionMs?.() ?? 0)
@@ -177,6 +183,13 @@ export function runCommand({
 
     const capture = (chunk: Buffer, stream: 'stdout' | 'stderr') => {
       const text = chunk.toString()
+      if (!hasMeaningfulOutput && stripAnsi(text).trim()) {
+        hasMeaningfulOutput = true
+        if (firstOutputTimer) {
+          clearTimeout(firstOutputTimer)
+          firstOutputTimer = undefined
+        }
+      }
       lastActivityAt = Date.now()
       scheduleIdleTimeout()
       if (stream === 'stdout') {
@@ -196,6 +209,19 @@ export function runCommand({
 
     proc.stdout!.on('data', (d: Buffer) => { capture(d, 'stdout') })
     proc.stderr!.on('data', (d: Buffer) => { capture(d, 'stderr') })
+
+    const scheduleFirstOutputTimeout = () => {
+      if (settled || hasMeaningfulOutput) return
+      const effectiveTimeout = Math.min(timeout, firstOutputTimeoutMs)
+      firstOutputTimer = setTimeout(() => {
+        if (settled || hasMeaningfulOutput) return
+        terminateProcessTree(proc)
+        settled = true
+        cleanupTimers()
+        signal?.removeEventListener('abort', abort)
+        reject(new Error(noOutputHint(adapterName, effectiveTimeout)))
+      }, effectiveTimeout)
+    }
 
     function scheduleIdleTimeout() {
       if (settled) return
@@ -239,6 +265,7 @@ export function runCommand({
       }, 0)
     }
 
+    scheduleFirstOutputTimeout()
     scheduleIdleTimeout()
     scheduleHardTimeout()
 
@@ -363,6 +390,11 @@ function summarizeFailureOutput(text: string): string {
     }
   }
   return lastMeaningfulLine(text) || 'No diagnostic output'
+}
+
+function noOutputHint(adapterName: string, timeoutMs: number): string {
+  const seconds = Math.round(timeoutMs / 1000)
+  return `[${adapterName}] no output after ${timeoutMs}ms\nstatus: no_output\nhint: This agent produced no output for ${seconds}s after the process started. The most likely cause is that the CLI is waiting for interactive input, such as login or a first-run confirmation. Run this command once in a terminal to complete login, then click Verify in Settings. If this agent is genuinely slow to start, increase its \`timeout\` in Settings.`
 }
 
 /**
