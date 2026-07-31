@@ -2721,7 +2721,14 @@ async function loadAgents(signal) {
 }
 
 function scheduleAgentVerificationPoll() {
-  if (!state.agents.some(agent => agent.kind === 'local' && agent.status === 'verifying')) {
+  const hasVerifyingAgent = state.agents.some(agent => agent.kind === 'local' && agent.status === 'verifying')
+  const hasRetryableCodex = location.pathname === '/settings' && state.agents.some(agent =>
+    agent.kind === 'local'
+      && agent.adapter === 'codex'
+      && agent.autoDiscovered
+      && agent.status === 'invalid'
+  )
+  if (!hasVerifyingAgent && !hasRetryableCodex) {
     if (agentVerificationPollTimer) clearTimeout(agentVerificationPollTimer)
     agentVerificationPollTimer = null
     return
@@ -2732,7 +2739,7 @@ function scheduleAgentVerificationPoll() {
     await loadAgents()
     renderAgentsList()
     renderLocalCliAgentsList()
-  }, 2000)
+  }, hasVerifyingAgent ? 2000 : 30_000)
 }
 
 async function loadTemplates() {

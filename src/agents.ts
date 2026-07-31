@@ -15,6 +15,7 @@ const execFileAsync = promisify(execFile)
 const HEALTH_CACHE_TTL_MS = 60_000
 const PERSISTED_VERIFICATION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 const FAILED_VERIFICATION_RETRY_MS = 6 * 60 * 60 * 1000
+const CODEX_FAILED_VERIFICATION_RETRY_MS = 5 * 60 * 1000
 const AGENT_SMOKE_TIMEOUT_MS = 45_000
 
 // --- Platform injection (for testability) ---
@@ -615,7 +616,10 @@ export class AgentCatalog {
     const attemptedAt = entry.config?.lastVerificationAttemptAt
     if (typeof attemptedAt !== 'number') return true
     const age = Date.now() - attemptedAt
-    return age < 0 || age > FAILED_VERIFICATION_RETRY_MS
+    const retryMs = entry.adapter === 'codex'
+      ? CODEX_FAILED_VERIFICATION_RETRY_MS
+      : FAILED_VERIFICATION_RETRY_MS
+    return age < 0 || age > retryMs
   }
 
   private persistSuccessfulVerification(entry: AgentEntry, version: string): void {

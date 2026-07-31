@@ -461,6 +461,42 @@ test('production discovery auto-configures and verifies installed agents', async
   }
 })
 
+test('Codex automatically retries a failed verification after five minutes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'passiton-codex-auto-retry-'))
+  const command = writeExecutable(join(dir, 'codex'),
+    'if [ "$1" = "--version" ]; then echo codex-retry; exit 0; fi\necho TURING_READY',
+    'if ($args[0] -eq "--version") { Write-Output "codex-retry"; exit 0 }\nWrite-Output "TURING_READY"'
+  )
+
+  try {
+    await withConfigHome(async () => {
+      writeConfig({
+        ...DEFAULT_CONFIG,
+        agents: {
+          codex: {
+            adapter: 'codex',
+            command,
+            args: ['{prompt}'],
+            timeout: 1_000,
+            autoDiscovered: true,
+            lastVerificationAttemptAt: Date.now() - (5 * 60 * 1000) - 1_000,
+            lastVerificationError: 'temporary verification failure',
+          },
+        },
+      })
+      const catalog = new AgentCatalog(loadConfig().agents, true, true)
+      await catalog.listAgents()
+      await waitFor(() => Boolean(loadConfig().agents.codex?.lastVerifiedAt))
+
+      const saved = loadConfig().agents.codex
+      assert.equal(saved.lastVerifiedVersion, 'codex-retry')
+      assert.equal(saved.lastVerificationError, undefined)
+    })
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('production discovery migrates previously configured built-ins to automatic management', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'passiton-agent-auto-migrate-'))
   const command = writeExecutable(join(dir, 'codex'), 'echo codex-test')
